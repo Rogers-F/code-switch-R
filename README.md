@@ -2,7 +2,12 @@
 
 集中管理 Claude Code & Codex 供应商
 
-接管 Claude Code 与 Codex 后，可并行使用多个 Provider 的服务；按优先级回退调用（支持拖动排序）以实现降级，并通过热力图、按供应商用量统计与请求日志洞察详细数据
+- 无需重启 cc & codex, 平滑切换不同供应商
+- 支持多供应商自动降级, 保证使用体验
+- 支持请求级别的用量统计, 花费多少清晰可见
+- 支持 cc & codex Mcp Server 双平台管理
+- 支持 Claude Skill 自动下载与安装, 内置 2 个流行的 skill 仓库
+- 支持添加自定义 Skill 仓库
 
 基于 [Wails 3](https://v3.wails.io)
 
@@ -12,7 +17,12 @@
 
 并自动更新 Claude Code、Codex 配置, 指向 http://127.0.0.1:18100 服务
 
-代理内部只暴露与 IDE 兼容的关键端点：/v1/messages 转发到配置的 Claude 供应商，/responses 转发到 Codex 供应商；请求由 proxyHandler 动态挑选符合当前优先级与启用状态的 provider，并在失败时自动回退。
+代理内部只暴露兼容的关键端点：
+
+- /v1/messages 转发到配置的 Claude 供应商
+- /responses 转发到 Codex 供应商；
+
+请求由 proxyHandler 动态挑选符合当前优先级与启用状态的 provider，并在失败时自动回退。
 
 以上流程让 cli 看到的是一个固定的本地地址，而真实请求会被 Code Switch 透明地路由到你在应用里维护的供应商列表
 

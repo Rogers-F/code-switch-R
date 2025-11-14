@@ -22,6 +22,7 @@ const router = useRouter()
 const { t } = useI18n()
 const heatmapEnabled = ref(true)
 const homeTitleVisible = ref(true)
+const autoStartEnabled = ref(false)
 const settingsLoading = ref(true)
 const saveBusy = ref(false)
 const importStatus = ref<ConfigImportStatus | null>(null)
@@ -38,10 +39,12 @@ const loadAppSettings = async () => {
     const data = await fetchAppSettings()
     heatmapEnabled.value = data?.show_heatmap ?? true
     homeTitleVisible.value = data?.show_home_title ?? true
+    autoStartEnabled.value = data?.auto_start ?? false
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
     homeTitleVisible.value = true
+    autoStartEnabled.value = false
   } finally {
     settingsLoading.value = false
   }
@@ -54,6 +57,7 @@ const persistAppSettings = async () => {
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
       show_home_title: homeTitleVisible.value,
+      auto_start: autoStartEnabled.value,
     }
     await saveAppSettings(payload)
     window.dispatchEvent(new CustomEvent('app-settings-updated'))
@@ -133,6 +137,7 @@ const secondaryButtonLabel = computed(() =>
     ? t('components.general.import.clear')
     : t('components.general.import.upload'),
 )
+const secondaryButtonVariant = computed(() => 'outline')
 
 const processImportResult = async (result?: ConfigImportResult | null) => {
   if (!result) return
@@ -277,6 +282,17 @@ const handleSecondaryImportAction = async () => {
               <span></span>
             </label>
           </ListItem>
+          <ListItem :label="$t('components.general.label.autoStart')">
+            <label class="mac-switch">
+              <input
+                type="checkbox"
+                :disabled="settingsLoading || saveBusy"
+                v-model="autoStartEnabled"
+                @change="persistAppSettings"
+              />
+              <span></span>
+            </label>
+          </ListItem>
           <ListItem
             v-if="showImportRow"
             :label="$t('components.general.import.label')"
@@ -294,7 +310,7 @@ const handleSecondaryImportAction = async () => {
               </BaseButton>
               <BaseButton
                 size="sm"
-                variant="ghost"
+                :variant="secondaryButtonVariant"
                 type="button"
                 :disabled="importBusy"
                 @click="handleSecondaryImportAction"
@@ -304,7 +320,7 @@ const handleSecondaryImportAction = async () => {
               <BaseButton
                 v-if="hasCustomSelection"
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 type="button"
                 :disabled="importBusy"
                 @click="handleUploadClick"
@@ -313,6 +329,7 @@ const handleSecondaryImportAction = async () => {
               </BaseButton>
             </div>
           </ListItem>
+
         </div>
       </section>
 
@@ -334,8 +351,19 @@ const handleSecondaryImportAction = async () => {
 <style scoped>
 .import-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.35rem;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.import-actions .btn {
+  min-width: 56px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.7rem;
+}
+
+.import-actions .btn-outline,
+.import-actions .btn-ghost {
+  padding-inline: 0.75rem;
 }
 </style>
