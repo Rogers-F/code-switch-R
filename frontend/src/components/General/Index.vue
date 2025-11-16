@@ -337,7 +337,6 @@ onMounted(async () => {
               <option :value="7">7 {{ $t('components.general.label.times') }}</option>
               <option :value="8">8 {{ $t('components.general.label.times') }}</option>
               <option :value="9">9 {{ $t('components.general.label.times') }}</option>
-              <option :value="10">10 {{ $t('components.general.label.times') }}</option>
             </select>
           </ListItem>
           <ListItem :label="$t('components.general.label.blacklistDuration')">
@@ -345,6 +344,7 @@ onMounted(async () => {
               v-model.number="blacklistDuration"
               :disabled="blacklistLoading || blacklistSaving"
               class="mac-select">
+              <option :value="5">5 {{ $t('components.general.label.minutes') }}</option>
               <option :value="15">15 {{ $t('components.general.label.minutes') }}</option>
               <option :value="30">30 {{ $t('components.general.label.minutes') }}</option>
               <option :value="60">60 {{ $t('components.general.label.minutes') }}</option>
@@ -444,9 +444,10 @@ onMounted(async () => {
 .hint-text {
   font-size: 11px;
   color: var(--mac-text-secondary);
-  line-height: 1.3;
-  max-width: 280px;
+  line-height: 1.4;
+  max-width: 320px;
   text-align: right;
+  white-space: nowrap;
 }
 
 :global(.dark) .hint-text {

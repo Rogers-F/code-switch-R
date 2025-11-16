@@ -1676,7 +1676,11 @@ const handleImportClick = async () => {
 /* Card title row badge 定位 */
 .card-title-row .level-badge {
   margin-left: 8px;
-  margin-right: auto;
+}
+
+/* 黑名单等级徽章与调度等级徽章的间距 */
+.card-title-row .blacklist-level-badge {
+  margin-left: 4px;
 }
 
 /* Level 配色方案：从绿色（高优先级）到红色（低优先级）*/

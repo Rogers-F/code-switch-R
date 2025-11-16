@@ -113,12 +113,12 @@ func (ss *SettingsService) UpdateBlacklistSettings(threshold int, duration int) 
 	}
 
 	// 验证参数
-	if threshold < 1 || threshold > 10 {
-		return fmt.Errorf("失败阈值必须在 1-10 之间")
+	if threshold < 1 || threshold > 9 {
+		return fmt.Errorf("失败阈值必须在 1-9 之间")
 	}
 
-	if duration != 15 && duration != 30 && duration != 60 {
-		return fmt.Errorf("拉黑时长只支持 15/30/60 分钟")
+	if duration != 5 && duration != 15 && duration != 30 && duration != 60 {
+		return fmt.Errorf("拉黑时长只支持 5/15/30/60 分钟")
 	}
 
 	// 开启事务
