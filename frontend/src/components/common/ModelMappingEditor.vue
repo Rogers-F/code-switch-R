@@ -7,6 +7,7 @@
           type="button"
           class="help-icon"
           :data-tooltip="$t('components.provider.modelMapping.tooltip')"
+          :aria-label="$t('components.provider.modelMapping.tooltip')"
         >
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path
@@ -226,6 +227,44 @@ const removeMapping = (index: number) => {
 .help-icon:hover {
   color: var(--foreground);
   background-color: var(--background-hover);
+}
+
+.help-icon[data-tooltip] {
+  position: relative;
+}
+
+.help-icon[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translate(-50%, 0);
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  display: inline-block;
+  white-space: normal;
+  min-width: 180px;
+  max-width: min(360px, calc(100vw - 64px));
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 10;
+}
+
+:global(.dark) .help-icon[data-tooltip]::after {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.help-icon[data-tooltip]:hover::after,
+.help-icon[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, -2px);
 }
 
 .mapping-list {

@@ -12,8 +12,6 @@ export type AutomationCard = {
   supportedModels?: Record<string, boolean>
   // 模型映射：external model -> internal model
   modelMapping?: Record<string, string>
-  // 优先级分组：数字越小优先级越高（1-10，默认 1）
-  level?: number
 }
 
 export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> = {

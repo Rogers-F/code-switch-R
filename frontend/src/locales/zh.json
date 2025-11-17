@@ -248,7 +248,8 @@
         "noFile": "尚未选择配置文件",
         "loadError": "读取配置文件失败",
         "clear": "清除选择",
-        "reupload": "重新上传"
+        "reupload": "重新上传",
+        "missingDefault": "未检测到 cc-switch 配置文件，可手动上传 JSON 进行导入"
       }
     },
     "mcp": {

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -210,86 +209,51 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 		fmt.Println()
 
-		// 按 Level 分组
-		levelGroups := make(map[int][]Provider)
-		for _, provider := range active {
-			level := provider.Level
-			if level <= 0 {
-				level = 1 // 未配置或零值时默认为 Level 1
-			}
-			levelGroups[level] = append(levelGroups[level], provider)
-		}
-
-		// 获取所有 level 并升序排序
-		levels := make([]int, 0, len(levelGroups))
-		for level := range levelGroups {
-			levels = append(levels, level)
-		}
-		sort.Ints(levels)
-
-		fmt.Printf("[INFO] 共 %d 个 Level 分组：%v\n", len(levels), levels)
-
 		query := flattenQuery(c.Request.URL.Query())
 		clientHeaders := cloneHeaders(c.Request.Header)
 
 		var lastErr error
 		attemptCount := 0
+		for i, provider := range active {
+			attemptCount++
 
-		// 外层循环：遍历 Level（从低到高，优先级从高到低）
-		for _, level := range levels {
-			providersInLevel := levelGroups[level]
-			fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+			effectiveModel := provider.GetEffectiveModel(requestedModel)
 
-			// 内层循环：遍历该 Level 的所有 provider（按数组顺序）
-			for i, provider := range providersInLevel {
-				attemptCount++
+			currentBodyBytes := bodyBytes
+			if effectiveModel != requestedModel && requestedModel != "" {
+				fmt.Printf("[INFO]   Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
 
-				// 获取实际应该使用的模型名
-				effectiveModel := provider.GetEffectiveModel(requestedModel)
-
-				// 如果需要映射，修改请求体
-				currentBodyBytes := bodyBytes
-				if effectiveModel != requestedModel && requestedModel != "" {
-					fmt.Printf("[INFO]   Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-
-					modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-					if err != nil {
-						fmt.Printf("[ERROR]   替换模型名失败: %v\n", err)
-						lastErr = err
-						continue
-					}
-					currentBodyBytes = modifiedBody
-				}
-
-				// 详细模式日志：记录 provider、model、level
-				fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n",
-					i+1, len(providersInLevel), provider.Name, effectiveModel)
-
-				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
-				duration := time.Since(startTime)
-
-				if ok {
-					fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
-					return
-				}
-
-				// 详细模式日志：记录错误和耗时
-				errorMsg := "未知错误"
+				modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
 				if err != nil {
-					errorMsg = err.Error()
+					fmt.Printf("[ERROR]   替换模型名失败: %v\n", err)
+					lastErr = err
+					continue
 				}
-				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
-					level, provider.Name, errorMsg, duration.Seconds())
-				lastErr = err
+				currentBodyBytes = modifiedBody
 			}
 
-			// 当前 Level 所有 provider 都失败
-			fmt.Printf("[WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
+			fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n",
+				i+1, len(active), provider.Name, effectiveModel)
+
+			startTime := time.Now()
+			ok, err := prs.forwardRequest(c, kind, provider, endpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+			duration := time.Since(startTime)
+
+			if ok {
+				fmt.Printf("[INFO]   ✓ 成功: %s | 耗时: %.2fs\n", provider.Name, duration.Seconds())
+				return
+			}
+
+			errorMsg := "未知错误"
+			if err != nil {
+				errorMsg = err.Error()
+			}
+			fmt.Printf("[WARN]   ✗ 失败: %s | 错误: %s | 耗时: %.2fs\n",
+				provider.Name, errorMsg, duration.Seconds())
+			lastErr = err
 		}
 
-		// 所有 Level 的所有 provider 都失败
-		message := fmt.Sprintf("所有 %d 个 Level 的 %d 个 provider 均失败", len(levels), attemptCount)
+		message := fmt.Sprintf("所有 %d 个 provider 均失败（共尝试 %d 次）", len(active), attemptCount)
 		if lastErr != nil {
 			message = fmt.Sprintf("%s: %s", message, lastErr.Error())
 		}
@@ -344,8 +308,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	req := xrequest.New().
 		SetHeaders(headers).
 		SetQueryParams(query).
-		SetRetry(1, 500*time.Millisecond).
-		SetTimeout(60 * time.Second)
+		SetRetry(1, 500*time.Millisecond)
 
 	reqBody := bytes.NewReader(bodyBytes)
 	req = req.SetBody(reqBody)

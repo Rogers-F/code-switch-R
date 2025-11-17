@@ -84,6 +84,12 @@ const loadImportStatus = async () => {
 
 const activeImportStatus = computed(() => customImportStatus.value ?? importStatus.value)
 const hasCustomSelection = computed(() => Boolean(customImportStatus.value))
+const shouldShowDefaultMissingHint = computed(() => {
+  if (hasCustomSelection.value) return false
+  const status = importStatus.value
+  if (!status) return false
+  return !status.config_exists
+})
 const pendingProviders = computed(() => activeImportStatus.value?.pending_provider_count ?? 0)
 const pendingServers = computed(() => activeImportStatus.value?.pending_mcp_count ?? 0)
 const configPath = computed(() => activeImportStatus.value?.config_path ?? '')
@@ -100,14 +106,15 @@ const canImportCustom = computed(() => {
 const canImportActive = computed(() =>
   hasCustomSelection.value ? canImportCustom.value : canImportDefault.value,
 )
-const showImportRow = computed(
-  () => Boolean(importStatus.value?.config_exists) || hasCustomSelection.value,
-)
+const showImportRow = computed(() => Boolean(importStatus.value) || hasCustomSelection.value)
 const importPathLabel = computed(() => {
   if (!configPath.value) return ''
   return t('components.general.import.path', { path: configPath.value })
 })
 const importDetailLabel = computed(() => {
+  if (shouldShowDefaultMissingHint.value) {
+    return t('components.general.import.missingDefault')
+  }
   if (!activeImportStatus.value) {
     return t('components.general.import.noFile')
   }
@@ -127,9 +134,10 @@ const importButtonText = computed(() => {
   if (hasCustomSelection.value) {
     return t('components.general.import.confirm')
   }
-  return canImportDefault.value
-    ? t('components.general.import.cta')
-    : t('components.general.import.syncedButton')
+  if (shouldShowDefaultMissingHint.value || canImportDefault.value) {
+    return t('components.general.import.cta')
+  }
+  return t('components.general.import.syncedButton')
 })
 const primaryButtonDisabled = computed(() => importBusy.value || !canImportActive.value)
 const secondaryButtonLabel = computed(() =>
@@ -137,7 +145,7 @@ const secondaryButtonLabel = computed(() =>
     ? t('components.general.import.clear')
     : t('components.general.import.upload'),
 )
-const secondaryButtonVariant = computed(() => 'outline')
+const secondaryButtonVariant = computed(() => 'outline' as const)
 
 const processImportResult = async (result?: ConfigImportResult | null) => {
   if (!result) return
