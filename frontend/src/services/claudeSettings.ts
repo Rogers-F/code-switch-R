@@ -1,5 +1,10 @@
 import { Call } from '@wailsio/runtime'
-import type { ClaudeProxyStatus } from '../../bindings/codeswitch/services/models'
+
+// 本地类型定义，避免依赖 CI 生成的绑定文件
+export interface ClaudeProxyStatus {
+  enabled: boolean
+  base_url: string
+}
 
 type Platform = 'claude' | 'codex'
 

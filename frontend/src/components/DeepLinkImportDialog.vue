@@ -112,8 +112,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import * as DeepLinkService from '../../bindings/codeswitch/services/deeplinkservice'
-import type { DeepLinkImportRequest as BindingDeepLinkRequest } from '../../bindings/codeswitch/services/deeplinkservice'
+import { ParseDeepLinkURL, ImportProviderFromDeepLink } from '../../bindings/codeswitch/services/deeplinkservice'
 import type { DeepLinkImportRequest } from '../types/deeplink'
 
 const { t } = useI18n()
@@ -138,7 +137,7 @@ watch(() => props.url, async (newUrl) => {
   if (newUrl && props.show) {
     try {
       error.value = ''
-      request.value = await DeepLinkService.ParseDeepLinkURL(newUrl)
+      request.value = await ParseDeepLinkURL(newUrl) as DeepLinkImportRequest
     } catch (err: any) {
       error.value = err.message || String(err)
       request.value = null
@@ -155,7 +154,7 @@ const handleImport = async () => {
     error.value = ''
 
     // 将可能为 null 的字段规范化为 undefined，匹配绑定类型定义
-    const payload: BindingDeepLinkRequest = {
+    const payload = {
       version: request.value.version,
       resource: request.value.resource,
       app: request.value.app,
@@ -173,7 +172,7 @@ const handleImport = async () => {
       configUrl: request.value.configUrl ?? undefined,
     }
 
-    const providerId = await DeepLinkService.ImportProviderFromDeepLink(payload)
+    const providerId = await ImportProviderFromDeepLink(payload)
 
     imported.value = true
 
