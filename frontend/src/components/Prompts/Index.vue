@@ -516,6 +516,7 @@ html.dark .action-btn:hover {
 .primary-btn,
 .secondary-btn {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
@@ -525,6 +526,8 @@ html.dark .action-btn:hover {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-wrap: nowrap;
 }
 
 .primary-btn {

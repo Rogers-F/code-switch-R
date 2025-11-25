@@ -213,6 +213,7 @@ html.dark .collapse-btn:hover {
 
 .mac-sidebar.collapsed .nav-list {
   padding: 12px 4px;
+  align-items: center;
 }
 
 .nav-item {

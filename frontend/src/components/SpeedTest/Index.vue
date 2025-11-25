@@ -269,6 +269,7 @@ function getLatencyText(result: EndpointLatency | null): string {
 
 .add-btn {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
@@ -280,6 +281,8 @@ function getLatencyText(result: EndpointLatency | null): string {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-wrap: nowrap;
 }
 
 .add-btn:hover:not(:disabled) {
@@ -310,6 +313,7 @@ function getLatencyText(result: EndpointLatency | null): string {
 
 .test-btn {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
@@ -321,6 +325,8 @@ function getLatencyText(result: EndpointLatency | null): string {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-wrap: nowrap;
 }
 
 .test-btn:hover:not(:disabled) {
