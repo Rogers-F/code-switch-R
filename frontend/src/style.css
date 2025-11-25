@@ -1627,6 +1627,10 @@ button {
   justify-content: center;
   gap: 8px;
   line-height: 1;
+  width: fit-content;
+  min-width: fit-content;
+  padding: 10px 20px;
+  box-sizing: border-box;
 }
 
 /* 修复按钮内 SVG 被 Tailwind preflight 设置为 display:block 导致的布局问题 */
