@@ -26,7 +26,11 @@ onMounted(() => {
   <div class="app-layout">
     <Sidebar />
     <main class="main-content">
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <keep-alive>
+          <component :is="Component" />
+        </keep-alive>
+      </RouterView>
     </main>
   </div>
 </template>

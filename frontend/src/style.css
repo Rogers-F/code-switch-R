@@ -1618,3 +1618,8 @@ html.dark .ghost-icon:hover {
 .general-page .mac-panel {
   width: 100%;
 }
+
+/* 全局按钮样式修复 - 防止 Tailwind Preflight 导致的文字溢出 */
+button {
+  line-height: 1;
+}
