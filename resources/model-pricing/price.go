@@ -252,6 +252,7 @@ func resolveCacheTokens(usage UsageSnapshot) (fiveMin int, oneHour int) {
 func buildEphemeral1hPricing() map[string]float64 {
 	return map[string]float64{
 		"claude-opus-4-5":            0.00001,
+		"claude-opus-4-5-20251101":   0.00001,
 		"claude-opus-4-5-20250929":   0.00001,
 		"claude-opus-4-1":            0.00003,
 		"claude-opus-4-1-20250805":   0.00003,
@@ -278,6 +279,8 @@ func buildEphemeral1hPricing() map[string]float64 {
 		"claude-3-haiku-20240307":    0.0000016,
 		"claude-haiku-3":             0.0000016,
 		"claude-haiku-3-5":           0.0000016,
+		"claude-haiku-4-5":           0.000002,
+		"claude-haiku-4-5-20251001":  0.000002,
 	}
 }
 
