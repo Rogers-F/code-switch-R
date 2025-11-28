@@ -24,29 +24,40 @@ func GetBlacklistLevelConfigPath() (string, error) {
 }
 
 // GetBlacklistLevelConfig 获取等级拉黑配置
+// 【修复】开关状态从数据库读取，其他配置从 JSON 文件读取
 func (ss *SettingsService) GetBlacklistLevelConfig() (*BlacklistLevelConfig, error) {
 	configPath, err := GetBlacklistLevelConfigPath()
 	if err != nil {
 		return nil, err
 	}
 
-	// 如果文件不存在，返回默认配置
+	var config *BlacklistLevelConfig
+
+	// 如果文件不存在，使用默认配置
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return DefaultBlacklistLevelConfig(), nil
+		config = DefaultBlacklistLevelConfig()
+	} else {
+		// 读取配置文件
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取配置文件失败: %w", err)
+		}
+
+		config = &BlacklistLevelConfig{}
+		if err := json.Unmarshal(data, config); err != nil {
+			return nil, fmt.Errorf("解析配置文件失败: %w", err)
+		}
 	}
 
-	// 读取配置文件
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
+	// 【关键修复】从数据库读取开关状态，覆盖 JSON 文件中的值
+	// 因为 UI 开关是通过 SetLevelBlacklistEnabled() 写入数据库的
+	dbEnabled, err := ss.GetLevelBlacklistEnabled()
+	if err == nil {
+		config.EnableLevelBlacklist = dbEnabled
 	}
+	// 如果数据库读取失败，保留 JSON 文件中的值（向后兼容）
 
-	var config BlacklistLevelConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("解析配置文件失败: %w", err)
-	}
-
-	return &config, nil
+	return config, nil
 }
 
 // SaveBlacklistLevelConfig 保存等级拉黑配置
