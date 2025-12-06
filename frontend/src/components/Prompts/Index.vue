@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PageLayout from '../common/PageLayout.vue'
 import MarkdownEditor from '../common/MarkdownEditor.vue'
 import {
   GetPrompts,
@@ -141,14 +142,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="prompts-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('prompts.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('prompts.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('prompts.hero.lead') }}</p>
-    </div>
-
+  <PageLayout
+    :eyebrow="t('prompts.hero.eyebrow')"
+    :title="t('prompts.hero.title')"
+  >
     <!-- Platform Tabs -->
     <div class="platform-tabs">
       <button
@@ -283,7 +280,7 @@ onMounted(() => {
         </div>
       </div>
     </Teleport>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>

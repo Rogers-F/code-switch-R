@@ -29,6 +29,47 @@
   --contrib-tooltip-heading: #0f172a;
   --contrib-tooltip-text: rgba(15, 23, 42, 0.7);
   --contrib-tooltip-value: #0f172a;
+
+  /* 统一间距系统 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+
+  /* 页面布局令牌 */
+  --spacing-page: var(--spacing-lg);        /* 页面容器padding: 24px */
+  --spacing-component: var(--spacing-md);   /* 组件间距: 16px */
+  --spacing-section: var(--spacing-lg);     /* 区块间距: 24px */
+  --spacing-tight: var(--spacing-sm);        /* 紧密间距: 8px */
+
+  /* 容器内边距 */
+  --padding-page: var(--spacing-page);      /* 页面容器: 24px */
+  --padding-card: 18px 20px;                /* 卡片内边距 */
+  --padding-panel: 32px;                    /* 面板内边距 */
+  --padding-form: 12px 16px;                /* 表单内边距 */
+
+  /* 圆角系统 */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* 阴影系统 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
+  --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-float: 0 15px 40px rgba(0, 0, 0, 0.08);
+
+  /* 过渡动画 */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.2s ease;
+  --transition-slow: 0.3s ease;
 }
 
 html.dark {
@@ -1699,4 +1740,137 @@ button svg {
   height: 16px !important;
   flex-shrink: 0 !important;
   display: inline-block !important;
+}
+
+/* PageLayout 组件样式 */
+.page-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  background: var(--app-background);
+}
+
+.page-header {
+  background: var(--app-background);
+  border-bottom: 1px solid var(--mac-border);
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.page-header--sticky {
+  position: sticky;
+  top: 0;
+}
+
+.page-header-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 48px 0;
+  gap: var(--spacing-section);
+}
+
+.page-title-section {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  flex: 1;
+  min-width: 0;
+}
+
+.page-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--mac-accent);
+  margin: 0;
+  line-height: 1;
+}
+
+.page-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--mac-text);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-tight);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.back-button {
+  border: none;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--mac-text);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.back-button svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.back-button:hover {
+  background: rgba(15, 23, 42, 0.15);
+}
+
+html.dark .back-button {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+html.dark .back-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.page-breadcrumbs {
+  padding: 8px 48px 0;
+}
+
+.page-content {
+  flex: 1;
+  padding: var(--padding-page);
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .page-header-content {
+    padding: 16px 24px 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-md);
+  }
+
+  .page-title-section {
+    align-items: flex-start;
+  }
+
+  .page-actions {
+    align-self: flex-end;
+  }
+
+  .page-breadcrumbs {
+    padding: 8px 24px 0;
+  }
+
+  .page-content {
+    padding: 16px 24px;
+  }
 }

@@ -1,111 +1,112 @@
 <template>
-  <div class="logs-page">
-    <div class="logs-header">
-      <BaseButton variant="outline" type="button" @click="backToHome">
-        {{ t('components.logs.back') }}
-      </BaseButton>
+  <PageLayout :title="t('components.logs.title')">
+    <template #actions>
       <div class="refresh-indicator">
         <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
         <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
           {{ t('components.logs.refresh') }}
         </BaseButton>
       </div>
+    </template>
+
+    <div style="display: flex; flex-direction: column; gap: var(--spacing-section);">
+
+      <section class="logs-summary" v-if="statsCards.length">
+        <article v-for="card in statsCards" :key="card.key" class="summary-card">
+          <div class="summary-card__label">{{ card.label }}</div>
+          <div class="summary-card__value">{{ card.value }}</div>
+          <div class="summary-card__hint">{{ card.hint }}</div>
+        </article>
+      </section>
+
+      <section class="logs-chart">
+        <Line :data="chartData" :options="chartOptions" />
+      </section>
+
+      <form class="logs-filter-row" @submit.prevent="applyFilters">
+        <div class="filter-fields">
+          <label class="filter-field">
+            <span>{{ t('components.logs.filters.platform') }}</span>
+            <select v-model="filters.platform" class="mac-select">
+              <option value="">{{ t('components.logs.filters.allPlatforms') }}</option>
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+              <option value="gemini">Gemini</option>
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>{{ t('components.logs.filters.provider') }}</span>
+            <select v-model="filters.provider" class="mac-select">
+              <option value="">{{ t('components.logs.filters.allProviders') }}</option>
+              <option v-for="provider in providerOptions" :key="provider" :value="provider">
+                {{ provider }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <BaseButton type="submit" :disabled="loading">
+            {{ t('components.logs.query') }}
+          </BaseButton>
+        </div>
+      </form>
+
+      <section class="logs-table-wrapper">
+        <table class="logs-table">
+          <thead>
+            <tr>
+              <th class="col-time">{{ t('components.logs.table.time') }}</th>
+              <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
+              <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
+              <th class="col-model">{{ t('components.logs.table.model') }}</th>
+              <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
+              <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
+              <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
+              <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in pagedLogs" :key="item.id">
+              <td>{{ formatTime(item.created_at) }}</td>
+              <td>{{ item.platform || '—' }}</td>
+              <td>{{ item.provider || '—' }}</td>
+              <td>{{ item.model || '—' }}</td>
+              <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
+              <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span>
+              </td>
+              <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec)
+                  }}</span></td>
+              <td class="token-cell">
+                <div>
+                  <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
+                  <span class="token-value">{{ formatNumber(item.input_tokens) }}</span>
+                </div>
+                <div>
+                  <span class="token-label">{{ t('components.logs.tokenLabels.output') }}</span>
+                  <span class="token-value">{{ formatNumber(item.output_tokens) }}</span>
+                </div>
+                <div>
+                  <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
+                  <span class="token-value">{{ formatNumber(item.reasoning_tokens) }}</span>
+                </div>
+                <div>
+                  <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
+                  <span class="token-value">{{ formatNumber(item.cache_create_tokens) }}</span>
+                </div>
+                <div>
+                  <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
+                  <span class="token-value">{{ formatNumber(item.cache_read_tokens) }}</span>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!pagedLogs.length && !loading">
+              <td colspan="8" class="empty">{{ t('components.logs.empty') }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="loading" class="empty">{{ t('components.logs.loading') }}</p>
+      </section>
     </div>
-
-    <section class="logs-summary" v-if="statsCards.length">
-      <article v-for="card in statsCards" :key="card.key" class="summary-card">
-        <div class="summary-card__label">{{ card.label }}</div>
-        <div class="summary-card__value">{{ card.value }}</div>
-        <div class="summary-card__hint">{{ card.hint }}</div>
-      </article>
-    </section>
-
-    <section class="logs-chart">
-      <Line :data="chartData" :options="chartOptions" />
-    </section>
-
-    <form class="logs-filter-row" @submit.prevent="applyFilters">
-      <div class="filter-fields">
-        <label class="filter-field">
-          <span>{{ t('components.logs.filters.platform') }}</span>
-          <select v-model="filters.platform" class="mac-select">
-            <option value="">{{ t('components.logs.filters.allPlatforms') }}</option>
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </label>
-        <label class="filter-field">
-          <span>{{ t('components.logs.filters.provider') }}</span>
-          <select v-model="filters.provider" class="mac-select">
-            <option value="">{{ t('components.logs.filters.allProviders') }}</option>
-            <option v-for="provider in providerOptions" :key="provider" :value="provider">
-              {{ provider }}
-            </option>
-          </select>
-        </label>
-      </div>
-      <div class="filter-actions">
-        <BaseButton type="submit" :disabled="loading">
-          {{ t('components.logs.query') }}
-        </BaseButton>
-      </div>
-    </form>
-
-    <section class="logs-table-wrapper">
-      <table class="logs-table">
-        <thead>
-          <tr>
-            <th class="col-time">{{ t('components.logs.table.time') }}</th>
-            <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
-            <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
-            <th class="col-model">{{ t('components.logs.table.model') }}</th>
-            <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
-            <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
-            <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
-            <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in pagedLogs" :key="item.id">
-            <td>{{ formatTime(item.created_at) }}</td>
-            <td>{{ item.platform || '—' }}</td>
-            <td>{{ item.provider || '—' }}</td>
-            <td>{{ item.model || '—' }}</td>
-            <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
-            <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
-            <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
-            <td class="token-cell">
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
-                <span class="token-value">{{ formatNumber(item.input_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.output') }}</span>
-                <span class="token-value">{{ formatNumber(item.output_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
-                <span class="token-value">{{ formatNumber(item.reasoning_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
-                <span class="token-value">{{ formatNumber(item.cache_create_tokens) }}</span>
-              </div>
-              <div>
-                <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
-                <span class="token-value">{{ formatNumber(item.cache_read_tokens) }}</span>
-              </div>
-            </td>
-          </tr>
-          <tr v-if="!pagedLogs.length && !loading">
-            <td colspan="8" class="empty">{{ t('components.logs.empty') }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="loading" class="empty">{{ t('components.logs.loading') }}</p>
-    </section>
-
     <div class="logs-pagination">
       <span>{{ page }} / {{ totalPages }}</span>
       <div class="pagination-actions">
@@ -117,13 +118,14 @@
         </BaseButton>
       </div>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import PageLayout from '../common/PageLayout.vue'
 import BaseButton from '../common/BaseButton.vue'
 import {
   fetchRequestLogs,

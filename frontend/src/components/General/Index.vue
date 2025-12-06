@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import PageLayout from '../common/PageLayout.vue'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
@@ -346,24 +347,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="main-shell general-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ $t('components.general.title.application') }}</p>
-      <button class="ghost-icon" :aria-label="$t('components.general.buttons.back')" @click="goBack">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M15 18l-6-6 6-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-    </div>
-
-    <div class="general-page">
+  <PageLayout
+    :eyebrow="$t('components.general.title.application')"
+    :show-back-button="true"
+    @back="goBack"
+  >
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.application') }}</h2>
         <div class="mac-panel">
@@ -575,8 +563,7 @@ onMounted(async () => {
           </ListItem>
         </div>
       </section>
-    </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>

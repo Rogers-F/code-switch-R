@@ -46,10 +46,10 @@ func (a *AppService) OpenSecondWindow() {
 	win := a.App.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "Logs",
 		Name:      name,
-		Width:     1024,
+		Width:     1280,
 		Height:    800,
-		MinWidth:  600,
-		MinHeight: 300,
+		MinWidth:  800,
+		MinHeight: 800,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			TitleBar:                application.MacTitleBarHidden,
@@ -126,7 +126,7 @@ func main() {
 	// 启动定时检查（如果启用）
 	if updateService.IsAutoCheckEnabled() {
 		go func() {
-			time.Sleep(10 * time.Second) // 延迟10秒，等待应用完成初始化
+			time.Sleep(10 * time.Second)     // 延迟10秒，等待应用完成初始化
 			updateService.CheckUpdateAsync() // 启动时检查一次
 			updateService.StartDailyCheck()  // 启动每日8点定时检查
 		}()

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PageLayout from '../common/PageLayout.vue'
 import {
   CheckEnvConflicts
 } from '../../../bindings/codeswitch/services/envcheckservice'
@@ -64,13 +65,22 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="envcheck-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('envcheck.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('envcheck.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('envcheck.hero.lead') }}</p>
-    </div>
+  <PageLayout
+    :eyebrow="t('envcheck.hero.eyebrow')"
+    :title="t('envcheck.hero.title')"
+  >
+    <template #actions>
+      <button class="ghost-icon" :disabled="loading" @click="checkConflicts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: loading }">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+        {{ t('envcheck.refresh') }}
+      </button>
+    </template>
+
+    <div style="display: flex; flex-direction: column; gap: var(--spacing-section);">
 
     <!-- Platform Tabs -->
     <div class="platform-tabs">
@@ -153,28 +163,11 @@ onMounted(() => {
       <div class="spinner"></div>
       <span>{{ t('envcheck.checking') }}</span>
     </div>
-
-    <!-- Refresh Button -->
-    <div class="page-actions">
-      <button class="refresh-btn" @click="checkConflicts" :disabled="loading">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: loading }">
-          <polyline points="23 4 23 10 17 10"></polyline>
-          <polyline points="1 20 1 14 7 14"></polyline>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-        </svg>
-        {{ t('envcheck.refresh') }}
-      </button>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.envcheck-page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
 .page-hero {
   margin-bottom: 32px;
 }

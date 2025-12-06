@@ -1,14 +1,9 @@
 <template>
-  <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.skill.hero.eyebrow') }}</p>
-      <button class="ghost-icon" :title="t('components.skill.actions.back')"
-        :data-tooltip="t('components.skill.actions.back')" @click="goHome">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
-            stroke-linejoin="round" />
-        </svg>
-      </button>
+  <PageLayout
+    :eyebrow="t('components.skill.hero.eyebrow')"
+    title="Claude Skill"
+  >
+    <template #actions>
       <button class="ghost-icon" :title="t('components.skill.actions.refresh')"
         :data-tooltip="t('components.skill.actions.refresh')" :disabled="refreshing" @click="refresh">
         <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spin: refreshing }">
@@ -26,17 +21,14 @@
           <path d="M12 7.5v1M12 15.5v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </svg>
       </button>
-    </div>
+    </template>
 
-    <div class="contrib-page skill-page">
-      <header class="skill-hero">
-        <div class="skill-hero-text">
-          <h1>Claude Skill</h1>
-          <p class="skill-lead">
-            {{ t('components.skill.hero.lead') }}
-          </p>
-        </div>
-      </header>
+    <div style="display: flex; flex-direction: column; gap: var(--spacing-section);">
+      <div class="skill-hero-text">
+        <p class="lead">
+          {{ t('components.skill.hero.lead') }}
+        </p>
+      </div>
 
       <section class="skill-list-section">
         <div v-if="loading" class="skill-empty">{{ t('components.skill.list.loading') }}</div>
@@ -147,13 +139,14 @@
         </div>
       </div>
     </BaseModal>
-  </div>
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import PageLayout from '../common/PageLayout.vue'
 import { Browser } from '@wailsio/runtime'
 import {
   fetchSkills,

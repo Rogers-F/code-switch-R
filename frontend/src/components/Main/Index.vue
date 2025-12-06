@@ -1,7 +1,9 @@
 <template>
-  <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.main.hero.eyebrow') }}</p>
+  <PageLayout
+    :eyebrow="t('components.main.hero.eyebrow')"
+    :sticky="true"
+  >
+    <template #actions>
       <button
         class="ghost-icon github-icon"
         :class="{
@@ -111,8 +113,9 @@
           />
         </svg>
       </button>
-    </div>
-    <div class="contrib-page">
+    </template>
+
+    <div style="display: flex; flex-direction: column; gap: var(--spacing-section);">
       <!-- 首次使用提示横幅 -->
       <div v-if="showFirstRunPrompt" class="first-run-banner">
         <div class="banner-content">
@@ -604,7 +607,7 @@
       </footer>
       </BaseModal>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
@@ -622,6 +625,7 @@ import {
 } from '../../data/usageHeatmap'
 import { automationCardGroups, createAutomationCards, type AutomationCard } from '../../data/cards'
 import lobeIcons from '../../icons/lobeIconMap'
+import PageLayout from '../common/PageLayout.vue'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'

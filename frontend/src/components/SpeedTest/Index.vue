@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PageLayout from '../common/PageLayout.vue'
 import {
   TestEndpoints,
   GetEndpointRecords,
@@ -174,127 +175,97 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="speedtest-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('speedtest.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('speedtest.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('speedtest.hero.lead') }}</p>
-    </div>
-
-    <!-- URL Input -->
-    <div class="input-section">
-      <input
-        v-model="newUrl"
-        type="url"
-        class="url-input"
-        :placeholder="t('speedtest.placeholder')"
-        @keyup.enter="addEndpoint"
-      />
-      <button class="add-btn" @click="addEndpoint" :disabled="!newUrl.trim()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        {{ t('speedtest.add') }}
-      </button>
-    </div>
-
-    <!-- Endpoint List Header -->
-    <div class="list-header">
-      <span class="list-title">
-        {{ t('speedtest.endpoints', { count: endpointCount }) }}
-      </span>
-      <button
-        class="test-btn"
-        :class="{ testing: isTesting }"
-        @click="runTest"
-        :disabled="isTesting || endpointCount === 0"
-      >
-        <svg v-if="!isTesting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 6v6l4 2"></path>
-        </svg>
-        {{ isTesting ? t('speedtest.testing') : t('speedtest.start') }}
-      </button>
-    </div>
-
-    <!-- Endpoint List -->
-    <div class="endpoint-list">
-      <div v-if="endpoints.length === 0" class="empty-state">
-        <p>{{ t('speedtest.empty') }}</p>
-      </div>
-
-      <div
-        v-for="(endpoint, index) in endpoints"
-        :key="endpoint.url"
-        class="endpoint-card"
-      >
-        <div class="endpoint-url">{{ endpoint.url }}</div>
-
-        <div class="endpoint-result">
-          <span
-            v-if="endpoint.testing"
-            class="result-testing"
-          >
-            {{ t('speedtest.testing') }}...
-          </span>
-          <span
-            v-else-if="endpoint.result"
-            class="result-latency"
-            :style="{ color: getLatencyColor(endpoint.result.latency) }"
-          >
-            <span class="latency-dot" :style="{ background: getLatencyColor(endpoint.result.latency) }"></span>
-            {{ getLatencyText(endpoint.result) }}
-          </span>
-          <span v-else class="result-pending">-</span>
-        </div>
-
-        <div class="endpoint-info">
-          <span class="last-test-info">{{ getLastTestInfo(endpoint) }}</span>
-        </div>
-
-        <button class="remove-btn" @click="removeEndpoint(index)">
+  <PageLayout :eyebrow="t('speedtest.hero.eyebrow')" :title="t('speedtest.hero.title')">
+    <div style="display: flex; flex-direction: column; gap: var(--spacing-section);">
+      <!-- URL Input -->
+      <div class="input-section">
+        <input v-model="newUrl" type="url" class="url-input" :placeholder="t('speedtest.placeholder')"
+          @keyup.enter="addEndpoint" />
+        <button class="add-btn" @click="addEndpoint" :disabled="!newUrl.trim()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
+          {{ t('speedtest.add') }}
         </button>
       </div>
-    </div>
 
-    <!-- Legend -->
-    <div class="legend">
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #10b981;"></span>
-        <span>&lt; 300ms</span>
+      <!-- Endpoint List Header -->
+      <div class="list-header">
+        <span class="list-title">
+          {{ t('speedtest.endpoints', { count: endpointCount }) }}
+        </span>
+        <button class="test-btn" :class="{ testing: isTesting }" @click="runTest"
+          :disabled="isTesting || endpointCount === 0">
+          <svg v-if="!isTesting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 6v6l4 2"></path>
+          </svg>
+          {{ isTesting ? t('speedtest.testing') : t('speedtest.start') }}
+        </button>
       </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #f59e0b;"></span>
-        <span>300-500ms</span>
+
+      <!-- Endpoint List -->
+      <div class="endpoint-list">
+        <div v-if="endpoints.length === 0" class="empty-state">
+          <p>{{ t('speedtest.empty') }}</p>
+        </div>
+
+        <div v-for="(endpoint, index) in endpoints" :key="endpoint.url" class="endpoint-card">
+          <div class="endpoint-url">{{ endpoint.url }}</div>
+
+          <div class="endpoint-result">
+            <span v-if="endpoint.testing" class="result-testing">
+              {{ t('speedtest.testing') }}...
+            </span>
+            <span v-else-if="endpoint.result" class="result-latency"
+              :style="{ color: getLatencyColor(endpoint.result.latency) }">
+              <span class="latency-dot" :style="{ background: getLatencyColor(endpoint.result.latency) }"></span>
+              {{ getLatencyText(endpoint.result) }}
+            </span>
+            <span v-else class="result-pending">-</span>
+          </div>
+
+          <div class="endpoint-info">
+            <span class="last-test-info">{{ getLastTestInfo(endpoint) }}</span>
+          </div>
+
+          <button class="remove-btn" @click="removeEndpoint(index)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
       </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #f97316;"></span>
-        <span>500-800ms</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #ef4444;"></span>
-        <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
+
+      <!-- Legend -->
+      <div class="legend">
+        <div class="legend-item">
+          <span class="legend-dot" style="background: #10b981;"></span>
+          <span>&lt; 300ms</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot" style="background: #f59e0b;"></span>
+          <span>300-500ms</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot" style="background: #f97316;"></span>
+          <span>500-800ms</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot" style="background: #ef4444;"></span>
+          <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
+        </div>
       </div>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.speedtest-page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
 .page-hero {
   margin-bottom: 32px;
 }
@@ -425,8 +396,13 @@ onMounted(() => {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .endpoint-list {

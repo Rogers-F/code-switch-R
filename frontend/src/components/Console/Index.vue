@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { Call } from '@wailsio/runtime'
+import PageLayout from '../common/PageLayout.vue'
 
 interface ConsoleLog {
   timestamp: string
@@ -87,29 +88,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="main-shell console-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">控制台</p>
+  <PageLayout
+    title="控制台"
+  >
+    <template #actions>
       <div class="actions-group">
         <button class="secondary-btn" @click="clearLogs">清空日志</button>
         <label class="auto-scroll-toggle">
           <input type="checkbox" v-model="autoScroll" />
           <span>自动滚动</span>
         </label>
-        <button class="ghost-icon" aria-label="返回" @click="goBack">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M15 18l-6-6 6-6"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
       </div>
-    </div>
+    </template>
 
     <div class="console-container">
       <div v-if="loading" class="loading-state">
@@ -134,17 +124,10 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.console-shell {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-
 .actions-group {
   display: flex;
   align-items: center;

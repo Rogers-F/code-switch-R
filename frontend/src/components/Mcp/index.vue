@@ -1,19 +1,9 @@
 <template>
-  <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.mcp.hero.eyebrow') }}</p>
-      <button class="ghost-icon" :aria-label="t('components.mcp.controls.back')" @click="goHome">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M15 18l-6-6 6-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
+  <PageLayout
+    :eyebrow="t('components.mcp.hero.eyebrow')"
+    :title="t('components.mcp.hero.title')"
+  >
+    <template #actions>
       <button class="ghost-icon" :aria-label="t('components.mcp.controls.settings')" @click="goToSettings">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -34,11 +24,10 @@
           />
         </svg>
       </button>
-    </div>
+    </template>
 
-    <div class="contrib-page">
+    <div style="display: flex; flex-direction: column; gap: var(--spacing-section);">
       <section class="contrib-hero">
-        <h1>{{ t('components.mcp.hero.title') }}</h1>
         <p class="lead">{{ t('components.mcp.hero.lead') }}</p>
       </section>
 
@@ -392,13 +381,15 @@
         </BaseButton>
       </footer>
     </BaseModal>
-  </div>
+
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import PageLayout from '../common/PageLayout.vue'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
