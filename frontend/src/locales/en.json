@@ -61,7 +61,11 @@
     "start": "Start Test",
     "testing": "Testing",
     "empty": "Add API endpoints to start testing",
-    "failed": "Failed"
+    "failed": "Failed",
+    "syncButton": "Refresh Provider Endpoints",
+    "syncing": "Syncing...",
+    "loadingTip": "Syncing provider endpoints from home page...",
+    "syncError": "Sync failed, please refresh manually"
   },
   "envcheck": {
     "hero": {

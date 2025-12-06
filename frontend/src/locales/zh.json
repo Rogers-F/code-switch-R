@@ -61,7 +61,11 @@
     "start": "开始测试",
     "testing": "测试中",
     "empty": "添加 API 端点开始测试",
-    "failed": "失败"
+    "failed": "失败",
+    "syncButton": "刷新供应商端点",
+    "syncing": "同步中...",
+    "loadingTip": "正在从首页同步供应商端点...",
+    "syncError": "同步失败，请手动刷新"
   },
   "envcheck": {
     "hero": {

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   TestEndpoints
 } from '../../../bindings/codeswitch/services/speedtestservice'
 import type { EndpointLatency } from '../../../bindings/codeswitch/services/models'
+import { fetchAllProviderEndpoints } from '../../services/endpointSync'
 
 const { t } = useI18n()
 
@@ -12,14 +13,18 @@ interface Endpoint {
   url: string
   result: EndpointLatency | null
   testing: boolean
+  source: 'manual' | 'claude' | 'codex' | 'gemini'  // 新增：端点来源
+  providerName?: string                              // 新增：供应商名称
 }
 
 const newUrl = ref('')
 const endpoints = ref<Endpoint[]>([
-  { url: 'https://api.anthropic.com', result: null, testing: false },
-  { url: 'https://api.openai.com', result: null, testing: false }
+  { url: 'https://api.anthropic.com', result: null, testing: false, source: 'manual' },
+  { url: 'https://api.openai.com', result: null, testing: false, source: 'manual' }
 ])
 const isTesting = ref(false)
+const isLoadingProviders = ref(false)
+const syncError = ref('')
 
 const endpointCount = computed(() => endpoints.value.length)
 
@@ -41,7 +46,8 @@ function addEndpoint() {
   endpoints.value.push({
     url: newUrl.value,
     result: null,
-    testing: false
+    testing: false,
+    source: 'manual'  // 手动添加的端点
   })
   newUrl.value = ''
 }
@@ -98,6 +104,58 @@ function getLatencyText(result: EndpointLatency | null): string {
   }
   return `${result.latency}ms`
 }
+
+/**
+ * 同步供应商端点
+ * @author sm
+ */
+async function syncProviderEndpoints() {
+  isLoadingProviders.value = true
+  syncError.value = ''
+
+  try {
+    // 获取所有供应商端点
+    const providerEndpoints = await fetchAllProviderEndpoints()
+
+    // 保留用户手动添加的端点
+    const manualEndpoints = endpoints.value.filter(ep => ep.source === 'manual')
+    const manualUrls = new Set(manualEndpoints.map(ep => ep.url))
+
+    // 过滤掉与手动端点重复的 URL
+    const uniqueProviderEndpoints = providerEndpoints.filter(
+      ep => !manualUrls.has(ep.url)
+    )
+
+    // 转换供应商端点格式
+    const syncedEndpoints: Endpoint[] = uniqueProviderEndpoints.map(ep => ({
+      url: ep.url,
+      result: null,
+      testing: false,
+      source: ep.source,
+      providerName: ep.providerName
+    }))
+
+    // 合并：手动端点 + 供应商端点
+    endpoints.value = [...manualEndpoints, ...syncedEndpoints]
+
+    console.log(`已同步 ${syncedEndpoints.length} 个供应商端点`)
+  } catch (error) {
+    console.error('同步供应商端点失败:', error)
+    syncError.value = t('speedtest.syncError')
+  } finally {
+    isLoadingProviders.value = false
+  }
+}
+
+// 组件挂载时加载
+onMounted(() => {
+  syncProviderEndpoints()
+})
+
+// 每次页面激活时重新加载（用户从首页切换回来）
+onActivated(() => {
+  syncProviderEndpoints()
+})
 </script>
 
 <template>
@@ -125,6 +183,31 @@ function getLatencyText(result: EndpointLatency | null): string {
         </svg>
         {{ t('speedtest.add') }}
       </button>
+      <button
+        class="sync-btn"
+        :class="{ syncing: isLoadingProviders }"
+        @click="syncProviderEndpoints"
+        :disabled="isLoadingProviders"
+        :title="t('speedtest.syncButton')"
+      >
+        <svg v-if="!isLoadingProviders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+        </svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 6v6l4 2"></path>
+        </svg>
+      </button>
+    </div>
+
+    <!-- 加载状态提示 -->
+    <div v-if="isLoadingProviders" class="loading-tip">
+      {{ t('speedtest.loadingTip') }}
+    </div>
+
+    <!-- 错误提示 -->
+    <div v-if="syncError" class="error-tip">
+      {{ syncError }}
     </div>
 
     <!-- Endpoint List Header -->
@@ -160,7 +243,17 @@ function getLatencyText(result: EndpointLatency | null): string {
         :key="endpoint.url"
         class="endpoint-card"
       >
-        <div class="endpoint-url">{{ endpoint.url }}</div>
+        <div class="endpoint-info">
+          <div class="endpoint-url">{{ endpoint.url }}</div>
+          <!-- 来源标签 -->
+          <span
+            v-if="endpoint.source !== 'manual' && endpoint.providerName"
+            class="source-badge"
+            :class="`badge-${endpoint.source}`"
+          >
+            {{ endpoint.providerName }}
+          </span>
+        </div>
 
         <div class="endpoint-result">
           <span
@@ -284,6 +377,71 @@ function getLatencyText(result: EndpointLatency | null): string {
   white-space: nowrap;
 }
 
+.input-section .sync-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--mac-border);
+  border-radius: 12px;
+  background: var(--mac-surface);
+  color: var(--mac-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sync-btn:hover:not(:disabled) {
+  border-color: var(--mac-accent);
+  color: var(--mac-accent);
+}
+
+.sync-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sync-btn svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.sync-btn.syncing svg.spin {
+  animation: spin 1s linear infinite;
+}
+
+.loading-tip {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: rgba(59, 130, 246, 0.1);
+  border-left: 3px solid #3b82f6;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--mac-text);
+}
+
+.error-tip {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: #ef4444;
+}
+
+:global(.dark) .loading-tip {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+
+:global(.dark) .error-tip {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
 .add-btn:hover:not(:disabled) {
   border-color: var(--mac-accent);
 }
@@ -374,14 +532,49 @@ function getLatencyText(result: EndpointLatency | null): string {
   border-color: var(--mac-accent);
 }
 
-.endpoint-url {
+.endpoint-info {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.endpoint-url {
   font-size: 0.9rem;
   color: var(--mac-text);
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.source-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  width: fit-content;
+}
+
+.badge-claude {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.badge-codex {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.badge-gemini {
+  background-color: #8b5cf6;
+  color: white;
+}
+
+:global(.dark) .source-badge {
+  opacity: 0.9;
 }
 
 .endpoint-result {
