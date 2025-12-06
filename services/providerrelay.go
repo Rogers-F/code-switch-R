@@ -397,9 +397,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			totalAttempts, lastProvider, errorMsg)
 
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":         fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
-			"last_provider": lastProvider,
-			"last_duration": fmt.Sprintf("%.2fs", lastDuration.Seconds()),
+			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
+			"last_provider":  lastProvider,
+			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
 			"total_attempts": totalAttempts,
 		})
 	}
@@ -474,7 +474,11 @@ func (prs *ProviderRelayService) forwardRequest(
 		SetRetry(1, 500*time.Millisecond).
 		SetTimeout(3 * time.Hour) // 3小时超时，适配大型项目分析
 
-	reqBody := bytes.NewReader(bodyBytes)
+	// 解决glm模型在CC里面的思考问题
+	modifiedBodyBytes := prs.injectThinkingIfNeeded(bodyBytes, provider.APIURL)
+	// appendDebugLog(bodyBytes, modifiedBodyBytes)
+	reqBody := bytes.NewReader(modifiedBodyBytes)
+	// reqBody := bytes.NewReader(bodyBytes)
 	req = req.SetBody(reqBody)
 
 	resp, err := req.Post(targetURL)
@@ -738,7 +742,7 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 // 【修复】维护跨 chunk 缓冲，确保完整 SSE 事件解析
 // Gemini SSE 格式: "data: {json}\n\n" 或 "data: [DONE]\n\n"
 func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *ReqeustLog) error {
-	buf := make([]byte, 8192) // 增大缓冲区减少系统调用
+	buf := make([]byte, 8192)   // 增大缓冲区减少系统调用
 	var lineBuf strings.Builder // 跨 chunk 行缓冲
 
 	for {
@@ -1140,3 +1144,73 @@ func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
 	}
 	mergeGeminiUsageMetadata(usage, reqLog)
 }
+
+// injectThinkingIfNeeded 检查 URL 并注入 thinking 参数
+func (prs *ProviderRelayService) injectThinkingIfNeeded(bodyBytes []byte, apiURL string) []byte {
+	// 定义需要注入 thinking 的目标 URL
+	targetURLs := []string{
+		"https://open.bigmodel.cn/api/anthropic",
+		"https://api.z.ai/api/anthropic",
+	}
+
+	// 1. 检查 URL 是否匹配
+	matched := false
+	for _, targetURL := range targetURLs {
+		if apiURL == targetURL {
+			matched = true
+			break
+		}
+	}
+
+	// 如果 URL 不匹配，直接返回
+	if !matched {
+		return bodyBytes
+	}
+
+	// 2. 检查 body 中是否已经存在 "thinking" 字段
+	// 使用 gjson.GetBytes 快速检查，性能很高
+	if gjson.GetBytes(bodyBytes, "thinking").Exists() {
+		fmt.Printf("[INFO] 检测到目标 URL，但用户已包含 thinking 参数，跳过注入: %s\n", apiURL)
+		return bodyBytes
+	}
+
+	// 3. 只有在不存在时，才注入默认参数
+	fmt.Printf("[INFO] 检测到目标 URL 且无 thinking 参数，执行注入: %s\n", apiURL)
+
+	modifiedBody, err := sjson.SetBytes(bodyBytes, "thinking", map[string]interface{}{
+		"type":          "enabled",
+		"budget_tokens": 4000,
+	})
+
+	if err != nil {
+		fmt.Printf("[ERROR] 注入 thinking 参数失败: %v\n", err)
+		return bodyBytes // 失败时返回原始数据，保证请求不挂
+	}
+
+	// URL 不匹配，返回原始请求体
+	return modifiedBody
+}
+
+// appendDebugLog 强行写文件日志
+// func appendDebugLog(original []byte, modified []byte) {
+// 	// 打开文件，如果不存在就创建，如果存在就追加 (O_APPEND)
+// 	f, err := os.OpenFile("~/.code-switch/debug_intercept.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+// 	if err != nil {
+// 		fmt.Printf("无法打开调试日志文件: %v\n", err)
+// 		return
+// 	}
+// 	defer f.Close()
+
+// 	timestamp := time.Now().Format("2006-01-02 15:04:05")
+
+// 	// 格式化输出内容，加分割线方便看
+// 	logContent := fmt.Sprintf("\n========== [%s] Request Log ==========\n", timestamp)
+// 	logContent += fmt.Sprintf(">>> [原始 Body]:\n%s\n", string(original))
+// 	logContent += fmt.Sprintf("----------------------------------------\n")
+// 	logContent += fmt.Sprintf("<<< [修改后 Body]:\n%s\n", string(modified))
+// 	logContent += fmt.Sprintf("================================================\n\n")
+
+// 	if _, err := f.WriteString(logContent); err != nil {
+// 		fmt.Printf("写入调试日志失败: %v\n", err)
+// 	}
+// }

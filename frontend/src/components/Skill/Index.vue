@@ -46,7 +46,7 @@
             <div class="skill-card-head">
               <div>
                 <p class="skill-card-eyebrow">{{ skill.directory }}</p>
-                <h3>{{ skill.name }}</h3>
+                <!-- <h3>{{ skill.name }}</h3> -->
               </div>
               <div class="skill-card-actions">
                 <button type="button" class="ghost-icon sm" :title="t('components.skill.actions.view')"
@@ -588,7 +588,7 @@ onMounted(() => {
 .skill-list {
   margin-top: 8px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
   gap: 24px;
 }
 
