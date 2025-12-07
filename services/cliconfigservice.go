@@ -356,10 +356,15 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) error {
 	configPath := s.getClaudeConfigPath()
 
-	// 读取现有配置
+	// 读取现有配置（保留用户的其他设置）
 	var data map[string]interface{}
 	if content, err := os.ReadFile(configPath); err == nil {
-		json.Unmarshal(content, &data)
+		// 仅当文件非空时解析
+		if len(content) > 0 {
+			if err := json.Unmarshal(content, &data); err != nil {
+				return fmt.Errorf("settings.json 格式无效: %w", err)
+			}
+		}
 	}
 	if data == nil {
 		data = make(map[string]interface{})
@@ -521,10 +526,15 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) error {
 	configPath := s.getCodexConfigPath()
 
-	// 读取现有配置
+	// 读取现有配置（保留用户的其他设置）
 	var raw map[string]interface{}
 	if content, err := os.ReadFile(configPath); err == nil {
-		toml.Unmarshal(content, &raw)
+		// 仅当文件非空时解析
+		if len(content) > 0 {
+			if err := toml.Unmarshal(content, &raw); err != nil {
+				return fmt.Errorf("config.toml 格式无效: %w", err)
+			}
+		}
 	}
 	if raw == nil {
 		raw = make(map[string]interface{})

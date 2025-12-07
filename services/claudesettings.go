@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,13 +73,22 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 		if err := os.WriteFile(backupPath, content, 0o600); err != nil {
 			return err
 		}
-		// 解析现有配置
-		if err := json.Unmarshal(content, &existingData); err != nil {
-			// 解析失败，使用空配置
+		// 解析现有配置（仅当文件非空时）
+		if len(content) > 0 {
+			if err := json.Unmarshal(content, &existingData); err != nil {
+				// JSON 解析失败，返回错误让用户修复配置文件
+				return fmt.Errorf("settings.json 格式无效，已备份到 %s: %w", backupPath, err)
+			}
+		}
+		if existingData == nil {
 			existingData = make(map[string]interface{})
 		}
-	} else {
+	} else if errors.Is(statErr, os.ErrNotExist) {
+		// 文件不存在，使用空配置
 		existingData = make(map[string]interface{})
+	} else {
+		// 其他 stat 错误（权限等），返回错误避免意外覆盖
+		return fmt.Errorf("无法读取 settings.json: %w", statErr)
 	}
 
 	// 仅更新代理相关字段，保留其他配置（如 model, alwaysThinkingEnabled, enabledPlugins）
