@@ -192,6 +192,9 @@ func main() {
 		},
 	})
 
+	// 设置 NotificationService 的 App 引用，用于发送事件到前端
+	notificationService.SetApp(app)
+
 	app.OnShutdown(func() {
 		_ = providerRelay.Stop()
 
