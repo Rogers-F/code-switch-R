@@ -114,6 +114,13 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 
 	// 根据用户配置的端点拼接目标 URL
 	targetURL := cts.buildTargetURL(&provider, platform)
+	authType := cts.getEffectiveAuthType(&provider, platform)
+
+	// 调试日志：打印最终请求信息
+	fmt.Printf("[DEBUG] 连通性测试请求:\n")
+	fmt.Printf("  targetURL: %s\n", targetURL)
+	fmt.Printf("  authType:  %s\n", authType)
+	fmt.Printf("  reqBody:   %s\n", string(reqBody))
 
 	// 创建 HTTP 请求
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(reqBody))
@@ -126,7 +133,7 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
-		authType := cts.getEffectiveAuthType(&provider, platform)
+		// authType 已在上方获取
 		if authType == "x-api-key" {
 			req.Header.Set("x-api-key", provider.APIKey)
 			req.Header.Set("anthropic-version", "2023-06-01")
@@ -635,6 +642,15 @@ func (cts *ConnectivityTestService) TestProviderManual(
 	endpoint string,
 	authType string,
 ) ManualTestResult {
+	// 调试日志：打印前端传递的参数
+	fmt.Printf("[DEBUG] TestProviderManual 收到参数:\n")
+	fmt.Printf("  platform: %q\n", platform)
+	fmt.Printf("  apiURL:   %q\n", apiURL)
+	fmt.Printf("  apiKey:   %q (len=%d)\n", maskAPIKey(apiKey), len(apiKey))
+	fmt.Printf("  model:    %q\n", model)
+	fmt.Printf("  endpoint: %q\n", endpoint)
+	fmt.Printf("  authType: %q\n", authType)
+
 	// 平台参数校验
 	if platform == "" {
 		platform = "claude"
@@ -660,4 +676,12 @@ func (cts *ConnectivityTestService) TestProviderManual(
 		HTTPCode:  result.HTTPCode,
 		Message:   result.Message,
 	}
+}
+
+// maskAPIKey 隐藏 API Key 的中间部分，用于安全日志输出
+func maskAPIKey(key string) string {
+	if len(key) <= 10 {
+		return "***"
+	}
+	return key[:6] + "..." + key[len(key)-4:]
 }
