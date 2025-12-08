@@ -146,7 +146,7 @@ func (us *UpdateService) CheckUpdate() (*UpdateInfo, error) {
 		Timeout: 15 * time.Second, // 增加超时时间从10秒到15秒
 	}
 
-	releaseURL := "https://api.github.com/repos/Rogers-F/code-switch-R/releases/latest"
+	releaseURL := "https://api.github.com/repos/SimonUTD/code-switch-R/releases/latest"
 
 	req, err := http.NewRequest("GET", releaseURL, nil)
 	if err != nil {
@@ -1197,7 +1197,7 @@ func (us *UpdateService) releaseUpdateLock() {
 
 // downloadAndVerify 下载文件并验证 SHA256
 func (us *UpdateService) downloadAndVerify(assetName string) (string, error) {
-	releaseBaseURL := "https://github.com/Rogers-F/code-switch-R/releases/download"
+	releaseBaseURL := "https://github.com/SimonUTD/code-switch-R/releases/download"
 
 	// 1. 下载主文件
 	mainURL := fmt.Sprintf("%s/%s/%s", releaseBaseURL, us.latestVersion, assetName)
@@ -1302,7 +1302,7 @@ func (us *UpdateService) downloadUpdater(targetPath string) error {
 		log.Printf("[UpdateService] 下载 updater.exe（带校验）失败: %v，尝试直接下载", err)
 
 		// 降级：直接下载（不校验）
-		url := fmt.Sprintf("https://github.com/Rogers-F/code-switch-R/releases/download/%s/updater.exe", us.latestVersion)
+		url := fmt.Sprintf("https://github.com/SimonUTD/code-switch-R/releases/download/%s/updater.exe", us.latestVersion)
 		log.Printf("[UpdateService] 直接下载更新器: %s", url)
 
 		if err := us.downloadFile(url, targetPath); err != nil {
@@ -1329,7 +1329,7 @@ func (us *UpdateService) downloadUpdater(targetPath string) error {
 func calculateTimeout(fileSize int64) int {
 	base := 30 // 基础 30 秒
 	// 每 100MB 增加 10 秒
-	extra := int(fileSize / (100 * 1024 * 1024)) * 10
+	extra := int(fileSize/(100*1024*1024)) * 10
 	return base + extra
 }
 

@@ -8,3 +8,4 @@ bin/
 .serena/
 build/
 CLAUDE.md
+.gocache/

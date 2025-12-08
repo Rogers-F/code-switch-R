@@ -17,12 +17,15 @@ const timeLayout = "2006-01-02 15:04:05"
 
 func init() {
 	home, _ := os.UserHomeDir()
+	const sqliteOptions = "?cache=shared&mode=rwc&_busy_timeout=5000&_journal_mode=WAL"
 
 	if err := xdb.Inits([]xdb.Config{
 		{
-			Name:   "default",
-			Driver: "sqlite",
-			DSN:    filepath.Join(home, ".code-switch", "app.db?cache=shared&mode=rwc&_busy_timeout=10000&_journal_mode=WAL"),
+			Name:        "default",
+			Driver:      "sqlite",
+			DSN:         filepath.Join(home, ".code-switch", "app.db"+sqliteOptions),
+			MaxOpenConn: 1,
+			MaxIdleConn: 1,
 		},
 	}); err != nil {
 		fmt.Printf("初始化 request_log 表失败: %v\n", err)

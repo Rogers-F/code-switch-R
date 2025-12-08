@@ -21,7 +21,7 @@ type GitHubRelease struct {
 func main() {
 	client := &http.Client{}
 
-	releaseURL := "https://api.github.com/repos/Rogers-F/code-switch-R/releases/latest"
+	releaseURL := "https://api.github.com/repos/SimonUTD/code-switch-R/releases/latest"
 
 	req, err := http.NewRequest("GET", releaseURL, nil)
 	if err != nil {
@@ -56,9 +56,9 @@ func main() {
 	// 检查必需的文件是否存在
 	requiredFiles := []string{
 		"CodeSwitch-amd64-installer.exe", // Windows安装器
-		"CodeSwitch.exe",                  // Windows便携版
-		"codeswitch-macos-arm64.zip",      // macOS ARM
-		"codeswitch-macos-amd64.zip",      // macOS Intel
+		"CodeSwitch.exe",                 // Windows便携版
+		"codeswitch-macos-arm64.zip",     // macOS ARM
+		"codeswitch-macos-amd64.zip",     // macOS Intel
 	}
 
 	fmt.Printf("\n🔍 检查必需文件:\n")

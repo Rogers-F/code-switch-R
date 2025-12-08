@@ -20,7 +20,7 @@
 
 ## 下载安装
 
-[最新版本下载](https://github.com/Rogers-F/code-switch-R/releases)
+[最新版本下载](https://github.com/SimonUTD/code-switch-R/releases)
 
 ### Windows
 
