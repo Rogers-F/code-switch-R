@@ -44,6 +44,11 @@
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
+// 定义组件名称，使其可以被其他组件正确导入
+defineOptions({
+  name: 'PageLayout'
+})
+
 interface PageLayoutProps {
   eyebrow?: string      // 页面副标题（如 "PROMPTS"）
   title?: string        // 页面主标题
