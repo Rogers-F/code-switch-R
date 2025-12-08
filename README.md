@@ -1,8 +1,10 @@
 # Code Switch R
 
-集中管理 Claude Code、Codex 和 Gemini CLI 的 AI 供应商配置
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 核心功能
+🚀 **Code Switch R** 是一款专为 AI 开发者打造的桌面应用，集中管理 Claude Code、Codex 和 Gemini CLI 的供应商配置，实现智能故障转移和平滑切换体验。
+
+## ✨ 核心特性
 
 - **平滑切换供应商** - 无需重启 Claude Code/Codex/Gemini CLI，实时切换不同供应商
 - **智能降级机制** - 支持多供应商分级优先级调度（Level 1-10），自动故障转移
@@ -17,69 +19,30 @@
 - **自定义提示词** - 管理 Claude/Codex/Gemini 的系统提示词
 - **环境变量检测** - 自动检测并提示环境变量冲突
 - **自动更新** - 内置更新检查，支持 SHA256 完整性校验
+- **GLM Thinking** - Claude Code 使用官方渠道的GLM 4.6模型，强行开启思维模式
 
-## 下载安装
-
-[最新版本下载](https://github.com/SimonUTD/code-switch-R/releases)
-
-### Windows
-
-| 文件 | 说明 |
-|------|------|
-| `CodeSwitch-amd64-installer.exe` | NSIS 安装器（推荐首次安装） |
-| `CodeSwitch.exe` | 便携版，直接运行 |
-| `updater.exe` | 静默更新辅助程序 |
-
-### macOS
-
-| 文件 | 说明 |
-|------|------|
-| `codeswitch-macos-arm64.zip` | Apple Silicon (M1/M2/M3) |
-| `codeswitch-macos-amd64.zip` | Intel 芯片 |
-
-解压后将 `.app` 拖入 Applications 文件夹。
-
-### Linux
-
-| 文件 | 说明 |
-|------|------|
-| `CodeSwitch.AppImage` | 跨发行版便携格式（推荐） |
-| `codeswitch_*.deb` | Debian/Ubuntu 安装包 |
-| `codeswitch-*.rpm` | RHEL/Fedora/CentOS 安装包 |
-
-**AppImage 运行方式：**
-```bash
-chmod +x CodeSwitch.AppImage
-./CodeSwitch.AppImage
-```
-
-如遇 FUSE 问题：
-```bash
-./CodeSwitch.AppImage --appimage-extract-and-run
-```
-
-**DEB 安装：**
-```bash
-sudo dpkg -i codeswitch_*.deb
-sudo apt-get install -f  # 安装依赖
-```
-
-**RPM 安装：**
-```bash
-sudo rpm -i codeswitch-*.rpm
-# 或使用 dnf
-sudo dnf install codeswitch-*.rpm
-```
-
-> 所有平台均提供 `.sha256` 校验文件，下载后可验证完整性。
-
-## 工作原理
+## 🔧 工作原理
 
 应用启动时在本地 `:18100` 端口创建 HTTP 代理服务器，并自动配置 Claude Code 和 Codex 指向该代理。
+
+### 代理架构
+
+```mermaid
+graph LR
+    A[Claude Code] --> B[localhost:18100]
+    C[Codex] --> B
+    D[Gemini CLI] --> B
+    B --> E[Provider Relay]
+    E --> F[Level 1 供应商]
+    E --> G[Level 2 供应商]
+    E --> H[Level N 供应商]
+```
 
 代理暴露两个关键端点：
 - `/v1/messages` → 转发到 Claude 供应商
 - `/responses` → 转发到 Codex 供应商
+
+### 智能调度算法
 
 请求由 `proxyHandler` 基于优先级分组动态选择 Provider：
 1. 优先尝试 Level 1（最高优先级）的所有供应商
@@ -89,7 +52,7 @@ sudo dnf install codeswitch-*.rpm
 
 这让 CLI 看到的是固定的本地地址，而请求被透明路由到你配置的供应商列表。
 
-## 特色功能
+## 🌟 特色功能
 
 ### 优先级分组调度
 
@@ -127,20 +90,25 @@ sudo dnf install codeswitch-*.rpm
 - **配置预览**: 查看原始配置文件内容（Codex 同时显示 config.toml 和 auth.json）
 - **智能粘贴**: 在空白区域粘贴 JSON/TOML/ENV 格式配置，自动识别并填充字段
 
-## 界面预览
+## 🖼️ 界面预览
 
-![亮色主界面](resources/images/code-switch.png)
-![暗色主界面](resources/images/code-swtich-dark.png)
-![日志亮色](resources/images/code-switch-logs.png)
-![日志暗色](resources/images/code-switch-logs-dark.png)
+| 亮色主界面 | 暗色主界面 |
+|---|---|
+| ![亮色主界面](resources/images/code-switch.png) | ![暗色主界面](resources/images/code-swtich-dark.png) |
 
-## 开发指南
+| 日志亮色 | 日志暗色 |
+|---|---|
+| ![日志亮色](resources/images/code-switch-logs.png) | ![日志暗色](resources/images/code-switch-logs-dark.png) |
 
-### 环境要求
+## 💻 开发指南
 
-- Go 1.24+
-- Node.js 18+
-- Wails 3 CLI: `go install github.com/wailsapp/wails/v3/cmd/wails3@latest`
+### 🔍 环境要求
+
+| 依赖 | 版本要求 | 安装命令 |
+|------|---------|----------|
+| Go | 1.24+ | [官方下载](https://golang.org/dl/) |
+| Node.js | 18+ | [官方下载](https://nodejs.org/) |
+| Wails 3 CLI | latest | `go install github.com/wailsapp/wails/v3/cmd/wails3@latest` |
 
 **Linux 额外依赖：**
 ```bash
@@ -149,16 +117,30 @@ sudo apt-get install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-d
 
 # Fedora
 sudo dnf install gtk3-devel webkit2gtk4.1-devel
+
+# Arch Linux
+sudo pacman -S base-devel webkit2gtk-4.1
 ```
 
-### 开发运行
+### 🚀 快速开始
 
 ```bash
+# 克隆项目
+git clone https://github.com/SimonUTD/code-switch-R.git
+cd code-switch-R
+
+# 安装前端依赖
+cd frontend
+npm install
+cd ..
+
+# 开发运行
 wails3 task dev
 ```
 
-### 构建
+### 📦 构建打包
 
+#### 基础构建
 ```bash
 # 更新构建元数据
 wails3 task common:update:build-assets
@@ -167,8 +149,7 @@ wails3 task common:update:build-assets
 wails3 task package
 ```
 
-### Linux 打包
-
+#### Linux 平台打包
 ```bash
 # 构建二进制
 wails3 task linux:build
@@ -183,15 +164,18 @@ wails3 task linux:create:deb
 wails3 task linux:create:rpm
 ```
 
-### 交叉编译 Windows (macOS)
-
+#### 交叉编译
 ```bash
+# Windows (macOS)
 brew install mingw-w64
 env ARCH=amd64 wails3 task windows:build
 env ARCH=amd64 wails3 task windows:package
+
+# Linux (macOS)
+env ARCH=amd64 wails3 task linux:build
 ```
 
-## 发布
+## 🚀 发布流程
 
 推送 tag 即可触发 GitHub Actions 自动构建：
 
@@ -205,32 +189,63 @@ git push origin v1.2.0
 - Windows: `CodeSwitch-amd64-installer.exe`, `CodeSwitch.exe`, `updater.exe`
 - Linux: `CodeSwitch.AppImage`, `codeswitch_*.deb`, `codeswitch-*.rpm`
 
-## 支持的发行版
+## 🐧 支持的发行版
 
-| 发行版 | 版本 | 格式 |
-|--------|------|------|
-| Ubuntu | 24.04 LTS | DEB / AppImage |
-| Ubuntu | 22.04 LTS | AppImage |
-| Debian | 12 (Bookworm) | DEB / AppImage |
-| Fedora | 39/40 | RPM / AppImage |
-| Linux Mint | 22+ | DEB / AppImage |
-| Arch Linux | Rolling | AppImage |
+| 发行版 | 版本 | 支持格式 | 推荐格式 |
+|--------|------|----------|----------|
+| Ubuntu | 24.04 LTS | DEB / AppImage | DEB |
+| Ubuntu | 22.04 LTS | AppImage | AppImage |
+| Debian | 12 (Bookworm) | DEB / AppImage | DEB |
+| Fedora | 39/40 | RPM / AppImage | RPM |
+| Linux Mint | 22+ | DEB / AppImage | DEB |
+| Arch Linux | Rolling | AppImage | AppImage |
+| openSUSE | Leap/Tumbleweed | AppImage | AppImage |
 
-> Ubuntu 22.04 因 WebKit 版本限制（4.0），建议使用 AppImage。
+> 💡 **提示**: Ubuntu 22.04 因 WebKit 版本限制（4.0），建议使用 AppImage。
 
-## 常见问题
+## ❓ 常见问题
+
+<details>
+<summary>构建相关</summary>
 
 - **macOS 无法打开 .app**: 先执行 `wails3 task common:update:build-assets` 再构建
 - **macOS 交叉编译权限问题**: 终端需要完全磁盘访问权限
 - **Linux AppImage FUSE 问题**: 使用 `--appimage-extract-and-run` 参数运行
 
-## 技术栈
+</details>
 
-- **后端**: Go 1.24 + Gin + SQLite
-- **前端**: Vue 3 + TypeScript + Tailwind CSS
-- **框架**: [Wails 3](https://v3.wails.io)
-- **打包**: nFPM (DEB/RPM), appimagetool (AppImage), NSIS (Windows)
+<details>
+<summary>运行时问题</summary>
 
-## License
+- **代理连接失败**: 检查端口 18100 是否被占用
+- **供应商配置不生效**: 确认 CLI 配置文件中的端点指向 localhost:18100
+- **Gemini OAuth 失败**: 检查系统代理设置和网络连接
 
-MIT
+</details>
+
+## 🛠️ 技术栈
+
+| 组件 | 技术 | 版本 |
+|------|------|------|
+| **后端** | Go | 1.24+ |
+| **Web框架** | Gin | latest |
+| **数据库** | SQLite | 3.x |
+| **前端** | Vue 3 | 3.x |
+| **语言** | TypeScript | 5.x |
+| **样式** | Tailwind CSS | 3.x |
+| **桌面框架** | [Wails 3](https://v3.wails.io) | 3.x |
+| **打包工具** | nFPM / appimagetool / NSIS | latest |
+
+## 📄 License
+
+本项目基于 [MIT License](LICENSE) 开源。
+
+---
+
+<div align="center">
+
+**[⬆ 回到顶部](#code-switch-r)**
+
+Made with ❤️ by [SimonUTD](https://github.com/SimonUTD)
+
+</div>
