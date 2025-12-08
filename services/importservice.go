@@ -1,6 +1,8 @@
 package services
 
 import (
+	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	_ "modernc.org/sqlite" // SQLite driver
 )
 
 // stringMap 是一个宽容的 map[string]string 类型
@@ -224,6 +227,14 @@ func loadCcSwitchConfigFromPath(path string) (*ccSwitchConfig, bool, error) {
 		log.Printf("⚠️  %v", err)
 		return nil, false, err
 	}
+
+	// 检测是否为 SQLite 文件
+	if isSQLiteFile(path) {
+		log.Printf("ℹ️  cc-switch: 检测到 SQLite 数据库: %s", path)
+		return loadCcSwitchConfigFromSQLite(path)
+	}
+
+	// JSON 文件处理（原有逻辑）
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -246,15 +257,225 @@ func loadCcSwitchConfigFromPath(path string) (*ccSwitchConfig, bool, error) {
 	return &cfg, true, nil
 }
 
+// isSQLiteFile 检测文件是否为 SQLite 数据库
+// 必须同时满足：文件存在 + 文件头为 SQLite 魔数
+func isSQLiteFile(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	// 检查文件头（SQLite 魔数: "SQLite format 3\x00"）
+	header := make([]byte, 16)
+	n, err := file.Read(header)
+	if err != nil || n < 16 {
+		return false
+	}
+
+	return bytes.HasPrefix(header, []byte("SQLite format 3"))
+}
+
+// loadCcSwitchConfigFromSQLite 从 SQLite 数据库加载 cc-switch 配置
+func loadCcSwitchConfigFromSQLite(path string) (*ccSwitchConfig, bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		log.Printf("⚠️  cc-switch: 打开 SQLite 失败: %v", err)
+		return nil, true, err
+	}
+	defer db.Close()
+
+	cfg := &ccSwitchConfig{
+		Claude: ccProviderSection{Providers: map[string]ccProviderEntry{}},
+		Codex:  ccProviderSection{Providers: map[string]ccProviderEntry{}},
+		MCP: ccMCPSection{
+			Claude: ccMCPPlatform{Servers: map[string]ccMCPServerEntry{}},
+			Codex:  ccMCPPlatform{Servers: map[string]ccMCPServerEntry{}},
+		},
+	}
+
+	// 1. 读取 providers
+	if err := loadProvidersFromSQLite(db, cfg); err != nil {
+		log.Printf("⚠️  cc-switch: 读取 providers 失败: %v", err)
+		return nil, true, err
+	}
+
+	// 2. 读取 MCP servers
+	if err := loadMCPServersFromSQLite(db, cfg); err != nil {
+		log.Printf("⚠️  cc-switch: 读取 MCP servers 失败: %v", err)
+		// MCP 失败不阻断，继续导入 providers
+	}
+
+	log.Printf("✅ cc-switch: SQLite 数据库加载成功: %s", path)
+	return cfg, true, nil
+}
+
+// loadProvidersFromSQLite 从 SQLite 读取 providers 数据
+func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
+	// 读取 provider_endpoints 作为 URL 补充
+	endpoints := make(map[string]string) // key: "app_type|provider_id" -> url
+	epRows, err := db.Query(`SELECT provider_id, app_type, url FROM provider_endpoints`)
+	if err == nil {
+		defer epRows.Close()
+		for epRows.Next() {
+			var pid, appType, url string
+			if err := epRows.Scan(&pid, &appType, &url); err == nil {
+				url = strings.TrimSpace(url)
+				if url != "" {
+					key := strings.ToLower(appType) + "|" + pid
+					endpoints[key] = url
+				}
+			}
+		}
+	}
+
+	// 读取 providers
+	rows, err := db.Query(`SELECT id, app_type, name, settings_config, COALESCE(website_url, '') FROM providers`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, appType, name, settingsJSON, website string
+		if err := rows.Scan(&id, &appType, &name, &settingsJSON, &website); err != nil {
+			log.Printf("⚠️  cc-switch: 扫描 provider 行失败: %v", err)
+			continue
+		}
+
+		entry := ccProviderEntry{
+			ID:         id,
+			Name:       name,
+			WebsiteURL: website,
+			Settings: ccProviderSetting{
+				Env:  stringMap{},
+				Auth: stringMap{},
+			},
+		}
+
+		// 解析 settings_config JSON
+		var raw map[string]interface{}
+		if err := json.Unmarshal([]byte(settingsJSON), &raw); err == nil {
+			// 解析 env
+			if env, ok := raw["env"].(map[string]interface{}); ok {
+				for k, v := range env {
+					entry.Settings.Env[k] = fmt.Sprint(v)
+				}
+			}
+			// 解析 auth
+			if auth, ok := raw["auth"].(map[string]interface{}); ok {
+				for k, v := range auth {
+					entry.Settings.Auth[k] = fmt.Sprint(v)
+				}
+			}
+			// 解析 config (Codex TOML)
+			if cfgStr, ok := raw["config"].(string); ok {
+				entry.Settings.Config = cfgStr
+			}
+		}
+
+		// 从 provider_endpoints 补充 URL
+		kind := strings.ToLower(strings.TrimSpace(appType))
+		if url := endpoints[kind+"|"+id]; url != "" {
+			if kind == "claude" {
+				// Claude: 补充 ANTHROPIC_BASE_URL
+				if entry.Settings.Env["ANTHROPIC_BASE_URL"] == "" {
+					entry.Settings.Env["ANTHROPIC_BASE_URL"] = url
+				}
+			} else if kind == "codex" {
+				// Codex: 如果没有 Config，生成最小 TOML
+				if entry.Settings.Config == "" {
+					entry.Settings.Config = fmt.Sprintf(
+						"model_provider = \"db\"\n[model_providers.db]\nbase_url = \"%s\"\nname = \"%s\"",
+						url, name,
+					)
+				}
+			}
+		}
+
+		// 添加到对应平台
+		if kind == "codex" {
+			cfg.Codex.Providers[id] = entry
+		} else {
+			cfg.Claude.Providers[id] = entry
+		}
+	}
+
+	return rows.Err()
+}
+
+// loadMCPServersFromSQLite 从 SQLite 读取 MCP servers 数据
+func loadMCPServersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
+	rows, err := db.Query(`
+		SELECT id, name, server_config,
+		       COALESCE(description, ''), COALESCE(homepage, ''),
+		       enabled_claude, enabled_codex
+		FROM mcp_servers
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, name, serverConfigJSON, description, homepage string
+		var enabledClaude, enabledCodex bool
+		if err := rows.Scan(&id, &name, &serverConfigJSON, &description, &homepage, &enabledClaude, &enabledCodex); err != nil {
+			log.Printf("⚠️  cc-switch: 扫描 MCP server 行失败: %v", err)
+			continue
+		}
+
+		// 解析 server_config JSON
+		var serverCfg ccMCPServerConfig
+		if err := json.Unmarshal([]byte(serverConfigJSON), &serverCfg); err != nil {
+			log.Printf("⚠️  cc-switch: 解析 MCP server_config 失败: %v", err)
+			continue
+		}
+
+		entry := ccMCPServerEntry{
+			ID:          id,
+			Name:        name,
+			Homepage:    homepage,
+			Description: description,
+			Server:      serverCfg,
+		}
+
+		// 根据启用状态添加到对应平台
+		if enabledClaude {
+			entry.Enabled = true
+			cfg.MCP.Claude.Servers[name] = entry
+		}
+		if enabledCodex {
+			entry.Enabled = true
+			cfg.MCP.Codex.Servers[name] = entry
+		}
+		// 如果两个平台都未启用，默认添加到两个平台（保持可见性）
+		if !enabledClaude && !enabledCodex {
+			cfg.MCP.Claude.Servers[name] = entry
+			cfg.MCP.Codex.Servers[name] = entry
+		}
+	}
+
+	return rows.Err()
+}
+
 func ccSwitchConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	// 优先检查新版配置文件，回退到旧版
+	// 优先检查 SQLite 数据库（新版 cc-switch），然后是 JSON 配置文件
 	candidates := []string{
-		filepath.Join(home, ".cc-switch", "config.json.migrated"),
-		filepath.Join(home, ".cc-switch", "config.json"),
+		filepath.Join(home, ".cc-switch", "cc-switch.db"),       // 新版 SQLite
+		filepath.Join(home, ".cc-switch", "config.json.migrated"), // 旧版迁移后的 JSON
+		filepath.Join(home, ".cc-switch", "config.json"),          // 旧版 JSON
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
@@ -263,7 +484,7 @@ func ccSwitchConfigPath() (string, error) {
 			return "", err // 权限/IO 等异常立即暴露
 		}
 	}
-	// 未找到现有文件时，默认使用新路径
+	// 未找到现有文件时，默认使用 SQLite 路径
 	return candidates[0], nil
 }
 
