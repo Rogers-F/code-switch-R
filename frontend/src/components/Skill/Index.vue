@@ -370,7 +370,7 @@ onMounted(() => {
 
 .skill-repo-section {
   border: 1px solid var(--mac-border);
-  border-radius: 20px;
+  border-radius: 12px;
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -417,7 +417,7 @@ onMounted(() => {
 
 .skill-repo-form input {
   border: 1px solid var(--mac-border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 8px 12px;
   background: var(--mac-surface);
   color: var(--mac-text);
@@ -588,7 +588,7 @@ onMounted(() => {
 .skill-card {
   background: color-mix(in srgb, var(--mac-surface) 90%, transparent);
   border: 1px solid var(--mac-border);
-  border-radius: 24px;
+  border-radius: 12px;
   padding: 24px;
   display: flex;
   flex-direction: column;

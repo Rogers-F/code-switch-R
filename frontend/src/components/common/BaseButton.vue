@@ -9,7 +9,7 @@ import { computed, useAttrs } from 'vue'
 
 const props = withDefaults(
   defineProps<{
-    variant?: 'primary' | 'outline' | 'danger' | 'ghost'
+    variant?: 'primary' | 'outline' | 'danger'
     type?: 'button' | 'submit' | 'reset'
   }>(),
   {

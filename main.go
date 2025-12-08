@@ -94,23 +94,25 @@ func main() {
 
 	providerService := services.NewProviderService()
 	settingsService := services.NewSettingsService()
-	blacklistService := services.NewBlacklistService(settingsService)
+	autoStartService := services.NewAutoStartService()
+	appSettings := services.NewAppSettingsService(autoStartService)
+	notificationService := services.NewNotificationService(appSettings) // 通知服务
+	blacklistService := services.NewBlacklistService(settingsService, notificationService)
 	geminiService := services.NewGeminiService("127.0.0.1:18100")
-	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, ":18100")
+	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, ":18100")
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
 	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
 	cliConfigService := services.NewCliConfigService(providerRelay.Addr())
 	logService := services.NewLogService()
-	autoStartService := services.NewAutoStartService()
 	updateService := services.NewUpdateService(AppVersion)
-	appSettings := services.NewAppSettingsService(autoStartService)
 	mcpService := services.NewMCPService()
 	skillService := services.NewSkillService()
 	promptService := services.NewPromptService()
 	envCheckService := services.NewEnvCheckService()
 	importService := services.NewImportService(providerService, mcpService)
 	deeplinkService := services.NewDeepLinkService(providerService)
-	speedTestService := services.NewSpeedTestServiceWithAddr(providerRelay.Addr())
+	speedTestService := services.NewSpeedTestService()
+	connectivityTestService := services.NewConnectivityTestService(providerService, blacklistService, settingsService)
 	dockService := dock.New()
 	versionService := NewVersionService()
 	consoleService := services.NewConsoleService()
@@ -126,7 +128,7 @@ func main() {
 	// 启动定时检查（如果启用）
 	if updateService.IsAutoCheckEnabled() {
 		go func() {
-			time.Sleep(10 * time.Second)     // 延迟10秒，等待应用完成初始化
+			time.Sleep(10 * time.Second) // 延迟10秒，等待应用完成初始化
 			updateService.CheckUpdateAsync() // 启动时检查一次
 			updateService.StartDailyCheck()  // 启动每日8点定时检查
 		}()
@@ -146,6 +148,23 @@ func main() {
 		for range ticker.C {
 			if err := blacklistService.AutoRecoverExpired(); err != nil {
 				log.Printf("自动恢复黑名单失败: %v", err)
+			}
+		}
+	}()
+
+	// 根据 AppSettings 配置启动自动连通性检测
+	go func() {
+		time.Sleep(3 * time.Second) // 延迟3秒，等待应用初始化
+		settings, err := appSettings.GetAppSettings()
+		if err != nil {
+			log.Printf("读取应用设置失败: %v", err)
+			return
+		}
+		if settings.AutoConnectivityTest {
+			if err := connectivityTestService.SetAutoTestEnabled(true); err != nil {
+				log.Printf("启动自动连通性检测失败: %v", err)
+			} else {
+				log.Println("✅ 自动连通性检测已启动")
 			}
 		}
 	}()
@@ -178,6 +197,7 @@ func main() {
 			application.NewService(importService),
 			application.NewService(deeplinkService),
 			application.NewService(speedTestService),
+			application.NewService(connectivityTestService),
 			application.NewService(dockService),
 			application.NewService(versionService),
 			application.NewService(geminiService),
@@ -190,6 +210,9 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
+
+	// 设置 NotificationService 的 App 引用，用于发送事件到前端
+	notificationService.SetApp(app)
 
 	app.OnShutdown(func() {
 		_ = providerRelay.Stop()

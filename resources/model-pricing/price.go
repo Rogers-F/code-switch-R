@@ -30,6 +30,7 @@ type Service struct {
 type PricingEntry struct {
 	InputCostPerToken                   float64 `json:"input_cost_per_token"`
 	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
+	OutputCostPerReasoningToken         float64 `json:"output_cost_per_reasoning_token"`
 	CacheCreationInputTokenCost         float64 `json:"cache_creation_input_token_cost"`
 	CacheCreationInputTokenCostAbove1Hr float64 `json:"cache_creation_input_token_cost_above_1hr"`
 	CacheCreationInputTokenCostAbove200 float64 `json:"cache_creation_input_token_cost_above_200k_tokens"`
@@ -43,6 +44,7 @@ type PricingEntry struct {
 type UsageSnapshot struct {
 	InputTokens       int
 	OutputTokens      int
+	ReasoningTokens   int
 	CacheCreateTokens int
 	CacheReadTokens   int
 	CacheCreation     *CacheCreationDetail
@@ -58,6 +60,7 @@ type CacheCreationDetail struct {
 type CostBreakdown struct {
 	InputCost       float64 `json:"input_cost"`
 	OutputCost      float64 `json:"output_cost"`
+	ReasoningCost   float64 `json:"reasoning_cost"`
 	CacheCreateCost float64 `json:"cache_create_cost"`
 	CacheReadCost   float64 `json:"cache_read_cost"`
 	Ephemeral5mCost float64 `json:"ephemeral_5m_cost"`
@@ -128,6 +131,10 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 		breakdown.InputCost = float64(usage.InputTokens) * entry.InputCostPerToken
 		breakdown.OutputCost = float64(usage.OutputTokens) * entry.OutputCostPerToken
 	}
+	// Reasoning tokens cost (for Gemini thinking models, Codex o1/o3, etc.)
+	if usage.ReasoningTokens > 0 && entry.OutputCostPerReasoningToken > 0 {
+		breakdown.ReasoningCost = float64(usage.ReasoningTokens) * entry.OutputCostPerReasoningToken
+	}
 	cacheCreateTokens, cache1hTokens := resolveCacheTokens(usage)
 	cache5mCost := float64(cacheCreateTokens) * entry.CacheCreationInputTokenCost
 	cache1hCost := float64(cache1hTokens) * s.getEphemeral1hPricing(model)
@@ -135,7 +142,7 @@ func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown
 	breakdown.Ephemeral1hCost = cache1hCost
 	breakdown.CacheCreateCost = cache5mCost + cache1hCost
 	breakdown.CacheReadCost = float64(usage.CacheReadTokens) * entry.CacheReadInputTokenCost
-	breakdown.TotalCost = breakdown.InputCost + breakdown.OutputCost + breakdown.CacheCreateCost + breakdown.CacheReadCost
+	breakdown.TotalCost = breakdown.InputCost + breakdown.OutputCost + breakdown.ReasoningCost + breakdown.CacheCreateCost + breakdown.CacheReadCost
 	if breakdown.TotalCost > 0 {
 		breakdown.HasPricing = true
 	}

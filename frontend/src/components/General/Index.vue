@@ -1,8 +1,6 @@
 <template>
   <PageLayout
     :eyebrow="$t('components.general.title.application')"
-    :show-back-button="true"
-    @back="goBack"
   >
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.application') }}</h2>
@@ -39,6 +37,40 @@
               />
               <span></span>
             </label>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.switchNotify')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="switchNotifyEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.switchNotifyHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.connectivity') }}</h2>
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.label.autoConnectivityTest')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="autoConnectivityTestEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.autoConnectivityTestHint') }}</span>
+            </div>
           </ListItem>
         </div>
       </section>
@@ -230,6 +262,7 @@ import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEn
 import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
+import { setAutoTestEnabled } from '../../services/connectivity'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -244,6 +277,8 @@ const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
+const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
+const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const settingsLoading = ref(true)
 const saveBusy = ref(false)
 
@@ -279,18 +314,24 @@ const loadAppSettings = async () => {
     homeTitleVisible.value = data?.show_home_title ?? true
     autoStartEnabled.value = data?.auto_start ?? false
     autoUpdateEnabled.value = data?.auto_update ?? true
+    autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
+    switchNotifyEnabled.value = data?.enable_switch_notify ?? true
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
     localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
     localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
     localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
     homeTitleVisible.value = true
     autoStartEnabled.value = false
     autoUpdateEnabled.value = true
+    autoConnectivityTestEnabled.value = false
+    switchNotifyEnabled.value = true
   } finally {
     settingsLoading.value = false
   }
@@ -305,17 +346,24 @@ const persistAppSettings = async () => {
       show_home_title: homeTitleVisible.value,
       auto_start: autoStartEnabled.value,
       auto_update: autoUpdateEnabled.value,
+      auto_connectivity_test: autoConnectivityTestEnabled.value,
+      enable_switch_notify: switchNotifyEnabled.value,
     }
     await saveAppSettings(payload)
 
     // 同步自动更新设置到 UpdateService
     await setAutoCheckEnabled(autoUpdateEnabled.value)
 
+    // 同步自动连通性检测设置到 ConnectivityTestService
+    await setAutoTestEnabled(autoConnectivityTestEnabled.value)
+
     // 更新缓存
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
     localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
     localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
     localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
 
     window.dispatchEvent(new CustomEvent('app-settings-updated'))
   } catch (error) {

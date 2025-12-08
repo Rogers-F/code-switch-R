@@ -153,6 +153,7 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 		usage := modelpricing.UsageSnapshot{
 			InputTokens:       input,
 			OutputTokens:      output,
+			ReasoningTokens:   reasoning,
 			CacheCreateTokens: cacheCreate,
 			CacheReadTokens:   cacheRead,
 		}
@@ -255,6 +256,7 @@ func (ls *LogService) StatsSince(platform string) (LogStats, error) {
 		usage := modelpricing.UsageSnapshot{
 			InputTokens:       input,
 			OutputTokens:      output,
+			ReasoningTokens:   reasoning,
 			CacheCreateTokens: cacheCreate,
 			CacheReadTokens:   cacheRead,
 		}
@@ -358,6 +360,7 @@ func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, 
 		usage := modelpricing.UsageSnapshot{
 			InputTokens:       input,
 			OutputTokens:      output,
+			ReasoningTokens:   reasoning,
 			CacheCreateTokens: cacheCreate,
 			CacheReadTokens:   cacheRead,
 		}
@@ -399,6 +402,7 @@ func (ls *LogService) decorateCost(logEntry *ReqeustLog) {
 	usage := modelpricing.UsageSnapshot{
 		InputTokens:       logEntry.InputTokens,
 		OutputTokens:      logEntry.OutputTokens,
+		ReasoningTokens:   logEntry.ReasoningTokens,
 		CacheCreateTokens: logEntry.CacheCreateTokens,
 		CacheReadTokens:   logEntry.CacheReadTokens,
 	}
@@ -406,6 +410,7 @@ func (ls *LogService) decorateCost(logEntry *ReqeustLog) {
 	logEntry.HasPricing = cost.HasPricing
 	logEntry.InputCost = cost.InputCost
 	logEntry.OutputCost = cost.OutputCost
+	logEntry.ReasoningCost = cost.ReasoningCost
 	logEntry.CacheCreateCost = cost.CacheCreateCost
 	logEntry.CacheReadCost = cost.CacheReadCost
 	logEntry.Ephemeral5mCost = cost.Ephemeral5mCost

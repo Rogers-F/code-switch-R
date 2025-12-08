@@ -392,7 +392,7 @@ html.dark .platform-tab:hover {
   padding: 16px 20px;
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);
-  border-radius: 16px;
+  border-radius: 12px;
   transition: all 0.15s ease;
 }
 
@@ -473,7 +473,7 @@ html.dark .toggle-switch {
   height: 34px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: 12px;
   color: var(--mac-text-secondary);
   cursor: pointer;
   display: flex;

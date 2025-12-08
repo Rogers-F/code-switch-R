@@ -16,6 +16,8 @@ export type AutomationCard = {
   level?: number
   // CLI 配置：存储供应商关联的 CLI 可编辑配置
   cliConfig?: Record<string, any>
+  // 连通性检测开关：是否启用自动连通性检测
+  connectivityCheck?: boolean
 }
 
 export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> = {

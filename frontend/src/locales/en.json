@@ -61,7 +61,11 @@
     "start": "Start Test",
     "testing": "Testing",
     "empty": "Add API endpoints to start testing",
-    "failed": "Failed"
+    "failed": "Failed",
+    "syncButton": "Refresh Provider Endpoints",
+    "syncing": "Syncing...",
+    "loadingTip": "Syncing provider endpoints from home page...",
+    "syncError": "Sync failed, please refresh manually"
   },
   "envcheck": {
     "hero": {
@@ -95,9 +99,9 @@
       },
       "modelMapping": {
         "label": "Model Mapping",
-        "tooltip": "Map external model names to provider-specific names. Supports wildcard expansion",
-        "keyPlaceholder": "External model (e.g., claude-*)",
-        "valuePlaceholder": "Internal model (e.g., anthropic/claude-*)",
+        "tooltip": "Map CLI requested model names to provider-specific names. Supports wildcard expansion",
+        "keyPlaceholder": "CLI model (e.g., claude-*)",
+        "valuePlaceholder": "Provider model (e.g., kimi-k2-thinking)",
         "add": "Add",
         "remove": "Remove mapping",
         "examples": {
@@ -174,7 +178,8 @@
         "cost": "Cost",
         "successRate": "Success rate",
         "loading": "Refreshing...",
-        "noData": "No data yet today"
+        "noData": "No data yet today",
+        "lastUsed": "In Use"
       },
       "form": {
         "createTitle": "Add vendor",
@@ -186,7 +191,8 @@
           "officialSite": "Official site",
           "icon": "Icon",
           "enabled": "Enabled",
-          "level": "Priority Level"
+          "level": "Priority Level",
+          "connectivityCheck": "Connectivity Check"
         },
         "placeholders": {
           "name": "e.g. AICoding.sh",
@@ -196,7 +202,8 @@
           "icon": "e.g. aicoding, kimi"
         },
         "hints": {
-          "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc."
+          "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
+          "connectivityCheck": "When enabled, connectivity to this provider will be tested periodically; enabling this may consume a small amount of tokens"
         },
         "actions": {
           "cancel": "Cancel",
@@ -211,7 +218,8 @@
         "confirmDeleteMessage": "Are you sure you want to remove {name}? This action cannot be undone.",
         "errors": {
           "invalidUrl": "Please enter a valid API URL"
-        }
+        },
+        "saveFailed": "Failed to save provider configuration"
       },
       "levelDesc": {
         "highest": "Highest Priority",
@@ -224,6 +232,28 @@
         "lower": "Lower Priority",
         "veryLow": "Very Low Priority",
         "lowest": "Lowest Priority"
+      },
+      "connectivity": {
+        "available": "Available",
+        "degraded": "Degraded",
+        "unavailable": "Unavailable",
+        "noData": "No data",
+        "status": {
+          "available": "Available",
+          "degraded": "Degraded",
+          "unavailable": "Unavailable",
+          "missing": "No data"
+        },
+        "subStatus": {
+          "slowLatency": "Slow latency",
+          "rateLimit": "Rate limited",
+          "serverError": "Server error",
+          "clientError": "Client error",
+          "authError": "Auth error",
+          "invalidRequest": "Invalid request",
+          "networkError": "Network error",
+          "contentMismatch": "Content mismatch"
+        }
       },
       "blacklist": {
         "blocked": "Blocked",
@@ -302,7 +332,11 @@
       "streamOff": "Single response",
       "back": "Back to home",
       "nextRefresh": "Next refresh in {seconds}s",
-      "query": "Query"
+      "query": "Query",
+      "costDetail": {
+        "title": "Today's Cost Breakdown",
+        "empty": "No cost records today"
+      }
     },
     "general": {
       "title": {
@@ -311,7 +345,8 @@
         "power": "Permission settings",
         "update": "Application update",
         "blacklist": "Blacklist Settings",
-        "dataImport": "Data Import"
+        "dataImport": "Data Import",
+        "connectivity": "Connectivity Test"
       },
       "label": {
         "assistant_access": "Accessibility permissions",
@@ -324,11 +359,15 @@
         "heatmap": "Show dashboard heatmap",
         "homeTitle": "Show home title",
         "autoStart": "Launch at login",
+        "switchNotify": "Switch Notification",
+        "switchNotifyHint": "Send system notification when provider switches or gets blacklisted",
         "autoUpdate": "Automatic update",
+        "autoConnectivityTest": "Auto connectivity test",
+        "autoConnectivityTestHint": "Test enabled providers every minute",
         "lastCheck": "Last check",
         "currentVersion": "Current version",
         "latestVersion": "Latest version",
-        "checkNow": "Check now",
+        "checkNow": "Check",
         "manualUpdate": "Manual update",
         "blacklistThreshold": "Failure threshold",
         "blacklistDuration": "Blacklist duration",
@@ -354,7 +393,7 @@
       "update": {
         "checkFailed": "Check failed {count} times in a row",
         "checking": "Checking...",
-        "checkNow": "Check now",
+        "checkNow": "Check",
         "downloading": "Downloading {progress}%",
         "downloadAndInstall": "Download and install",
         "installAndRestart": "Install and restart"
@@ -368,7 +407,7 @@
         "configNotFound": "Config file not found",
         "pendingCount": "{providers} providers, {mcp} MCPs",
         "action": "Import action",
-        "importBtn": "Import config",
+        "importBtn": "Import",
         "importing": "Importing...",
         "success": "Imported: {providers} providers, {mcp} MCP servers",
         "nothingToImport": "Nothing to import (all may have been imported)",

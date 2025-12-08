@@ -556,7 +556,7 @@ onMounted(() => {
   padding: 16px;
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);
-  border-radius: 10px;
+  border-radius: 12px;;
   cursor: pointer;
   transition: all 0.2s ease;
 }

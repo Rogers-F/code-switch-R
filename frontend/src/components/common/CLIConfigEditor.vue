@@ -1018,7 +1018,7 @@ onMounted(() => {
   right: 0;
   bottom: 0;
   background-color: var(--mac-border);
-  border-radius: 22px;
+  border-radius: 12px;
   transition: 0.2s;
 }
 
@@ -1094,7 +1094,7 @@ onMounted(() => {
   margin-left: auto;
   font-size: 11px;
   padding: 2px 6px;
-  border-radius: 10px;
+  border-radius: 12px;;
   background: var(--mac-surface-strong);
   color: var(--mac-text-secondary);
 }

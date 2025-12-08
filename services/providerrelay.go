@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/daodao97/xgo/xdb"
@@ -19,18 +20,29 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+// LastUsedProvider 最后使用的供应商信息
+// @author sm
+type LastUsedProvider struct {
+	Platform     string `json:"platform"`      // claude/codex/gemini
+	ProviderName string `json:"provider_name"` // 供应商名称
+	UpdatedAt    int64  `json:"updated_at"`    // 更新时间（毫秒）
+}
+
 type ProviderRelayService struct {
-	providerService  *ProviderService
-	geminiService    *GeminiService
-	blacklistService *BlacklistService
-	server           *http.Server
-	addr             string
+	providerService     *ProviderService
+	geminiService       *GeminiService
+	blacklistService    *BlacklistService
+	notificationService *NotificationService
+	server              *http.Server
+	addr                string
+	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
+	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
 
-func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, addr string) *ProviderRelayService {
+func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
 	}
@@ -39,11 +51,49 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 	// 此处不再调用 xdb.Inits()、ensureRequestLogTable()、ensureBlacklistTables()
 
 	return &ProviderRelayService{
-		providerService:  providerService,
-		geminiService:    geminiService,
-		blacklistService: blacklistService,
-		addr:             addr,
+		providerService:     providerService,
+		geminiService:       geminiService,
+		blacklistService:    blacklistService,
+		notificationService: notificationService,
+		addr:                addr,
+		lastUsed: map[string]*LastUsedProvider{
+			"claude": nil,
+			"codex":  nil,
+			"gemini": nil,
+		},
 	}
+}
+
+// setLastUsedProvider 记录最后使用的供应商
+// @author sm
+func (prs *ProviderRelayService) setLastUsedProvider(platform, providerName string) {
+	prs.lastUsedMu.Lock()
+	defer prs.lastUsedMu.Unlock()
+	prs.lastUsed[platform] = &LastUsedProvider{
+		Platform:     platform,
+		ProviderName: providerName,
+		UpdatedAt:    time.Now().UnixMilli(),
+	}
+}
+
+// GetLastUsedProvider 获取指定平台最后使用的供应商
+// @author sm
+func (prs *ProviderRelayService) GetLastUsedProvider(platform string) *LastUsedProvider {
+	prs.lastUsedMu.RLock()
+	defer prs.lastUsedMu.RUnlock()
+	return prs.lastUsed[platform]
+}
+
+// GetAllLastUsedProviders 获取所有平台最后使用的供应商
+// @author sm
+func (prs *ProviderRelayService) GetAllLastUsedProviders() map[string]*LastUsedProvider {
+	prs.lastUsedMu.RLock()
+	defer prs.lastUsedMu.RUnlock()
+	result := make(map[string]*LastUsedProvider)
+	for k, v := range prs.lastUsed {
+		result[k] = v
+	}
+	return result
 }
 
 func (prs *ProviderRelayService) Start() error {
@@ -105,6 +155,13 @@ func (prs *ProviderRelayService) validateConfig() []string {
 				(p.ModelMapping == nil || len(p.ModelMapping) == 0) {
 				warnings = append(warnings, fmt.Sprintf(
 					"[%s/%s] 未配置 supportedModels 或 modelMapping，将假设支持所有模型（可能导致降级失败）",
+					kind, p.Name))
+			}
+
+			// 检查是否只配置了映射但没有白名单
+			if len(p.ModelMapping) > 0 && len(p.SupportedModels) == 0 {
+				warnings = append(warnings, fmt.Sprintf(
+					"[%s/%s] 配置了 modelMapping 但未配置 supportedModels，映射目标将不做校验，请确认目标模型在供应商处可用",
 					kind, p.Name))
 			}
 		}
@@ -286,6 +343,8 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				if err := prs.blacklistService.RecordSuccess(kind, firstProvider.Name); err != nil {
 					fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
 				}
+				// 记录最后使用的供应商
+				prs.setLastUsedProvider(kind, firstProvider.Name)
 				return
 			}
 
@@ -362,6 +421,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
 					}
 
+					// 记录最后使用的供应商
+					prs.setLastUsedProvider(kind, provider.Name)
+
 					return // 成功，立即返回
 				}
 
@@ -383,6 +445,31 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				} else if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
 					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 				}
+
+				// 发送切换通知：检查是否有下一个可用的 provider
+				if prs.notificationService != nil {
+					nextProvider := ""
+					// 先查找同级别的下一个
+					if i+1 < len(providersInLevel) {
+						nextProvider = providersInLevel[i+1].Name
+					} else {
+						// 查找下一个 level 的第一个 provider
+						for _, nextLevel := range levels {
+							if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
+								nextProvider = levelGroups[nextLevel][0].Name
+								break
+							}
+						}
+					}
+					if nextProvider != "" {
+						prs.notificationService.NotifyProviderSwitch(SwitchNotification{
+							FromProvider: provider.Name,
+							ToProvider:   nextProvider,
+							Reason:       errorMsg,
+							Platform:     kind,
+						})
+					}
+				}
 			}
 
 			fmt.Printf("[WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
@@ -397,9 +484,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			totalAttempts, lastProvider, errorMsg)
 
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
-			"last_provider":  lastProvider,
-			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
+			"error":         fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
+			"last_provider": lastProvider,
+			"last_duration": fmt.Sprintf("%.2fs", lastDuration.Seconds()),
 			"total_attempts": totalAttempts,
 		})
 	}
@@ -675,6 +762,7 @@ type ReqeustLog struct {
 	CreatedAt         string  `json:"created_at"`
 	InputCost         float64 `json:"input_cost"`
 	OutputCost        float64 `json:"output_cost"`
+	ReasoningCost     float64 `json:"reasoning_cost"`
 	CacheCreateCost   float64 `json:"cache_create_cost"`
 	CacheReadCost     float64 `json:"cache_read_cost"`
 	Ephemeral5mCost   float64 `json:"ephemeral_5m_cost"`
@@ -730,6 +818,11 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 	if v := int(usage.Get("cachedContentTokenCount").Int()); v > reqLog.CacheReadTokens {
 		reqLog.CacheReadTokens = v
 	}
+	// Gemini thinking/reasoning tokens (thoughtsTokenCount)
+	// 参考: https://ai.google.dev/gemini-api/docs/thinking
+	if v := int(usage.Get("thoughtsTokenCount").Int()); v > reqLog.ReasoningTokens {
+		reqLog.ReasoningTokens = v
+	}
 
 	// 若仅提供 totalTokenCount，按 total - input 估算输出 token
 	total := usage.Get("totalTokenCount").Int()
@@ -742,7 +835,7 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 // 【修复】维护跨 chunk 缓冲，确保完整 SSE 事件解析
 // Gemini SSE 格式: "data: {json}\n\n" 或 "data: [DONE]\n\n"
 func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *ReqeustLog) error {
-	buf := make([]byte, 8192)   // 增大缓冲区减少系统调用
+	buf := make([]byte, 8192) // 增大缓冲区减少系统调用
 	var lineBuf strings.Builder // 跨 chunk 行缓冲
 
 	for {
@@ -985,6 +1078,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			ok, err := prs.forwardGeminiRequest(c, firstProvider, endpoint, bodyBytes, isStream, requestLog)
 			if ok {
 				_ = prs.blacklistService.RecordSuccess("gemini", firstProvider.Name)
+				// 记录最后使用的供应商
+				prs.setLastUsedProvider("gemini", firstProvider.Name)
 			} else {
 				_ = prs.blacklistService.RecordFailure("gemini", firstProvider.Name)
 				if requestLog.HttpCode == 0 {
@@ -1015,6 +1110,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				ok, errMsg := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 				if ok {
 					_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
+					// 记录最后使用的供应商
+					prs.setLastUsedProvider("gemini", provider.Name)
 					fmt.Printf("[Gemini] ✓ 请求完成 | Provider: %s | 总耗时: %.2fs\n", provider.Name, time.Since(start).Seconds())
 					return // 成功，退出
 				}

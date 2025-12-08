@@ -24,6 +24,7 @@ defineProps<{
   justify-content: space-between;
   padding: 14px 18px;
   gap: 16px;
+  border-radius: 10rpx;
 }
 
 .mac-list-text {

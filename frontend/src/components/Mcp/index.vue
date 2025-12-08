@@ -70,17 +70,40 @@
             </div>
 
             <div class="mcp-platforms">
-              <div class="platform-toggle" v-for="option in platformOptions" :key="option.id">
-                <span class="platform-icon-label">{{ option.id === 'claude-code' ? 'Claude' : 'Codex' }}</span>
-                <label class="mac-switch sm">
-                  <input type="checkbox" :checked="platformEnabled(server, option.id)" :disabled="saveBusy"
-                    @change="onPlatformToggle(server, option.id, $event)" />
-                  <span></span>
-                </label>
-              </div>
-            </div>
+              <div v-for="option in platformOptions" :key="option.id" class="platform-row">
+                <div class="platform-info">
+                  <span class="platform-label">{{ option.label }}</span>
+                  <div class="platform-controls">
+                    <span class="platform-status" :class="{ active: platformActive(server, option.id) }">
+                      {{ platformActive(server, option.id) ? t('components.mcp.status.active') :
+                        t('components.mcp.status.inactive') }}
+                    </span>
+                    <label class="mac-switch sm">
+                      <input type="checkbox" :checked="platformEnabled(server, option.id)" :disabled="saveBusy"
+                        @change="onPlatformToggle(server, option.id, $event)" />
+                      <span></span>
+                    </label>
+                  </div>
+                </div>
 
-            <div class="card-actions">
+                <div class="card-actions">
+                  <button class="ghost-icon" :aria-label="t('components.mcp.list.edit')" @click="openEditModal(server)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 21v-3.5L15.5 6.5a2 2 0 012.83 0l.67.67a2 2 0 010 2.83L7.5 21H4z" fill="none"
+                        stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
+                  <button class="ghost-icon" :aria-label="t('components.mcp.list.delete')"
+                    @click="requestDelete(server)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
+                        fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </article>
         </div>
@@ -278,7 +301,6 @@
         </BaseButton>
       </footer>
     </BaseModal>
-
   </PageLayout>
 </template>
 
@@ -923,7 +945,7 @@ onMounted(() => {
   align-items: center;
   width: 48px;
   height: 48px;
-  border-radius: 14px;
+  border-radius: 12px;
   overflow: hidden;
 }
 

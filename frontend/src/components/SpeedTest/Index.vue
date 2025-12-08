@@ -419,7 +419,7 @@ onMounted(() => {
   padding: 16px 20px;
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);
-  border-radius: 16px;
+  border-radius: 12px;
   transition: all 0.15s ease;
 }
 
