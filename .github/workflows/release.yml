@@ -18,6 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Update version from tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Updating version to: $VERSION"
+          sed -i '' "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          echo "Updated version_service.go:"
+          grep "AppVersion" version_service.go
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
@@ -69,6 +77,27 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Update version from tag
+        shell: pwsh
+        run: |
+          $VERSION = "${{ github.ref_name }}".TrimStart('v')
+          Write-Host "Updating version to: $VERSION"
+
+          # Update version_service.go
+          $content = Get-Content version_service.go -Raw
+          $content = $content -replace 'const AppVersion = "v[^"]*"', "const AppVersion = `"v$VERSION`""
+          Set-Content version_service.go $content
+          Write-Host "Updated version_service.go:"
+          Select-String "AppVersion" version_service.go
+
+          # Update build/windows/info.json
+          $json = Get-Content build/windows/info.json -Raw | ConvertFrom-Json
+          $json.fixed.file_version = $VERSION
+          $json.info.'0000'.ProductVersion = $VERSION
+          $json | ConvertTo-Json -Depth 10 | Set-Content build/windows/info.json
+          Write-Host "Updated build/windows/info.json:"
+          Get-Content build/windows/info.json
 
       - uses: actions/setup-go@v5
         with:
@@ -157,6 +186,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Update version from tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Updating version to: $VERSION"
+          sed -i "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          echo "Updated version_service.go:"
+          grep "AppVersion" version_service.go
 
       - uses: actions/setup-go@v5
         with:
