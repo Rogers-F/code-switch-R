@@ -141,9 +141,42 @@
         "label": "Claude proxy",
         "hostClaude": "托管 Claude Code",
         "hostCodex": "托管 Codex",
+        "hostGemini": "托管 Gemini CLI",
+        "hostOthers": "托管自定义 CLI",
         "tooltip": "通过本地转发托管 API 访问，统一管理密钥与配额。",
         "statusOn": "已托管",
         "statusOff": "未托管"
+      },
+      "customCli": {
+        "selectToolFirst": "请先选择一个 CLI 工具",
+        "noTools": "暂无自定义 CLI 工具",
+        "addTool": "添加 CLI 工具",
+        "toolName": "工具名称",
+        "toolNamePlaceholder": "例如：Droid、RooCode",
+        "configFiles": "配置文件",
+        "proxySettings": "代理注入设置",
+        "selectTool": "选择 CLI 工具",
+        "createTitle": "新建 CLI 工具",
+        "editTitle": "编辑 CLI 工具",
+        "deleteTitle": "删除 CLI 工具",
+        "deleteMessage": "确认删除 {name} 吗？此操作不可撤销。",
+        "primaryConfig": "主配置文件",
+        "labelPlaceholder": "配置文件标签",
+        "pathPlaceholder": "配置文件路径，如 ~/.droid/config.json",
+        "primary": "主文件",
+        "selectConfigFile": "选择目标配置文件",
+        "unnamed": "未命名",
+        "baseUrlFieldPlaceholder": "Base URL 字段路径，如 env.ANTHROPIC_BASE_URL",
+        "authTokenFieldPlaceholder": "认证 Token 字段路径（可选）",
+        "proxyHint": "代理注入会将本地代理地址写入指定的配置文件字段",
+        "nameRequired": "请输入工具名称",
+        "configRequired": "请至少添加一个有效的配置文件路径",
+        "createSuccess": "CLI 工具创建成功",
+        "updateSuccess": "CLI 工具更新成功",
+        "deleteSuccess": "CLI 工具已删除",
+        "saveFailed": "保存 CLI 工具失败",
+        "deleteFailed": "删除 CLI 工具失败",
+        "invalidProxyTarget": "代理注入目标配置文件无效"
       },
       "logs": {
         "view": "查看日志",
@@ -700,7 +733,9 @@
       "previewApply": "应用",
       "previewReset": "还原",
       "previewParseError": "配置格式无效，请检查语法",
-      "previewApplySuccess": "配置已应用"
+      "previewApplySuccess": "配置已应用",
+      "saveAllFailed": "所有配置文件保存失败",
+      "savePartialSuccess": "成功 {success} 个，失败 {fail} 个"
     }
   }
 }

@@ -1,3 +1,23 @@
+# Code Switch v2.0.0
+
+## 新功能
+- **自定义 CLI 工具支持（Others Tab）**：新增"托管自定义 CLI"功能，支持为任意 AI CLI 工具（如 Droid、RooCode 等）配置代理托管。用户可以自定义配置文件路径、格式（JSON/TOML/ENV）和代理注入字段，实现统一的供应商管理。
+- **多配置文件编辑器**：支持为每个自定义 CLI 工具管理多个配置文件，提供实时编辑、格式校验和一键保存功能。
+
+## 修复
+- **自定义 CLI 代理路由**：修复自定义 CLI 工具的代理路由 `/custom/:toolId/v1/messages`，确保请求正确转发到供应商。
+- **代理注入 URL 格式**：修复代理注入时 URL 路径拼接问题，确保生成正确的 `http://127.0.0.1:18100/custom/{toolId}` 格式。
+- **Windows 路径扩展**：修复 Windows 系统下 `~\` 路径前缀的展开问题，正确识别用户主目录。
+- **前端 toast 提示**：修复创建/更新 CLI 工具后的成功提示显示。
+- **Claude 代理开关状态检测**：修复刷新后 Claude 代理开关显示为关闭的问题。根本原因是 Claude CLI 可能覆盖 `ANTHROPIC_AUTH_TOKEN`，现改为仅检查 `ANTHROPIC_BASE_URL` 是否指向本地代理。
+
+## 技术改进
+- 新增 `CustomCliService` 服务，提供完整的 CRUD 和代理状态管理
+- 前端新增 `CustomCliConfigEditor` 组件，支持多文件编辑和格式校验
+- 中英文国际化支持完善
+
+---
+
 # Code Switch v1.5.4
 
 ## 更新亮点

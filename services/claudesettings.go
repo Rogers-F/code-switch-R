@@ -52,11 +52,16 @@ func (css *ClaudeSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
 		return status, nil
 	}
 	// 将 env 值转为字符串进行比较（nil 时返回空字符串）
-	authToken := anyToString(env["ANTHROPIC_AUTH_TOKEN"])
 	baseURLVal := anyToString(env["ANTHROPIC_BASE_URL"])
 	baseURL := css.baseURL()
-	enabled := strings.EqualFold(authToken, claudeAuthTokenValue) &&
-		strings.EqualFold(baseURLVal, baseURL)
+	// 只检查 base_url 是否指向本地代理，因为：
+	// 1. base_url 是决定代理是否生效的关键字段
+	// 2. auth_token 可能被 Claude CLI 覆盖，但不影响代理功能
+	// 去除尾随斜杠以避免用户手动编辑时的小差异导致状态误判
+	enabled := strings.EqualFold(
+		strings.TrimSuffix(strings.TrimSpace(baseURLVal), "/"),
+		strings.TrimSuffix(strings.TrimSpace(baseURL), "/"),
+	)
 	status.Enabled = enabled
 	return status, nil
 }

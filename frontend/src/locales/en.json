@@ -140,9 +140,42 @@
         "label": "Claude proxy",
         "hostClaude": "Host Claude Code",
         "hostCodex": "Host Codex",
+        "hostGemini": "Host Gemini CLI",
+        "hostOthers": "Host Custom CLI",
         "tooltip": "Route traffic through the local relay to manage API keys centrally.",
         "statusOn": "Managed",
         "statusOff": "Not managed"
+      },
+      "customCli": {
+        "selectToolFirst": "Please select a CLI tool first",
+        "noTools": "No custom CLI tools yet",
+        "addTool": "Add CLI Tool",
+        "toolName": "Tool Name",
+        "toolNamePlaceholder": "e.g., Droid, RooCode",
+        "configFiles": "Config Files",
+        "proxySettings": "Proxy Injection Settings",
+        "selectTool": "Select CLI Tool",
+        "createTitle": "New CLI Tool",
+        "editTitle": "Edit CLI Tool",
+        "deleteTitle": "Delete CLI Tool",
+        "deleteMessage": "Are you sure you want to delete {name}? This action cannot be undone.",
+        "primaryConfig": "Primary Config",
+        "labelPlaceholder": "Config file label",
+        "pathPlaceholder": "Config file path, e.g., ~/.droid/config.json",
+        "primary": "Primary",
+        "selectConfigFile": "Select target config file",
+        "unnamed": "Unnamed",
+        "baseUrlFieldPlaceholder": "Base URL field path, e.g., env.ANTHROPIC_BASE_URL",
+        "authTokenFieldPlaceholder": "Auth token field path (optional)",
+        "proxyHint": "Proxy injection writes the local proxy address to the specified config file fields",
+        "nameRequired": "Please enter a tool name",
+        "configRequired": "Please add at least one valid config file path",
+        "createSuccess": "CLI tool created successfully",
+        "updateSuccess": "CLI tool updated successfully",
+        "deleteSuccess": "CLI tool deleted",
+        "saveFailed": "Failed to save CLI tool",
+        "deleteFailed": "Failed to delete CLI tool",
+        "invalidProxyTarget": "Invalid proxy injection target config file"
       },
       "logs": {
         "view": "View logs",
@@ -699,7 +732,9 @@
       "previewApply": "Apply",
       "previewReset": "Reset",
       "previewParseError": "Invalid config format, please check syntax",
-      "previewApplySuccess": "Config applied successfully"
+      "previewApplySuccess": "Config applied successfully",
+      "saveAllFailed": "All config files failed to save",
+      "savePartialSuccess": "{success} saved, {fail} failed"
     }
   }
 }

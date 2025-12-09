@@ -248,6 +248,83 @@
           </button>
         </div>
       </div>
+
+      <!-- 'others' Tab: CLI 工具选择器 -->
+      <div v-if="activeTab === 'others'" class="cli-tool-selector">
+        <div class="tool-selector-row">
+          <select
+            v-model="selectedToolId"
+            class="tool-select"
+            @change="onToolSelect"
+          >
+            <option v-if="customCliTools.length === 0" value="" disabled>
+              {{ t('components.main.customCli.noTools') }}
+            </option>
+            <option
+              v-for="tool in customCliTools"
+              :key="tool.id"
+              :value="tool.id"
+            >
+              {{ tool.name }}
+            </option>
+          </select>
+          <button
+            class="ghost-icon add-tool-btn"
+            :data-tooltip="t('components.main.customCli.addTool')"
+            @click="openCliToolModal"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 5v14M5 12h14"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                fill="none"
+              />
+            </svg>
+          </button>
+          <button
+            v-if="selectedToolId"
+            class="ghost-icon"
+            :data-tooltip="t('components.main.form.editTitle')"
+            @click="editCurrentCliTool"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M11.983 2.25a1.125 1.125 0 011.077.81l.563 2.101a7.482 7.482 0 012.326 1.343l2.08-.621a1.125 1.125 0 011.356.651l1.313 3.207a1.125 1.125 0 01-.442 1.339l-1.86 1.205a7.418 7.418 0 010 2.686l1.86 1.205a1.125 1.125 0 01.442 1.339l-1.313 3.207a1.125 1.125 0 01-1.356.651l-2.08-.621a7.482 7.482 0 01-2.326 1.343l-.563 2.101a1.125 1.125 0 01-1.077.81h-2.634a1.125 1.125 0 01-1.077-.81l-.563-2.101a7.482 7.482 0 01-2.326-1.343l-2.08.621a1.125 1.125 0 01-1.356-.651l-1.313-3.207a1.125 1.125 0 01.442-1.339l1.86-1.205a7.418 7.418 0 010-2.686l-1.86-1.205a1.125 1.125 0 01-.442-1.339l1.313-3.207a1.125 1.125 0 011.356-.651l2.08.621a7.482 7.482 0 012.326-1.343l.563-2.101a1.125 1.125 0 011.077-.81h2.634z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+          <button
+            v-if="selectedToolId"
+            class="ghost-icon"
+            :data-tooltip="t('components.main.form.actions.delete')"
+            @click="deleteCurrentCliTool"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <p v-if="customCliTools.length === 0" class="no-tools-hint">
+          {{ t('components.main.customCli.noTools') }} - {{ t('components.main.customCli.addTool') }}
+        </p>
+      </div>
+
       <div class="automation-list" @dragover.prevent>
         <article
           v-for="card in activeCards"
@@ -448,6 +525,15 @@
           </div>
         </article>
       </div>
+
+      <!-- 自定义 CLI 工具配置文件编辑器 -->
+      <CustomCliConfigEditor
+        v-if="activeTab === 'others' && selectedToolId && selectedCustomCliTool"
+        :tool-id="selectedToolId"
+        :tool-name="selectedCustomCliTool.name"
+        :config-files="selectedCustomCliTool.configFiles"
+        @saved="onConfigFileSaved"
+      />
       </section>
 
       <BaseModal
@@ -699,6 +785,160 @@
         </BaseButton>
       </footer>
       </BaseModal>
+
+      <!-- CLI 工具配置模态框 -->
+      <BaseModal
+        :open="cliToolModalState.open"
+        :title="cliToolModalState.editingId ? t('components.main.customCli.editTitle') : t('components.main.customCli.createTitle')"
+        @close="closeCliToolModal"
+      >
+        <form class="vendor-form cli-tool-form" @submit.prevent="submitCliToolModal">
+          <label class="form-field">
+            <span>{{ t('components.main.customCli.toolName') }}</span>
+            <BaseInput
+              v-model="cliToolModalState.form.name"
+              type="text"
+              :placeholder="t('components.main.customCli.toolNamePlaceholder')"
+              required
+            />
+          </label>
+
+          <!-- 配置文件列表 -->
+          <div class="form-field">
+            <div class="field-header">
+              <span>{{ t('components.main.customCli.configFiles') }}</span>
+              <button type="button" class="add-btn" @click="addConfigFile">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" />
+                </svg>
+              </button>
+            </div>
+            <div class="config-files-list">
+              <div
+                v-for="(cf, idx) in cliToolModalState.form.configFiles"
+                :key="cf.id"
+                class="config-file-item"
+              >
+                <div class="config-file-row">
+                  <BaseInput
+                    v-model="cf.label"
+                    class="config-label-input"
+                    :placeholder="t('components.main.customCli.labelPlaceholder')"
+                  />
+                  <select v-model="cf.format" class="config-format-select">
+                    <option value="json">JSON</option>
+                    <option value="toml">TOML</option>
+                    <option value="env">ENV</option>
+                  </select>
+                  <label class="primary-checkbox">
+                    <input type="checkbox" v-model="cf.isPrimary" />
+                    <span>{{ t('components.main.customCli.primary') }}</span>
+                  </label>
+                  <button
+                    type="button"
+                    class="remove-btn"
+                    :disabled="cliToolModalState.form.configFiles.length <= 1"
+                    @click="removeConfigFile(idx)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" />
+                    </svg>
+                  </button>
+                </div>
+                <BaseInput
+                  v-model="cf.path"
+                  class="config-path-input"
+                  :placeholder="t('components.main.customCli.pathPlaceholder')"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 代理注入配置 -->
+          <div class="form-field">
+            <div class="field-header">
+              <span>{{ t('components.main.customCli.proxySettings') }}</span>
+              <button type="button" class="add-btn" @click="addProxyInjection">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" />
+                </svg>
+              </button>
+            </div>
+            <div class="proxy-injection-list">
+              <div
+                v-for="(pi, idx) in cliToolModalState.form.proxyInjection"
+                :key="idx"
+                class="proxy-injection-item"
+              >
+                <div class="proxy-injection-row">
+                  <select v-model="pi.targetFileId" class="target-file-select">
+                    <option value="">{{ t('components.main.customCli.selectConfigFile') }}</option>
+                    <option
+                      v-for="cf in cliToolModalState.form.configFiles"
+                      :key="cf.id"
+                      :value="cf.id"
+                    >
+                      {{ cf.label || cf.path || t('components.main.customCli.unnamed') }}
+                    </option>
+                  </select>
+                  <button
+                    type="button"
+                    class="remove-btn"
+                    :disabled="cliToolModalState.form.proxyInjection.length <= 1"
+                    @click="removeProxyInjection(idx)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="proxy-fields-row">
+                  <BaseInput
+                    v-model="pi.baseUrlField"
+                    class="proxy-field-input"
+                    :placeholder="t('components.main.customCli.baseUrlFieldPlaceholder')"
+                  />
+                  <BaseInput
+                    v-model="pi.authTokenField"
+                    class="proxy-field-input"
+                    :placeholder="t('components.main.customCli.authTokenFieldPlaceholder')"
+                  />
+                </div>
+              </div>
+            </div>
+            <p class="field-hint">{{ t('components.main.customCli.proxyHint') }}</p>
+          </div>
+
+          <footer class="form-actions">
+            <BaseButton variant="outline" type="button" @click="closeCliToolModal">
+              {{ t('components.main.form.actions.cancel') }}
+            </BaseButton>
+            <BaseButton type="submit">
+              {{ t('components.main.form.actions.save') }}
+            </BaseButton>
+          </footer>
+        </form>
+      </BaseModal>
+
+      <!-- CLI 工具删除确认框 -->
+      <BaseModal
+        :open="cliToolConfirmState.open"
+        :title="t('components.main.customCli.deleteTitle')"
+        variant="confirm"
+        @close="closeCliToolConfirm"
+      >
+        <div class="confirm-body">
+          <p>{{ t('components.main.customCli.deleteMessage', { name: cliToolConfirmState.tool?.name ?? '' }) }}</p>
+        </div>
+        <footer class="form-actions confirm-actions">
+          <BaseButton variant="outline" type="button" @click="closeCliToolConfirm">
+            {{ t('components.main.form.actions.cancel') }}
+          </BaseButton>
+          <BaseButton variant="danger" type="button" @click="confirmDeleteCliTool">
+            {{ t('components.main.form.actions.delete') }}
+          </BaseButton>
+        </footer>
+      </BaseModal>
     </div>
   </div>
 </template>
@@ -724,6 +964,7 @@ import BaseInput from '../common/BaseInput.vue'
 import ModelWhitelistEditor from '../common/ModelWhitelistEditor.vue'
 import ModelMappingEditor from '../common/ModelMappingEditor.vue'
 import CLIConfigEditor from '../common/CLIConfigEditor.vue'
+import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
@@ -738,6 +979,18 @@ import { fetchConfigImportStatus, importFromCcSwitch, isFirstRun, markFirstRunDo
 import { showToast } from '../../utils/toast'
 import { getBlacklistStatus, manualUnblock, type BlacklistStatus } from '../../services/blacklist'
 import { saveCLIConfig, type CLIPlatform } from '../../services/cliConfig'
+import {
+  listCustomCliTools,
+  createCustomCliTool,
+  updateCustomCliTool,
+  deleteCustomCliTool,
+  getCustomCliProxyStatus,
+  enableCustomCliProxy,
+  disableCustomCliProxy,
+  type CustomCliTool,
+  type ConfigFile,
+  type ProxyInjection,
+} from '../../services/customCliService'
 import {
   getConnectivityResults,
   StatusAvailable,
@@ -769,27 +1022,32 @@ const proxyStates = reactive<Record<ProviderTab, boolean>>({
   claude: false,
   codex: false,
   gemini: false,
+  others: false,
 })
 const proxyBusy = reactive<Record<ProviderTab, boolean>>({
   claude: false,
   codex: false,
   gemini: false,
+  others: false,
 })
 
 const providerStatsMap = reactive<Record<ProviderTab, Record<string, ProviderDailyStat>>>({
   claude: {},
   codex: {},
   gemini: {},
+  others: {},
 })
 const providerStatsLoading = reactive<Record<ProviderTab, boolean>>({
   claude: false,
   codex: false,
   gemini: false,
+  others: false,
 })
 const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
   claude: false,
   codex: false,
   gemini: false,
+  others: false,
 })
 let providerStatsTimer: number | undefined
 let updateTimer: number | undefined
@@ -804,11 +1062,29 @@ const importStatus = ref<ConfigImportStatus | null>(null)
 const importBusy = ref(false)
 const showFirstRunPrompt = ref(false)
 
+// 自定义 CLI 工具状态
+const customCliTools = ref<CustomCliTool[]>([])
+const selectedToolId = ref<string | null>(null)
+const customCliProxyStates = reactive<Record<string, boolean>>({})  // toolId -> enabled
+
+// 当前选中的 CLI 工具（计算属性）
+const selectedCustomCliTool = computed(() => {
+  if (!selectedToolId.value) return null
+  return customCliTools.value.find(t => t.id === selectedToolId.value) || null
+})
+
+// 配置文件保存成功后的回调
+const onConfigFileSaved = () => {
+  // 配置文件保存成功，可以在这里添加额外逻辑（如刷新状态）
+  console.log('[CustomCliConfigEditor] Config file saved')
+}
+
 // 黑名单状态
 const blacklistStatusMap = reactive<Record<ProviderTab, Record<string, BlacklistStatus>>>({
   claude: {},
   codex: {},
   gemini: {},
+  others: {},
 })
 let blacklistTimer: number | undefined
 
@@ -817,6 +1093,7 @@ const connectivityResultsMap = reactive<Record<ProviderTab, Record<number, Conne
   claude: {},
   codex: {},
   gemini: {},
+  others: {},
 })
 
 // 最后使用的供应商（用于高亮显示）
@@ -830,6 +1107,7 @@ const lastUsedProviders = reactive<Record<string, LastUsedProvider | null>>({
   claude: null,
   codex: null,
   gemini: null,
+  others: null,
 })
 // 高亮闪烁的供应商名称
 const highlightedProvider = ref<string | null>(null)
@@ -1127,6 +1405,7 @@ const tabs = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
   { id: 'gemini', label: 'Gemini' },
+  { id: 'others', label: '其他' },
 ] as const
 type ProviderTab = (typeof tabs)[number]['id']
 const providerTabIds = tabs.map((tab) => tab.id) as ProviderTab[]
@@ -1135,6 +1414,7 @@ const cards = reactive<Record<ProviderTab, AutomationCard[]>>({
   claude: createAutomationCards(automationCardGroups.claude),
   codex: createAutomationCards(automationCardGroups.codex),
   gemini: [],
+  others: [],
 })
 const draggingId = ref<number | null>(null)
 
@@ -1165,12 +1445,22 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
 
 const serializeProviders = (providers: AutomationCard[]) => providers.map((provider) => ({ ...provider }))
 
+// 生成 custom CLI 工具的 provider kind（后端需要 "custom:{toolId}" 格式）
+const getCustomProviderKind = (toolId: string): string => `custom:${toolId}`
+
 // 存储 Gemini 原始数据，用于转换回去
 const geminiProvidersCache = ref<GeminiProvider[]>([])
 
 const persistProviders = async (tabId: ProviderTab) => {
   try {
-    if (tabId === 'gemini') {
+    if (tabId === 'others') {
+      // 'others' Tab 需要使用 "custom:{toolId}" 格式
+      if (!selectedToolId.value) {
+        showToast(t('components.main.customCli.selectToolFirst'), 'error')
+        return
+      }
+      await SaveProviders(getCustomProviderKind(selectedToolId.value), serializeProviders(cards.others))
+    } else if (tabId === 'gemini') {
       // Gemini 使用独立的保存逻辑
       // 1. 收集当前卡片的 name 集合
       const currentNames = new Set(cards.gemini.map(c => c.name))
@@ -1236,7 +1526,10 @@ const replaceProviders = (tabId: ProviderTab, data: AutomationCard[]) => {
 const loadProvidersFromDisk = async () => {
   for (const tab of providerTabIds) {
     try {
-      if (tab === 'gemini') {
+      if (tab === 'others') {
+        // 'others' Tab: 先加载自定义 CLI 工具列表，再加载每个工具的 providers
+        await loadCustomCliTools()
+      } else if (tab === 'gemini') {
         // Gemini 使用独立的加载逻辑
         const geminiProviders = await GetGeminiProviders()
         geminiProvidersCache.value = geminiProviders
@@ -1254,6 +1547,57 @@ const loadProvidersFromDisk = async () => {
     } catch (error) {
       console.error('Failed to load providers', error)
     }
+  }
+}
+
+// 加载自定义 CLI 工具列表
+const loadCustomCliTools = async () => {
+  try {
+    const tools = await listCustomCliTools()
+    customCliTools.value = tools
+
+    // 自动选择第一个工具（如果有）
+    if (tools.length > 0 && !selectedToolId.value) {
+      selectedToolId.value = tools[0].id
+    }
+
+    // 为每个工具加载代理状态
+    for (const tool of tools) {
+      try {
+        const status = await getCustomCliProxyStatus(tool.id)
+        customCliProxyStates[tool.id] = Boolean(status?.enabled)
+      } catch (err) {
+        customCliProxyStates[tool.id] = false
+      }
+    }
+
+    // 如果当前选中了工具，更新 'others' Tab 的代理状态并加载 providers
+    if (selectedToolId.value) {
+      proxyStates.others = customCliProxyStates[selectedToolId.value] ?? false
+      await loadCustomCliProviders(selectedToolId.value)
+    }
+  } catch (error) {
+    console.error('Failed to load custom CLI tools', error)
+    customCliTools.value = []
+  }
+}
+
+// 加载特定 CLI 工具的 providers
+const loadCustomCliProviders = async (toolId: string) => {
+  if (!toolId) return
+  try {
+    const kind = getCustomProviderKind(toolId)
+    const saved = await LoadProviders(kind)
+    if (Array.isArray(saved)) {
+      cards.others.splice(0, cards.others.length, ...createAutomationCards(saved as AutomationCard[]))
+      sortProvidersByLevel(cards.others)
+    } else {
+      // 如果没有保存的数据，清空列表
+      cards.others.splice(0, cards.others.length)
+    }
+  } catch (error) {
+    console.error(`Failed to load providers for tool ${toolId}`, error)
+    cards.others.splice(0, cards.others.length)
   }
 }
 
@@ -1296,7 +1640,16 @@ const goToImportSettings = async () => {
 
 const refreshProxyState = async (tab: ProviderTab) => {
   try {
-    if (tab === 'gemini') {
+    if (tab === 'others') {
+      // 'others' Tab 的代理状态依赖于选中的 CLI 工具
+      if (selectedToolId.value) {
+        const status = await getCustomCliProxyStatus(selectedToolId.value)
+        customCliProxyStates[selectedToolId.value] = Boolean(status?.enabled)
+        proxyStates[tab] = Boolean(status?.enabled)
+      } else {
+        proxyStates[tab] = false
+      }
+    } else if (tab === 'gemini') {
       const status = await fetchGeminiProxyStatus()
       proxyStates[tab] = Boolean(status?.enabled)
     } else {
@@ -1315,7 +1668,19 @@ const onProxyToggle = async () => {
   proxyBusy[tab] = true
   const nextState = !proxyStates[tab]
   try {
-    if (tab === 'gemini') {
+    if (tab === 'others') {
+      // 'others' Tab 需要选中工具才能切换代理
+      if (!selectedToolId.value) {
+        showToast(t('components.main.customCli.selectToolFirst'), 'error')
+        return
+      }
+      if (nextState) {
+        await enableCustomCliProxy(selectedToolId.value)
+      } else {
+        await disableCustomCliProxy(selectedToolId.value)
+      }
+      customCliProxyStates[selectedToolId.value] = nextState
+    } else if (tab === 'gemini') {
       if (nextState) {
         await enableGeminiProxy()
       } else {
@@ -1337,6 +1702,12 @@ const onProxyToggle = async () => {
 }
 
 const loadProviderStats = async (tab: ProviderTab) => {
+  // 'others' Tab 暂不加载统计数据（自定义 CLI 工具统计需要后续实现）
+  if (tab === 'others') {
+    providerStatsLoaded[tab] = true
+    return
+  }
+
   providerStatsLoading[tab] = true
   try {
     // Gemini 统计数据目前通过相同的日志接口，直接查询
@@ -1359,6 +1730,11 @@ const loadProviderStats = async (tab: ProviderTab) => {
 
 // 加载黑名单状态
 const loadBlacklistStatus = async (tab: ProviderTab) => {
+  // 'others' Tab 暂不加载黑名单状态
+  if (tab === 'others') {
+    return
+  }
+
   try {
     const statuses = await getBlacklistStatus(tab)
     const map: Record<string, BlacklistStatus> = {}
@@ -1412,6 +1788,11 @@ const getProviderBlacklistStatus = (providerName: string): BlacklistStatus | nul
 
 // 加载连通性测试结果
 const loadConnectivityResults = async (tab: ProviderTab) => {
+  // 'others' Tab 暂不加载连通性结果
+  if (tab === 'others') {
+    return
+  }
+
   try {
     const results = await getConnectivityResults(tab)
     const map: Record<number, ConnectivityResult> = {}
@@ -1831,11 +2212,21 @@ watch(activeTab, (newTab) => {
   void loadBlacklistStatus(newTab)
   void loadConnectivityResults(newTab)
 })
-const currentProxyLabel = computed(() =>
-  activeTab.value === 'claude'
-    ? t('components.main.relayToggle.hostClaude')
-    : t('components.main.relayToggle.hostCodex')
-)
+const currentProxyLabel = computed(() => {
+  const tab = activeTab.value
+  if (tab === 'claude') {
+    return t('components.main.relayToggle.hostClaude')
+  } else if (tab === 'codex') {
+    return t('components.main.relayToggle.hostCodex')
+  } else if (tab === 'gemini') {
+    return t('components.main.relayToggle.hostGemini')
+  } else if (tab === 'others') {
+    // 显示选中的工具名称
+    const tool = customCliTools.value.find(t => t.id === selectedToolId.value)
+    return tool?.name || t('components.main.relayToggle.hostOthers')
+  }
+  return t('components.main.relayToggle.hostCodex')
+})
 const activeProxyState = computed(() => proxyStates[activeTab.value])
 const activeProxyBusy = computed(() => proxyBusy[activeTab.value])
 
@@ -2245,6 +2636,243 @@ const handleImportClick = async () => {
     showToast(t('components.main.importConfig.error'), 'error')
   } finally {
     importBusy.value = false
+  }
+}
+
+// ========== 自定义 CLI 工具管理 ==========
+
+// CLI 工具模态框状态
+const cliToolModalState = reactive({
+  open: false,
+  editingId: null as string | null,
+  form: {
+    name: '',
+    configFiles: [] as Array<{
+      id: string
+      label: string
+      path: string
+      format: 'json' | 'toml' | 'env'
+      isPrimary: boolean
+    }>,
+    proxyInjection: [] as Array<{
+      targetFileId: string
+      baseUrlField: string
+      authTokenField: string
+    }>,
+  },
+})
+
+// CLI 工具删除确认状态
+const cliToolConfirmState = reactive({
+  open: false,
+  tool: null as CustomCliTool | null,
+})
+
+// 切换选中的 CLI 工具
+const onToolSelect = async () => {
+  if (selectedToolId.value) {
+    // 更新当前 tab 的代理状态
+    proxyStates.others = customCliProxyStates[selectedToolId.value] ?? false
+    // 加载该工具的 providers 列表
+    await loadCustomCliProviders(selectedToolId.value)
+  } else {
+    // 未选中任何工具，清空 providers 列表
+    cards.others.splice(0, cards.others.length)
+  }
+}
+
+// 打开新建 CLI 工具模态框
+const openCliToolModal = () => {
+  cliToolModalState.editingId = null
+  cliToolModalState.form.name = ''
+  cliToolModalState.form.configFiles = [{
+    id: `cfg-${Date.now()}`,
+    label: t('components.main.customCli.primaryConfig'),
+    path: '',
+    format: 'json',
+    isPrimary: true,
+  }]
+  cliToolModalState.form.proxyInjection = [{
+    targetFileId: '',
+    baseUrlField: '',
+    authTokenField: '',
+  }]
+  cliToolModalState.open = true
+}
+
+// 编辑当前选中的 CLI 工具
+const editCurrentCliTool = async () => {
+  if (!selectedToolId.value) return
+  const tool = customCliTools.value.find(t => t.id === selectedToolId.value)
+  if (!tool) return
+
+  cliToolModalState.editingId = tool.id
+  cliToolModalState.form.name = tool.name
+  cliToolModalState.form.configFiles = tool.configFiles.length > 0
+    ? tool.configFiles.map(cf => ({
+        id: cf.id,
+        label: cf.label,
+        path: cf.path,
+        format: cf.format,
+        isPrimary: cf.isPrimary ?? false,
+      }))
+    : [{
+        id: `cfg-${Date.now()}`,
+        label: t('components.main.customCli.primaryConfig'),
+        path: '',
+        format: 'json' as const,
+        isPrimary: true,
+      }]
+  cliToolModalState.form.proxyInjection = tool.proxyInjection && tool.proxyInjection.length > 0
+    ? tool.proxyInjection.map(pi => ({
+        targetFileId: pi.targetFileId,
+        baseUrlField: pi.baseUrlField,
+        authTokenField: pi.authTokenField ?? '',
+      }))
+    : [{
+        targetFileId: '',
+        baseUrlField: '',
+        authTokenField: '',
+      }]
+  cliToolModalState.open = true
+}
+
+// 请求删除当前选中的 CLI 工具
+const deleteCurrentCliTool = () => {
+  if (!selectedToolId.value) return
+  const tool = customCliTools.value.find(t => t.id === selectedToolId.value)
+  if (!tool) return
+  cliToolConfirmState.tool = tool
+  cliToolConfirmState.open = true
+}
+
+// 关闭 CLI 工具模态框
+const closeCliToolModal = () => {
+  cliToolModalState.open = false
+}
+
+// 关闭 CLI 工具删除确认框
+const closeCliToolConfirm = () => {
+  cliToolConfirmState.open = false
+  cliToolConfirmState.tool = null
+}
+
+// 添加配置文件
+const addConfigFile = () => {
+  cliToolModalState.form.configFiles.push({
+    id: `cfg-${Date.now()}`,
+    label: '',
+    path: '',
+    format: 'json',
+    isPrimary: false,
+  })
+}
+
+// 删除配置文件
+const removeConfigFile = (index: number) => {
+  if (cliToolModalState.form.configFiles.length <= 1) return
+  cliToolModalState.form.configFiles.splice(index, 1)
+}
+
+// 添加代理注入配置
+const addProxyInjection = () => {
+  cliToolModalState.form.proxyInjection.push({
+    targetFileId: '',
+    baseUrlField: '',
+    authTokenField: '',
+  })
+}
+
+// 删除代理注入配置
+const removeProxyInjection = (index: number) => {
+  if (cliToolModalState.form.proxyInjection.length <= 1) return
+  cliToolModalState.form.proxyInjection.splice(index, 1)
+}
+
+// 提交 CLI 工具模态框
+const submitCliToolModal = async () => {
+  const name = cliToolModalState.form.name.trim()
+  if (!name) {
+    showToast(t('components.main.customCli.nameRequired'), 'error')
+    return
+  }
+
+  // 过滤掉空的配置文件
+  const validConfigFiles = cliToolModalState.form.configFiles.filter(cf => cf.path.trim())
+  if (validConfigFiles.length === 0) {
+    showToast(t('components.main.customCli.configRequired'), 'error')
+    return
+  }
+
+  // 验证至少有一个主配置文件
+  const hasPrimary = validConfigFiles.some(cf => cf.isPrimary)
+  if (!hasPrimary) {
+    // 如果没有选中主配置文件，自动将第一个设为主配置
+    validConfigFiles[0].isPrimary = true
+  }
+
+  // 过滤掉空的代理注入配置
+  const validProxyInjections = cliToolModalState.form.proxyInjection.filter(
+    pi => pi.targetFileId && pi.baseUrlField.trim()
+  )
+
+  // 验证代理注入目标指向有效的配置文件 ID
+  const validFileIds = new Set(validConfigFiles.map(cf => cf.id))
+  const invalidInjections = validProxyInjections.filter(pi => !validFileIds.has(pi.targetFileId))
+  if (invalidInjections.length > 0) {
+    showToast(t('components.main.customCli.invalidProxyTarget'), 'error')
+    return
+  }
+
+  try {
+    if (cliToolModalState.editingId) {
+      // 更新现有工具
+      await updateCustomCliTool(cliToolModalState.editingId, {
+        id: cliToolModalState.editingId,
+        name,
+        configFiles: validConfigFiles,
+        proxyInjection: validProxyInjections,
+      })
+      showToast(t('components.main.customCli.updateSuccess'), 'success')
+    } else {
+      // 创建新工具
+      const newTool = await createCustomCliTool({
+        name,
+        configFiles: validConfigFiles,
+        proxyInjection: validProxyInjections,
+      })
+      selectedToolId.value = newTool.id
+      showToast(t('components.main.customCli.createSuccess'), 'success')
+    }
+
+    // 刷新工具列表
+    await loadCustomCliTools()
+    closeCliToolModal()
+  } catch (error) {
+    console.error('Failed to save CLI tool', error)
+    showToast(t('components.main.customCli.saveFailed'), 'error')
+  }
+}
+
+// 确认删除 CLI 工具
+const confirmDeleteCliTool = async () => {
+  if (!cliToolConfirmState.tool) return
+  try {
+    await deleteCustomCliTool(cliToolConfirmState.tool.id)
+    showToast(t('components.main.customCli.deleteSuccess'), 'success')
+
+    // 如果删除的是当前选中的工具，清空选择
+    if (selectedToolId.value === cliToolConfirmState.tool.id) {
+      selectedToolId.value = null
+      proxyStates.others = false
+    }
+
+    // 刷新工具列表
+    await loadCustomCliTools()
+    closeCliToolConfirm()
+  } catch (error) {
+    console.error('Failed to delete CLI tool', error)
+    showToast(t('components.main.customCli.deleteFailed'), 'error')
   }
 }
 </script>
@@ -2983,5 +3611,255 @@ const handleImportClick = async () => {
 :global(.dark) .test-result.error {
   background: rgba(239, 68, 68, 0.15);
   color: #f87171;
+}
+
+/* ========== CLI 工具选择器样式 ========== */
+.cli-tool-selector {
+  padding: 12px 16px;
+  background: var(--mac-surface);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid var(--mac-border);
+}
+
+.tool-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-select {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tool-select:hover {
+  border-color: var(--color-border-hover);
+}
+
+.tool-select:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.add-tool-btn {
+  flex-shrink: 0;
+}
+
+.no-tools-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--mac-text-secondary);
+  text-align: center;
+}
+
+/* ========== CLI 工具表单样式 ========== */
+.cli-tool-form .field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.cli-tool-form .field-header span {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--mac-text);
+}
+
+.cli-tool-form .add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--mac-accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cli-tool-form .add-btn:hover {
+  filter: brightness(1.1);
+}
+
+.cli-tool-form .add-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cli-tool-form .remove-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  border: 1px solid var(--mac-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cli-tool-form .remove-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.cli-tool-form .remove-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cli-tool-form .remove-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ========== 配置文件列表样式 ========== */
+.config-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.config-file-item {
+  padding: 12px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+}
+
+.config-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.config-label-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.config-format-select {
+  width: 80px;
+  padding: 6px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.config-format-select:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.primary-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--mac-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary-checkbox input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--mac-accent);
+  cursor: pointer;
+}
+
+.config-path-input {
+  width: 100%;
+}
+
+/* ========== 代理注入配置样式 ========== */
+.proxy-injection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.proxy-injection-item {
+  padding: 12px;
+  background: var(--mac-surface-strong);
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+}
+
+.proxy-injection-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.target-file-select {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.target-file-select:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.proxy-fields-row {
+  display: flex;
+  gap: 8px;
+}
+
+.proxy-field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 暗色模式适配 */
+:global(.dark) .cli-tool-selector {
+  background: var(--mac-surface);
+  border-color: var(--mac-border);
+}
+
+:global(.dark) .config-file-item,
+:global(.dark) .proxy-injection-item {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .tool-select,
+:global(.dark) .config-format-select,
+:global(.dark) .target-file-select {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--mac-text);
+}
+
+:global(.dark) .tool-select:hover,
+:global(.dark) .config-format-select:hover,
+:global(.dark) .target-file-select:hover {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 </style>

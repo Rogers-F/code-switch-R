@@ -79,6 +79,19 @@ func providerFilePath(kind string) (string, error) {
 	case "codex":
 		filename = "codex.json"
 	default:
+		// 支持自定义 CLI 工具的供应商存储：custom:{tool-id}
+		if strings.HasPrefix(kind, "custom:") {
+			toolId := strings.TrimPrefix(kind, "custom:")
+			if toolId == "" {
+				return "", fmt.Errorf("invalid custom provider kind: %s", kind)
+			}
+			// 存储在 providers 子目录下
+			providersDir := filepath.Join(dir, "providers")
+			if err := os.MkdirAll(providersDir, 0o755); err != nil {
+				return "", err
+			}
+			return filepath.Join(providersDir, toolId+".json"), nil
+		}
 		return "", fmt.Errorf("unknown provider type: %s", kind)
 	}
 	return filepath.Join(dir, filename), nil

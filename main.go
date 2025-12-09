@@ -116,6 +116,7 @@ func main() {
 	dockService := dock.New()
 	versionService := NewVersionService()
 	consoleService := services.NewConsoleService()
+	customCliService := services.NewCustomCliService(providerRelay.Addr())
 
 	// 应用待处理的更新
 	go func() {
@@ -202,6 +203,7 @@ func main() {
 			application.NewService(versionService),
 			application.NewService(geminiService),
 			application.NewService(consoleService),
+			application.NewService(customCliService),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
