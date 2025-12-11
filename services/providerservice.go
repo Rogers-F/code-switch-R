@@ -60,6 +60,10 @@ type Provider struct {
 	// 可用性高级配置 - 可选，在可用性页面的"高级配置"中设置
 	AvailabilityConfig *AvailabilityConfig `json:"availabilityConfig,omitempty"`
 
+	// 认证方式 - bearer / x-api-key / 自定义 Header 名
+	// 空值时使用平台默认（claude: x-api-key, codex: bearer）
+	ConnectivityAuthType string `json:"connectivityAuthType,omitempty"`
+
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段
 
@@ -71,9 +75,6 @@ type Provider struct {
 
 	// [已废弃] 连通性检测端点 - 迁移到 AvailabilityConfig.TestEndpoint
 	ConnectivityTestEndpoint string `json:"connectivityTestEndpoint,omitempty"`
-
-	// [已废弃] 连通性检测认证方式 - 已移除，统一使用 Bearer
-	ConnectivityAuthType string `json:"connectivityAuthType,omitempty"`
 
 	// 内部字段：配置验证错误（不持久化）
 	configErrors []string `json:"-"`
@@ -348,7 +349,7 @@ func (p *Provider) clearLegacyFields() {
 	p.ConnectivityCheck = false
 	p.ConnectivityTestModel = ""
 	p.ConnectivityTestEndpoint = ""
-	p.ConnectivityAuthType = ""
+	// 注意：ConnectivityAuthType 现在是活跃字段，不再清除
 }
 
 // DuplicateProvider 复制供应商配置，生成新的副本

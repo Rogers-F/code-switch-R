@@ -558,12 +558,30 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
-		// 根据平台选择认证方式
-		if platform == "claude" {
+		// 根据认证方式设置请求头
+		authTypeRaw := strings.TrimSpace(provider.ConnectivityAuthType)
+		authType := strings.ToLower(authTypeRaw)
+		if authType == "" {
+			// 空值时使用平台默认（claude: x-api-key, codex: bearer）
+			if strings.ToLower(platform) == "claude" {
+				authType = "x-api-key"
+			} else {
+				authType = "bearer"
+			}
+		}
+		switch authType {
+		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
 			req.Header.Set("anthropic-version", "2023-06-01")
-		} else {
+		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+		default:
+			// 自定义 Header 名
+			headerName := authTypeRaw
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			req.Header.Set(headerName, provider.APIKey)
 		}
 	}
 

@@ -513,7 +513,32 @@ func (prs *ProviderRelayService) forwardRequest(
 ) (bool, error) {
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
-	headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+
+	// 根据认证方式设置请求头
+	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
+	if authType == "" {
+		// 空值时使用平台默认（claude: x-api-key, codex: bearer）
+		if kind == "claude" {
+			headers["x-api-key"] = provider.APIKey
+		} else {
+			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+		}
+	} else {
+		switch authType {
+		case "bearer":
+			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+		case "x-api-key":
+			headers["x-api-key"] = provider.APIKey
+		default:
+			// 自定义 Header 名
+			headerName := strings.TrimSpace(provider.ConnectivityAuthType)
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			headers[headerName] = provider.APIKey
+		}
+	}
+
 	if _, ok := headers["Accept"]; !ok {
 		headers["Accept"] = "application/json"
 	}

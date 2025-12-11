@@ -602,6 +602,42 @@
                   <span class="field-hint">{{ t('components.main.form.hints.apiEndpoint') }}</span>
                 </label>
 
+                <!-- 认证方式 -->
+                <div class="form-field">
+                  <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
+                  <Listbox v-model="selectedAuthType" v-slot="{ open }">
+                    <div class="level-select">
+                      <ListboxButton class="level-select-button">
+                        <span class="level-label">
+                          {{ authTypeOptions.find((item) => item.value === selectedAuthType)?.label || selectedAuthType }}
+                        </span>
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                          <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                        </svg>
+                      </ListboxButton>
+                      <ListboxOptions v-if="open" class="level-select-options">
+                        <ListboxOption
+                          v-for="option in authTypeOptions"
+                          :key="option.value"
+                          :value="option.value"
+                          v-slot="{ active, selected }"
+                        >
+                          <div :class="['level-option', { active, selected }]">
+                            <span class="level-name">{{ option.label }}</span>
+                          </div>
+                        </ListboxOption>
+                      </ListboxOptions>
+                    </div>
+                  </Listbox>
+                  <BaseInput
+                    v-model="customAuthHeader"
+                    type="text"
+                    :placeholder="t('components.main.form.placeholders.customAuthHeader')"
+                    class="mt-2"
+                  />
+                  <span class="field-hint">{{ t('components.main.form.hints.connectivityAuthType') }}</span>
+                </div>
+
                 <div class="form-field">
                   <span>{{ t('components.main.form.labels.icon') }}</span>
                   <Listbox v-model="modalState.form.icon" v-slot="{ open }">
@@ -1455,7 +1491,8 @@ const serializeProviders = (providers: AutomationCard[]) =>
     connectivityCheck: false,
     connectivityTestModel: '',
     connectivityTestEndpoint: '',
-    connectivityAuthType: '',
+    // 保留认证方式配置（已从废弃字段升级为活跃字段）
+    connectivityAuthType: provider.connectivityAuthType || '',
   }))
 
 // 生成 custom CLI 工具的 provider kind（后端需要 "custom:{toolId}" 格式）
@@ -2258,7 +2295,7 @@ const handleTestConnectivity = async () => {
       modalState.form.apiKey,
       modalState.form.connectivityTestModel || '',
       modalState.form.connectivityTestEndpoint || getDefaultEndpoint(platform),
-      modalState.form.connectivityAuthType || getDefaultAuthType(platform)
+      resolveEffectiveAuthType()
     )
 
     connectivityTestResult.value = {
@@ -2462,6 +2499,16 @@ const modalState = reactive({
   },
 })
 
+// 认证方式相关状态
+const selectedAuthType = ref<string>('bearer')
+const customAuthHeader = ref<string>('')
+const authTypeOptions = computed(() => [
+  { value: 'bearer', label: 'Bearer' },
+  { value: 'x-api-key', label: 'X-API-Key' },
+])
+const resolveEffectiveAuthType = () =>
+  customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(modalState.tabId)
+
 const editingCard = ref<AutomationCard | null>(null)
 const confirmState = reactive({ open: false, card: null as AutomationCard | null, tabId: tabs[0].id as ProviderTab })
 
@@ -2470,6 +2517,9 @@ const openCreateModal = () => {
   modalState.editingId = null
   editingCard.value = null
   Object.assign(modalState.form, defaultFormValues(activeTab.value))
+  // 初始化认证方式为平台默认
+  selectedAuthType.value = getDefaultAuthType(activeTab.value)
+  customAuthHeader.value = ''
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
@@ -2508,8 +2558,22 @@ const openEditModal = (card: AutomationCard) => {
     connectivityCheck: false,
     connectivityTestModel: '',
     connectivityTestEndpoint: '',
-    connectivityAuthType: '',
+    connectivityAuthType: card.connectivityAuthType || '',
   })
+  // 初始化认证方式状态
+  const storedAuth = (card.connectivityAuthType || '').trim()
+  const lower = storedAuth.toLowerCase()
+  if (!storedAuth) {
+    selectedAuthType.value = getDefaultAuthType(activeTab.value)
+    customAuthHeader.value = ''
+  } else if (lower === 'bearer' || lower === 'x-api-key') {
+    selectedAuthType.value = lower
+    customAuthHeader.value = ''
+  } else {
+    // 自定义 Header 名
+    selectedAuthType.value = getDefaultAuthType(activeTab.value)
+    customAuthHeader.value = storedAuth
+  }
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
@@ -2570,7 +2634,7 @@ const submitModal = async () => {
       connectivityCheck: false,
       connectivityTestModel: '',
       connectivityTestEndpoint: '',
-      connectivityAuthType: '',
+      connectivityAuthType: resolveEffectiveAuthType(),
     })
     if (prevLevel !== nextLevel) {
       sortProvidersByLevel(list)
@@ -2606,7 +2670,7 @@ const submitModal = async () => {
       connectivityCheck: false,
       connectivityTestModel: '',
       connectivityTestEndpoint: '',
-      connectivityAuthType: '',
+      connectivityAuthType: resolveEffectiveAuthType(),
     }
     list.push(newCard)
     sortProvidersByLevel(list)
