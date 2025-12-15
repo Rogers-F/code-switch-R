@@ -179,6 +179,7 @@
     </div>
 
     <FullScreenPanel
+      class="mcp-fullscreen-panel"
       :open="modalState.open"
       :title="modalState.editingName ? t('components.mcp.form.editTitle') : t('components.mcp.form.createTitle')"
       @close="closeModal"
@@ -199,7 +200,7 @@
           :class="{ active: modalMode === 'json' }"
           @click.stop="switchModalMode('json')"
         >
-          {{ t('components.mcp.jsonImport.tabJson') }}
+          {{ t('components.mcp.jsonImport.tabBulkImport') }}
         </button>
       </div>
 
@@ -1264,6 +1265,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 修复：提升 MCP 全屏面板层级，避免被全局 modal 遮罩层覆盖 */
+:global(body .mcp-fullscreen-panel.panel-container) {
+  z-index: 2100;
+}
+
 .chip {
   padding: 2px 8px;
   border-radius: 999px;

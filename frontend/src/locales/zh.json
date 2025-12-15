@@ -654,7 +654,7 @@
       },
       "jsonImport": {
         "tabForm": "表单填写",
-        "tabJson": "粘贴 JSON",
+        "tabBulkImport": "批量导入",
         "jsonHint": "支持 Claude Desktop、数组、单对象等多种格式",
         "loadExample": "加载示例",
         "formatSingle": "单对象",

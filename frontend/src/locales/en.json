@@ -653,7 +653,7 @@
       },
       "jsonImport": {
         "tabForm": "Form",
-        "tabJson": "Paste JSON",
+        "tabBulkImport": "Bulk Import",
         "jsonHint": "Supports Claude Desktop, array, single object formats",
         "loadExample": "Load Example",
         "formatSingle": "Single Object",
