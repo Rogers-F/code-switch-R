@@ -1,8 +1,8 @@
 <template>
   <Teleport to="body">
-    <Transition name="panel-slide">
-      <div
-        v-if="open"
+    <!-- DEBUG: 临时禁用 Transition 测试是否动画卡住 -->
+    <div
+      v-if="open"
         v-bind="$attrs"
         ref="panelRef"
         class="panel-container"
@@ -44,7 +44,6 @@
           <slot name="footer"></slot>
         </footer>
       </div>
-    </Transition>
   </Teleport>
 </template>
 
