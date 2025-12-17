@@ -1,13 +1,18 @@
 <template>
-  <!-- DEBUG: 无条件渲染测试 -->
-    <div
-      v-show="props.open"
+  <Teleport to="body">
+    <Transition name="panel-slide">
+      <div
+        v-if="open"
+        v-bind="$attrs"
         ref="panelRef"
-        class="panel-container mcp-fullscreen-panel"
-        style="background: green !important; position: fixed !important; inset: 0 !important; z-index: 99999 !important;"
+        class="panel-container"
         role="dialog"
+        aria-modal="true"
+        :aria-labelledby="titleId"
+        tabindex="-1"
+        @click="handleBackdropClick"
+        @keydown="onKeyDown"
       >
-        <!-- Header: @click.stop 防止点击 header 触发 backdrop 逻辑 -->
         <header class="panel-header" @click.stop>
           <button
             ref="closeButtonRef"
@@ -24,25 +29,20 @@
           <div class="header-spacer"></div>
         </header>
 
-        <!--
-          Main Content: @click.stop 是关键修复
-          创建"事件隔离堡垒"，确保内容区域（Tab按钮、表单等）的点击
-          不会冒泡到 panel-container 触发意外关闭
-        -->
         <main class="panel-content" @click.stop>
           <slot></slot>
         </main>
 
-        <!-- Footer: 同样需要 @click.stop -->
         <footer v-if="$slots.footer" class="panel-footer" @click.stop>
           <slot name="footer"></slot>
         </footer>
       </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
-import { showToast } from '../../utils/toast'
 
 const props = withDefaults(
   defineProps<{
@@ -53,7 +53,6 @@ const props = withDefaults(
   }>(),
   {
     closeLabel: 'Close',
-    // 全屏面板默认不支持点击背景关闭，防止误操作导致数据丢失
     closeOnBackdrop: false,
   },
 )
@@ -71,20 +70,16 @@ const handleClose = () => {
   emit('close')
 }
 
-// 简化的背景点击处理：仅当 closeOnBackdrop 启用且点击的是容器本身时关闭
 const handleBackdropClick = (event: MouseEvent) => {
   if (!props.closeOnBackdrop) return
-  // 严格检查：只有点击容器本身才关闭（子元素的 @click.stop 已阻止冒泡）
   if (event.target === event.currentTarget) {
     handleClose()
   }
 }
 
-// 简化的 Escape 键处理
 const onKeyDown = (e: KeyboardEvent) => {
   if (!props.open) return
   if (e.key !== 'Escape') return
-  // 忽略 IME 输入法组合状态
   if (e.isComposing) return
 
   e.preventDefault()
@@ -92,11 +87,9 @@ const onKeyDown = (e: KeyboardEvent) => {
   handleClose()
 }
 
-// 焦点管理和 body 滚动锁定
 watch(
   () => props.open,
   (isOpen) => {
-    showToast(`[DEBUG] FullScreenPanel watch: open=${isOpen}, title=${props.title}`, 'success')
     if (isOpen) {
       lastActiveElement = document.activeElement
       document.body.style.overflow = 'hidden'
@@ -204,7 +197,6 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-/* Transition 动画 */
 .panel-slide-enter-active,
 .panel-slide-leave-active {
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
