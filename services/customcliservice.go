@@ -262,9 +262,17 @@ func (s *CustomCliService) ProxyStatus(toolId string) (*CustomCliProxyStatus, er
 		}
 
 		// 校验可选的鉴权字段，避免误判为已启用
+		// 向后兼容：同时检查 code-switch-r（新）和 code-switch（旧）两个 token
 		if injection.AuthTokenField != "" {
-			authEnabled, err := s.checkProxyField(content, targetFile.Format, injection.AuthTokenField, "code-switch")
-			if err != nil || !authEnabled {
+			authOk := false
+			for _, token := range []string{"code-switch-r", "code-switch"} {
+				authEnabled, err := s.checkProxyField(content, targetFile.Format, injection.AuthTokenField, token)
+				if err == nil && authEnabled {
+					authOk = true
+					break
+				}
+			}
+			if !authOk {
 				allEnabled = false
 			}
 		}
@@ -637,7 +645,7 @@ func (s *CustomCliService) injectProxyField(configPath, format string, injection
 	// 设置代理字段（使用包含 toolId 的完整路径）
 	setNestedValue(data, injection.BaseUrlField, s.baseURLWithToolPath(toolId))
 	if injection.AuthTokenField != "" {
-		setNestedValue(data, injection.AuthTokenField, "code-switch")
+		setNestedValue(data, injection.AuthTokenField, "code-switch-r")
 	}
 
 	// 确保目录存在
@@ -677,7 +685,7 @@ func (s *CustomCliService) injectEnvField(configPath string, content []byte, inj
 		if idx := strings.LastIndex(authKey, "."); idx >= 0 {
 			authKey = authKey[idx+1:]
 		}
-		envMap[authKey] = "code-switch"
+		envMap[authKey] = "code-switch-r"
 	}
 
 	// 确保目录存在

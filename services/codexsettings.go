@@ -19,10 +19,10 @@ const (
 	codexBackupAuthName   = "cc-studio.back.auth.json"
 	codexPreferredAuth    = "apikey"
 	codexDefaultModel     = "gpt-5-codex"
-	codexProviderKey      = "code-switch"
+	codexProviderKey      = "code-switch-r"
 	codexEnvKey           = "OPENAI_API_KEY"
 	codexWireAPI          = "responses"
-	codexTokenValue       = "code-switch"
+	codexTokenValue       = "code-switch-r"
 )
 
 type CodexSettingsService struct {
@@ -42,14 +42,22 @@ func (css *CodexSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
 		}
 		return status, err
 	}
-	provider, ok := config.ModelProviders[codexProviderKey]
-	if !ok {
-		return status, nil
-	}
+
+	// 向后兼容：同时检查 code-switch-r（新）和 code-switch（旧）两个 key
+	proxyKeys := []string{codexProviderKey, "code-switch"}
 	baseURL := css.baseURL()
-	if strings.EqualFold(config.ModelProvider, codexProviderKey) && strings.EqualFold(provider.BaseURL, baseURL) {
-		status.Enabled = true
+
+	for _, key := range proxyKeys {
+		provider, ok := config.ModelProviders[key]
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(config.ModelProvider, key) && strings.EqualFold(provider.BaseURL, baseURL) {
+			status.Enabled = true
+			return status, nil
+		}
 	}
+
 	return status, nil
 }
 

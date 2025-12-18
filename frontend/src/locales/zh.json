@@ -863,7 +863,9 @@
       "previewParseError": "配置格式无效，请检查语法",
       "previewApplySuccess": "配置已应用",
       "saveAllFailed": "所有配置文件保存失败",
-      "savePartialSuccess": "成功 {success} 个，失败 {fail} 个"
+      "savePartialSuccess": "成功 {success} 个，失败 {fail} 个",
+      "tabPreview": "预览效果",
+      "tabCurrent": "当前磁盘"
     }
   }
 }

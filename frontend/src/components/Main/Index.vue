@@ -732,6 +732,10 @@
                   <CLIConfigEditor
                     :platform="activeTab as CLIPlatform"
                     v-model="modalState.form.cliConfig"
+                    :provider-config="{
+                      apiKey: modalState.form.apiKey,
+                      baseUrl: modalState.form.apiUrl
+                    }"
                   />
                 </div>
 

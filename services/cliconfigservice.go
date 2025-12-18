@@ -79,6 +79,13 @@ type CLIConfig struct {
 	Editable     map[string]interface{}    `json:"editable,omitempty"`     // 可编辑字段的当前值
 }
 
+// CLIConfigSnapshots CLI 配置快照（用于前端对比：当前 vs 预览）
+type CLIConfigSnapshots struct {
+	CurrentFiles []CLIConfigFile `json:"currentFiles"`
+	PreviewFiles []CLIConfigFile `json:"previewFiles"`
+	Mode         string          `json:"mode"` // "proxy" | "direct"
+}
+
 // CLITemplate CLI 配置模板
 type CLITemplate struct {
 	Template        map[string]interface{} `json:"template"`
@@ -111,6 +118,298 @@ func (s *CliConfigService) GetConfig(platform string) (*CLIConfig, error) {
 		return s.getCodexConfig()
 	case PlatformGemini:
 		return s.getGeminiConfig()
+	default:
+		return nil, fmt.Errorf("不支持的平台: %s", platform)
+	}
+}
+
+// GetConfigSnapshots 获取指定平台的配置快照，用于前端展示"当前(磁盘)"与"预览(激活后)"对比。
+// 这是纯 dry-run 接口：不会对任何文件进行写入。
+//
+// 预览规则：
+//   - 若传入 apiUrl/apiKey 任一非空：模拟 ApplySingleProvider() 的写入结果（直连模式）
+//   - 若二者都为空：模拟 EnableProxy() 的写入结果（代理模式）
+func (s *CliConfigService) GetConfigSnapshots(platform string, apiUrl string, apiKey string) (*CLIConfigSnapshots, error) {
+	if err := s.requireHome(); err != nil {
+		return nil, err
+	}
+
+	p := CLIPlatform(platform)
+
+	readText := func(path string) (string, error) {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", nil
+			}
+			return "", err
+		}
+		return string(content), nil
+	}
+
+	// 传入了 provider 配置则视为"直连预览"；否则视为"代理预览"
+	previewDirect := strings.TrimSpace(apiUrl) != "" || strings.TrimSpace(apiKey) != ""
+
+	// .env 稳定序列化：按键排序输出，并跳过空值
+	serializeEnvNoEmpty := func(envMap map[string]string) string {
+		if envMap == nil {
+			return ""
+		}
+		keys := make([]string, 0, len(envMap))
+		for k, v := range envMap {
+			if strings.TrimSpace(k) == "" || v == "" {
+				continue
+			}
+			keys = append(keys, k)
+		}
+		for i := 0; i < len(keys); i++ {
+			for j := i + 1; j < len(keys); j++ {
+				if keys[i] > keys[j] {
+					keys[i], keys[j] = keys[j], keys[i]
+				}
+			}
+		}
+		lines := make([]string, 0, len(keys))
+		for _, k := range keys {
+			lines = append(lines, fmt.Sprintf("%s=%s", k, envMap[k]))
+		}
+		out := strings.Join(lines, "\n")
+		if out != "" {
+			out += "\n"
+		}
+		return out
+	}
+
+	switch p {
+	case PlatformClaude:
+		configPath := s.getClaudeConfigPath()
+
+		currentContent, err := readText(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取 Claude 配置失败: %w", err)
+		}
+
+		currentFiles := []CLIConfigFile{
+			{Path: configPath, Format: "json", Content: currentContent},
+		}
+
+		// 计算当前模式：是否指向本地代理
+		currentMode := "direct"
+		if strings.TrimSpace(currentContent) != "" {
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(currentContent), &payload); err == nil {
+				env, _ := payload["env"].(map[string]any)
+				if env != nil {
+					baseURLVal := anyToString(env["ANTHROPIC_BASE_URL"])
+					enabled := strings.EqualFold(
+						strings.TrimSuffix(strings.TrimSpace(baseURLVal), "/"),
+						strings.TrimSuffix(strings.TrimSpace(s.baseURL()), "/"),
+					)
+					if enabled {
+						currentMode = "proxy"
+					}
+				}
+			}
+		}
+
+		// 构造预览：最小侵入，仅更新锁定字段
+		previewData := make(map[string]any)
+		if strings.TrimSpace(currentContent) != "" {
+			if err := json.Unmarshal([]byte(currentContent), &previewData); err != nil {
+				previewData = make(map[string]any)
+			}
+		}
+		env, _ := previewData["env"].(map[string]any)
+		if env == nil {
+			env = make(map[string]any)
+		}
+		if previewDirect {
+			env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(apiUrl)
+			env["ANTHROPIC_AUTH_TOKEN"] = apiKey
+		} else {
+			env["ANTHROPIC_BASE_URL"] = s.baseURL()
+			env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
+		}
+		previewData["env"] = env
+
+		previewBytes, err := json.MarshalIndent(previewData, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Claude 预览配置失败: %w", err)
+		}
+
+		previewFiles := []CLIConfigFile{
+			{Path: configPath, Format: "json", Content: string(previewBytes)},
+		}
+
+		return &CLIConfigSnapshots{
+			CurrentFiles: currentFiles,
+			PreviewFiles: previewFiles,
+			Mode:         currentMode,
+		}, nil
+
+	case PlatformCodex:
+		configPath := s.getCodexConfigPath()
+		authPath := s.getCodexAuthPath()
+
+		currentConfig, err := readText(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取 Codex 配置失败: %w", err)
+		}
+		currentAuth, err := readText(authPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取 Codex 认证文件失败: %w", err)
+		}
+
+		currentFiles := []CLIConfigFile{
+			{Path: configPath, Format: "toml", Content: currentConfig},
+			{Path: authPath, Format: "json", Content: currentAuth},
+		}
+
+		// 计算当前模式：是否指向本地代理
+		// 向后兼容：同时检查 code-switch-r（新）和 code-switch（旧）两个 key
+		currentMode := "direct"
+		if strings.TrimSpace(currentConfig) != "" {
+			var cfg codexConfig
+			if err := toml.Unmarshal([]byte(currentConfig), &cfg); err == nil {
+				proxyKeys := []string{codexProviderKey, "code-switch"}
+				for _, key := range proxyKeys {
+					provider, ok := cfg.ModelProviders[key]
+					if ok && strings.EqualFold(cfg.ModelProvider, key) && strings.EqualFold(provider.BaseURL, s.baseURL()) {
+						currentMode = "proxy"
+						break
+					}
+				}
+			}
+		}
+
+		// 解析现有 TOML
+		raw := make(map[string]any)
+		if strings.TrimSpace(currentConfig) != "" {
+			if err := toml.Unmarshal([]byte(currentConfig), &raw); err != nil {
+				raw = make(map[string]any)
+			}
+		}
+
+		authPayload := map[string]string{}
+
+		if previewDirect {
+			// 复用 provider 快照推导 providerKey
+			providerKey := "preview-provider"
+			if providers, err := loadProviderSnapshot("codex"); err == nil {
+				for _, p := range providers {
+					if urlsEqualFold(p.APIURL, apiUrl) && p.APIKey == apiKey {
+						providerKey = sanitizeProviderKey(p.Name, int(p.ID))
+						break
+					}
+				}
+			}
+
+			raw["preferred_auth_method"] = "apikey"
+			raw["model_provider"] = providerKey
+
+			modelProviders := ensureTomlTable(raw, "model_providers")
+			providerCfg := ensureProviderTable(modelProviders, providerKey)
+			providerCfg["name"] = providerKey
+			providerCfg["base_url"] = normalizeURLTrimSlash(apiUrl)
+			providerCfg["wire_api"] = "responses"
+			providerCfg["requires_openai_auth"] = false
+			modelProviders[providerKey] = providerCfg
+			raw["model_providers"] = modelProviders
+
+			authPayload["OPENAI_API_KEY"] = apiKey
+		} else {
+			raw["preferred_auth_method"] = "apikey"
+			raw["model_provider"] = "code-switch-r"
+
+			if _, exists := raw["model"]; !exists {
+				raw["model"] = "gpt-5-codex"
+			}
+
+			modelProviders := ensureTomlTable(raw, "model_providers")
+			providerCfg := ensureProviderTable(modelProviders, "code-switch-r")
+			providerCfg["name"] = "code-switch-r"
+			providerCfg["base_url"] = s.baseURL()
+			providerCfg["wire_api"] = "responses"
+			providerCfg["requires_openai_auth"] = false
+			modelProviders["code-switch-r"] = providerCfg
+			raw["model_providers"] = modelProviders
+
+			authPayload["OPENAI_API_KEY"] = "code-switch-r"
+		}
+
+		tomlBytes, err := toml.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Codex 预览配置失败: %w", err)
+		}
+		cleaned := stripModelProvidersHeader(tomlBytes)
+
+		authBytes, err := json.MarshalIndent(authPayload, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("序列化 Codex auth 预览失败: %w", err)
+		}
+
+		previewFiles := []CLIConfigFile{
+			{Path: configPath, Format: "toml", Content: string(cleaned)},
+			{Path: authPath, Format: "json", Content: string(authBytes)},
+		}
+
+		return &CLIConfigSnapshots{
+			CurrentFiles: currentFiles,
+			PreviewFiles: previewFiles,
+			Mode:         currentMode,
+		}, nil
+
+	case PlatformGemini:
+		envPath := s.getGeminiEnvPath()
+		currentEnv, err := readText(envPath)
+		if err != nil {
+			return nil, fmt.Errorf("读取 Gemini .env 失败: %w", err)
+		}
+
+		currentFiles := []CLIConfigFile{
+			{Path: envPath, Format: "env", Content: currentEnv},
+		}
+
+		// 计算当前模式：是否指向本地代理
+		currentMode := "direct"
+		if strings.TrimSpace(currentEnv) != "" {
+			envMap := parseEnvFile(currentEnv)
+			if strings.EqualFold(strings.TrimSpace(envMap["GOOGLE_GEMINI_BASE_URL"]), strings.TrimSpace(s.geminiBaseURL())) {
+				currentMode = "proxy"
+			}
+		}
+
+		envMap := parseEnvFile(currentEnv)
+		if envMap == nil {
+			envMap = make(map[string]string)
+		}
+
+		if previewDirect {
+			if strings.TrimSpace(apiUrl) != "" {
+				envMap["GOOGLE_GEMINI_BASE_URL"] = strings.TrimSpace(apiUrl)
+			} else {
+				delete(envMap, "GOOGLE_GEMINI_BASE_URL")
+			}
+			if strings.TrimSpace(apiKey) != "" {
+				envMap["GEMINI_API_KEY"] = strings.TrimSpace(apiKey)
+			} else {
+				delete(envMap, "GEMINI_API_KEY")
+			}
+		} else {
+			envMap["GOOGLE_GEMINI_BASE_URL"] = s.geminiBaseURL()
+			envMap["GEMINI_API_KEY"] = "code-switch-r"
+		}
+
+		previewFiles := []CLIConfigFile{
+			{Path: envPath, Format: "env", Content: serializeEnvNoEmpty(envMap)},
+		}
+
+		return &CLIConfigSnapshots{
+			CurrentFiles: currentFiles,
+			PreviewFiles: previewFiles,
+			Mode:         currentMode,
+		}, nil
+
 	default:
 		return nil, fmt.Errorf("不支持的平台: %s", platform)
 	}
@@ -233,7 +532,7 @@ func (s *CliConfigService) GetLockedFields(platform string) []string {
 	case PlatformClaude:
 		return []string{"env.ANTHROPIC_BASE_URL", "env.ANTHROPIC_AUTH_TOKEN"}
 	case PlatformCodex:
-		return []string{"model_provider", "preferred_auth_method", "model_providers.code-switch.base_url", "model_providers.code-switch.name", "model_providers.code-switch.wire_api"}
+		return []string{"model_provider", "preferred_auth_method", "model_providers.code-switch-r.base_url", "model_providers.code-switch-r.name", "model_providers.code-switch-r.wire_api"}
 	case PlatformGemini:
 		return []string{"GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY"}
 	default:
@@ -357,7 +656,7 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 		},
 		CLIConfigField{
 			Key:    "env.ANTHROPIC_AUTH_TOKEN",
-			Value:  "code-switch",
+			Value:  "code-switch-r",
 			Locked: true,
 			Hint:   "代理认证令牌",
 			Type:   "string",
@@ -455,7 +754,7 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) err
 		env = make(map[string]interface{})
 	}
 	env["ANTHROPIC_BASE_URL"] = s.baseURL()
-	env["ANTHROPIC_AUTH_TOKEN"] = "code-switch"
+	env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
 	data["env"] = env
 
 	// 锁定字段列表（这些字段不允许用户覆盖）
@@ -515,7 +814,7 @@ func (s *CliConfigService) saveClaudeConfigContent(configPath string, content st
 		env = make(map[string]interface{})
 	}
 	env["ANTHROPIC_BASE_URL"] = s.baseURL()
-	env["ANTHROPIC_AUTH_TOKEN"] = "code-switch"
+	env["ANTHROPIC_AUTH_TOKEN"] = "code-switch-r"
 	data["env"] = env
 
 	// 创建备份（文件不存在时 CreateBackup 会返回空路径并忽略）
@@ -584,7 +883,7 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 	config.Fields = append(config.Fields,
 		CLIConfigField{
 			Key:    "model_provider",
-			Value:  "code-switch",
+			Value:  "code-switch-r",
 			Locked: true,
 			Hint:   "代理提供商标识",
 			Type:   "string",
@@ -597,7 +896,7 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 			Type:   "string",
 		},
 		CLIConfigField{
-			Key:    "model_providers.code-switch.base_url",
+			Key:    "model_providers.code-switch-r.base_url",
 			Value:  baseURL,
 			Locked: true,
 			Hint:   "由代理管理，指向本地代理服务",
@@ -669,23 +968,23 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 	}
 
 	// 设置锁定字段
-	raw["model_provider"] = "code-switch"
+	raw["model_provider"] = "code-switch-r"
 	raw["preferred_auth_method"] = "apikey"
 
-	// 确保 model_providers.code-switch 存在
+	// 确保 model_providers.code-switch-r 存在
 	modelProviders, ok := raw["model_providers"].(map[string]interface{})
 	if !ok {
 		modelProviders = make(map[string]interface{})
 	}
-	provider, ok := modelProviders["code-switch"].(map[string]interface{})
+	provider, ok := modelProviders["code-switch-r"].(map[string]interface{})
 	if !ok {
 		provider = make(map[string]interface{})
 	}
-	provider["name"] = "code-switch"
+	provider["name"] = "code-switch-r"
 	provider["base_url"] = s.baseURL()
 	provider["wire_api"] = "responses"
 	provider["requires_openai_auth"] = false
-	modelProviders["code-switch"] = provider
+	modelProviders["code-switch-r"] = provider
 	raw["model_providers"] = modelProviders
 
 	// 锁定字段列表（这些字段不允许用户覆盖）
@@ -741,23 +1040,23 @@ func (s *CliConfigService) saveCodexConfigContent(configPath string, content str
 	}
 
 	// 强制写入锁定字段
-	raw["model_provider"] = "code-switch"
+	raw["model_provider"] = "code-switch-r"
 	raw["preferred_auth_method"] = "apikey"
 
-	// 确保 model_providers.code-switch 存在并写入锁定字段
+	// 确保 model_providers.code-switch-r 存在并写入锁定字段
 	modelProviders, ok := raw["model_providers"].(map[string]interface{})
 	if !ok || modelProviders == nil {
 		modelProviders = make(map[string]interface{})
 	}
-	provider, ok := modelProviders["code-switch"].(map[string]interface{})
+	provider, ok := modelProviders["code-switch-r"].(map[string]interface{})
 	if !ok || provider == nil {
 		provider = make(map[string]interface{})
 	}
-	provider["name"] = "code-switch"
+	provider["name"] = "code-switch-r"
 	provider["base_url"] = s.baseURL()
 	provider["wire_api"] = "responses"
 	provider["requires_openai_auth"] = false
-	modelProviders["code-switch"] = provider
+	modelProviders["code-switch-r"] = provider
 	raw["model_providers"] = modelProviders
 
 	// 确保目录存在
@@ -946,7 +1245,7 @@ func (s *CliConfigService) saveGeminiEnvContent(envPath string, content string) 
 	if existingAPIKey != "" {
 		envMap["GEMINI_API_KEY"] = existingAPIKey
 	} else if envMap["GEMINI_API_KEY"] == "" {
-		envMap["GEMINI_API_KEY"] = "code-switch"
+		envMap["GEMINI_API_KEY"] = "code-switch-r"
 	}
 
 	if _, err := CreateBackup(envPath); err != nil {
