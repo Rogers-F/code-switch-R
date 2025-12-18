@@ -736,7 +736,6 @@
         "name": "供应商名称",
         "baseUrl": "API 地址",
         "apiKey": "API 密钥",
-        "apiKeyReadonlyHint": "API 密钥由系统管理，编辑模式下不可修改",
         "model": "默认模型",
         "cancel": "取消",
         "save": "保存",
