@@ -529,6 +529,8 @@
         "autoStart": "开机自启动",
         "switchNotify": "切换通知",
         "switchNotifyHint": "供应商切换或拉黑时发送系统通知",
+        "roundRobin": "同 Level 轮询",
+        "roundRobinHint": "启用后同 Level 的供应商轮流处理请求，关闭则始终从第一个开始",
         "autoUpdate": "自动更新",
         "lastCheck": "上次检查",
         "currentVersion": "当前版本",
@@ -777,15 +779,30 @@
         "title": "Claude Skill",
         "lead": "从 Skill 仓库中获取 Claude Skill，点击右上角按钮可添加更多 Skill 仓库。"
       },
+      "platform": {
+        "claude": "Claude Code",
+        "codex": "Codex"
+      },
+      "groups": {
+        "project": "项目级技能",
+        "user": "用户级技能",
+        "available": "可用技能"
+      },
       "actions": {
         "back": "返回首页",
         "loading": "处理中...",
         "refresh": "刷新列表",
         "view": "查看 GitHub",
-        "install": "安装到 Claude Code",
+        "install": "安装",
         "uninstall": "卸载",
         "installError": "安装 {name} 失败，请重试",
-        "uninstallError": "卸载 {name} 失败，请重试"
+        "uninstallError": "卸载 {name} 失败，请重试",
+        "toggle": "启用/禁用",
+        "viewContent": "查看内容",
+        "hideContent": "收起内容",
+        "openFolder": "打开文件夹",
+        "loadFailed": "加载内容失败",
+        "toggleError": "切换技能状态失败"
       },
       "list": {
         "title": "可用技能",
@@ -794,7 +811,23 @@
         "empty": "仓库中没有可用技能。",
         "error": "技能列表加载失败，请检查网络后重试。",
         "noDescription": "SKILL.md 未提供描述",
-        "missingRepo": "缺少对应的仓库信息，无法安装"
+        "missingRepo": "缺少对应的仓库信息，无法安装",
+        "noInstalled": "当前没有已安装的技能"
+      },
+      "install": {
+        "title": "选择安装位置",
+        "desc": "将 {name} 安装到：",
+        "locationLabel": "安装位置",
+        "userLevel": "用户级（全局）",
+        "userLevelDesc": "~/.{platform}/skills/",
+        "projectLevel": "项目级（当前目录）",
+        "projectLevelDesc": "./.{platform}/skills/",
+        "gitWarning": "项目级技能可能需要添加到 .gitignore",
+        "installing": "安装中...",
+        "confirm": "确认安装"
+      },
+      "license": {
+        "complete": "完整条款见 {file}"
       },
       "repos": {
         "open": "管理仓库",
