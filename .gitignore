@@ -4,3 +4,5 @@ frontend/dist
 .task
 bin
 CLAUDE.md
+*.exe
+.cursor
