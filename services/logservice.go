@@ -26,7 +26,7 @@ func NewLogService() *LogService {
 	return &LogService{pricing: svc}
 }
 
-func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]ReqeustLog, error) {
+func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]RequestLog, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -48,9 +48,9 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 	if err != nil {
 		return nil, err
 	}
-	logs := make([]ReqeustLog, 0, len(records))
+	logs := make([]RequestLog, 0, len(records))
 	for _, record := range records {
-		logEntry := ReqeustLog{
+		logEntry := RequestLog{
 			ID:                record.GetInt64("id"),
 			Platform:          record.GetString("platform"),
 			Model:             record.GetString("model"),
@@ -395,7 +395,7 @@ func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, 
 	return stats, nil
 }
 
-func (ls *LogService) decorateCost(logEntry *ReqeustLog) {
+func (ls *LogService) decorateCost(logEntry *RequestLog) {
 	if ls == nil || ls.pricing == nil || logEntry == nil {
 		return
 	}
@@ -526,17 +526,17 @@ type LogStats struct {
 }
 
 type ProviderDailyStat struct {
-	Provider          string  `json:"provider"`
-	TotalRequests     int64   `json:"total_requests"`
+	Provider           string  `json:"provider"`
+	TotalRequests      int64   `json:"total_requests"`
 	SuccessfulRequests int64   `json:"successful_requests"`
-	FailedRequests    int64   `json:"failed_requests"`
-	SuccessRate       float64 `json:"success_rate"`
-	InputTokens       int64   `json:"input_tokens"`
-	OutputTokens      int64   `json:"output_tokens"`
-	ReasoningTokens   int64   `json:"reasoning_tokens"`
-	CacheCreateTokens int64   `json:"cache_create_tokens"`
-	CacheReadTokens   int64   `json:"cache_read_tokens"`
-	CostTotal         float64 `json:"cost_total"`
+	FailedRequests     int64   `json:"failed_requests"`
+	SuccessRate        float64 `json:"success_rate"`
+	InputTokens        int64   `json:"input_tokens"`
+	OutputTokens       int64   `json:"output_tokens"`
+	ReasoningTokens    int64   `json:"reasoning_tokens"`
+	CacheCreateTokens  int64   `json:"cache_create_tokens"`
+	CacheReadTokens    int64   `json:"cache_read_tokens"`
+	CostTotal          float64 `json:"cost_total"`
 }
 
 type LogStatsSeries struct {

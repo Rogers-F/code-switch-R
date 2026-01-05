@@ -34,6 +34,19 @@ type consoleWriter struct {
 	output  io.Writer
 }
 
+// requestLogFields 请求日志特征字段（转义和非转义两种形式）
+// 【性能优化】作为包级变量，避免在高频调用的 isRequestLogJSON 中重复创建切片
+var requestLogFields = []string{
+	`"input_tokens":`, `\"input_tokens\":`,
+	`"output_tokens":`, `\"output_tokens\":`,
+	`"total_cost":`, `\"total_cost\":`,
+	`"has_pricing":`, `\"has_pricing\":`,
+	`"cache_create_tokens":`, `\"cache_create_tokens\":`,
+	`"cache_read_tokens":`, `\"cache_read_tokens\":`,
+	`"reasoning_tokens":`, `\"reasoning_tokens\":`,
+	`"duration_sec":`, `\"duration_sec\":`,
+}
+
 func (w *consoleWriter) Write(p []byte) (n int, err error) {
 	// 写入原始输出
 	n, err = w.output.Write(p)
@@ -120,8 +133,17 @@ func (cs *ConsoleService) shouldSkipLog(message string) bool {
 	if strings.Contains(message, `\\\\`) {
 		return true
 	}
+	// 跳过包含转义引号的 JSON 数据（双重转义特征）
+	if strings.Contains(message, `\\\"`) {
+		return true
+	}
 	// 跳过看起来像 ConsoleLog JSON 数组的内容
 	if strings.Contains(message, `"timestamp":`) && strings.Contains(message, `"level":`) && strings.Contains(message, `"message":`) {
+		return true
+	}
+	// 跳过看起来像 request_log JSON 数据的内容
+	// 这些数据包含请求日志的典型字段
+	if isRequestLogJSON(message) {
 		return true
 	}
 	// 跳过 Wails 框架的 Asset Request 日志（静态资源请求）
@@ -133,6 +155,22 @@ func (cs *ConsoleService) shouldSkipLog(message string) bool {
 	// 这些日志在每次前端调用后端服务时产生，频率很高
 	if strings.Contains(message, "Binding call started:") || strings.Contains(message, "Binding call complete:") {
 		return true
+	}
+	return false
+}
+
+// isRequestLogJSON 检测消息是否为请求日志 JSON 数据
+// 请求日志 JSON 包含特定字段组合，如 platform, model, provider, input_tokens 等
+func isRequestLogJSON(message string) bool {
+	matchCount := 0
+	for _, field := range requestLogFields {
+		if strings.Contains(message, field) {
+			matchCount++
+			// 匹配到2个以上特征字段就认为是请求日志 JSON
+			if matchCount >= 2 {
+				return true
+			}
+		}
 	}
 	return false
 }

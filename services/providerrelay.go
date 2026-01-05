@@ -7,18 +7,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/daodao97/xgo/xdb"
-	"github.com/daodao97/xgo/xrequest"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// responseBufferSize 是流式响应复制时使用的缓冲区大小
+const responseBufferSize = 32 * 1024 // 32KB
 
 // LastUsedProvider 最后使用的供应商信息
 // @author sm
@@ -45,6 +50,204 @@ type ProviderRelayService struct {
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
+
+// hopByHopHeaders 是不应该被代理转发的逐跳头（hop-by-hop headers）
+// 参考 RFC 2616 Section 13.5.1 和 RFC 7230 Section 6.1
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+}
+
+// defaultRetryHTTPClient 是共享的带网络级重试的 HTTP 客户端
+// 使用 sync.Once 确保只初始化一次，避免每次请求创建新的 Transport 造成资源泄漏
+var (
+	defaultRetryHTTPClient     *http.Client
+	defaultRetryHTTPClientOnce sync.Once
+)
+
+// RetryTransport 是一个支持网络级错误自动重试的 http.RoundTripper
+// 用于处理瞬时网络抖动（TCP reset、DNS 解析失败等），避免直接计入应用层失败次数
+type RetryTransport struct {
+	Base       http.RoundTripper
+	MaxRetries int           // 最大重试次数
+	RetryDelay time.Duration // 重试间隔
+}
+
+// RoundTrip 实现 http.RoundTripper 接口，支持网络级错误重试
+func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var lastErr error
+	base := rt.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+
+	for attempt := 0; attempt <= rt.MaxRetries; attempt++ {
+		// 检查 context 是否已取消
+		if req.Context().Err() != nil {
+			return nil, req.Context().Err()
+		}
+
+		// 重试时重置 request body（如果 GetBody 可用）
+		if attempt > 0 && req.GetBody != nil {
+			newBody, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("failed to reset request body for retry: %w", err)
+			}
+			req.Body = newBody
+		}
+
+		resp, err := base.RoundTrip(req)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+
+		// 检查是否是 context 取消/超时
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+
+		// 判断是否是网络级别的瞬时错误（值得重试）
+		if !isTransientNetworkError(err) {
+			return nil, err
+		}
+
+		// 最后一次尝试不等待
+		if attempt < rt.MaxRetries {
+			fmt.Printf("[RetryTransport] 网络错误，%dms 后重试（%d/%d）: %v\n",
+				rt.RetryDelay.Milliseconds(), attempt+1, rt.MaxRetries, err)
+			time.Sleep(rt.RetryDelay)
+		}
+	}
+
+	return nil, lastErr
+}
+
+// isTransientNetworkError 判断是否是值得重试的瞬时网络错误
+func isTransientNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// 使用类型断言检测网络错误（比字符串匹配更可靠）
+	// 检查是否是 net.Error（网络超时等）
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// 检查是否是 net.OpError（连接级别错误）
+	// 只重试 reset/broken pipe 等瞬时错误，不重试 connection refused（服务器可能已关闭）
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		errStr := strings.ToLower(opErr.Error())
+		return strings.Contains(errStr, "reset") ||
+			strings.Contains(errStr, "broken pipe")
+	}
+
+	// 检查是否是 DNS 错误
+	// 只重试临时 DNS 错误（如超时、服务器不可达），不重试永久错误如 NXDOMAIN
+	// 注意：Temporary() 方法已废弃，使用 IsTemporary 字段代替
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		// IsNotFound 表示域名不存在（NXDOMAIN），不应重试
+		if dnsErr.IsNotFound {
+			return false
+		}
+		// IsTemporary 表示临时性 DNS 错误（超时、服务器暂时不可达等）
+		// IsTimeout 表示 DNS 查询超时，也应该重试
+		// 注意：IsTemporary 默认为 false，需要显式检查 IsTimeout
+		return dnsErr.IsTemporary || dnsErr.IsTimeout
+	}
+
+	// 回退：字符串匹配处理未被上述类型覆盖的错误
+	// 使用更精确的模式避免误匹配（如 "Geoffrey" 包含 "eof"）
+	errStr := strings.ToLower(err.Error())
+	transientErrors := []string{
+		"unexpected eof",
+		"read: eof",
+		" eof",  // 空格前缀避免误匹配如 "Geoffrey"
+		"eof\n", // 行尾 eof
+		"broken pipe",
+		"connection reset by peer",
+		"tls handshake timeout",
+	}
+
+	for _, te := range transientErrors {
+		if strings.Contains(errStr, te) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// newRetryHTTPClient 返回带有网络级重试的 HTTP 客户端
+// 使用默认参数（1 次重试，500ms 间隔）时返回共享的单例客户端，避免资源泄漏
+// 自定义参数时创建新客户端（罕见场景）
+//
+// 【资源管理注意事项】
+// - 使用默认参数时返回共享单例，无需关闭
+// - 自定义参数时返回新客户端，其 Transport 包含连接池
+// - 如需关闭自定义客户端，可调用 client.CloseIdleConnections()
+// - 建议：尽量复用客户端实例，避免频繁创建/销毁带来的资源开销
+//
+// 【并发安全】
+// - 不要直接修改返回客户端的 Timeout 字段，这会影响共享单例的所有调用方
+// - 应使用 context.WithTimeout 或 context.WithDeadline 控制单次请求超时
+func newRetryHTTPClient(maxRetries int, retryDelay time.Duration) *http.Client {
+	// 使用默认参数时返回共享的单例客户端
+	// 注意：maxRetries <= 0 被视为"使用默认值"（1次重试），而非"不重试"
+	// 如需完全禁用重试，应使用标准 http.Client 而非此函数
+	if (maxRetries <= 0 || maxRetries == 1) && (retryDelay <= 0 || retryDelay == 500*time.Millisecond) {
+		defaultRetryHTTPClientOnce.Do(func() {
+			defaultRetryHTTPClient = &http.Client{
+				Transport: &RetryTransport{
+					Base: &http.Transport{
+						MaxIdleConns:        100,
+						IdleConnTimeout:     90 * time.Second,
+						MaxIdleConnsPerHost: 10,
+					},
+					MaxRetries: 1,
+					RetryDelay: 500 * time.Millisecond,
+				},
+			}
+		})
+		return defaultRetryHTTPClient
+	}
+
+	// 自定义参数时创建新客户端
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+	if retryDelay <= 0 {
+		retryDelay = 500 * time.Millisecond
+	}
+
+	return &http.Client{
+		Transport: &RetryTransport{
+			Base: &http.Transport{
+				MaxIdleConns:        100,
+				IdleConnTimeout:     90 * time.Second,
+				MaxIdleConnsPerHost: 10,
+			},
+			MaxRetries: maxRetries,
+			RetryDelay: retryDelay,
+		},
+	}
+}
+
+// isHopByHopHeader 检查给定的 header 是否是逐跳头
+func isHopByHopHeader(header string) bool {
+	return hopByHopHeaders[header]
+}
 
 func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, addr string) *ProviderRelayService {
 	if addr == "" {
@@ -517,7 +720,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							break
 						}
 
-						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 尝试 %d/%d | Model: %s\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
@@ -525,7 +728,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						duration := time.Since(startTime)
 
 						if ok {
-							fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+							fmt.Printf("[INFO] ✓ 成功: %s | 尝试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
 							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
 								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
@@ -542,7 +745,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if err != nil {
 							errorMsg = err.Error()
 						}
-						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+						fmt.Printf("[WARN] ✗ 失败: %s | 尝试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
 
 						// 客户端中断不计入失败次数，直接返回
@@ -759,6 +962,20 @@ func (prs *ProviderRelayService) forwardRequest(
 	model string,
 ) (bool, error) {
 	targetURL := joinURL(provider.APIURL, endpoint)
+
+	// 添加查询参数（使用 url.Parse 进行正确的 URL 操作）
+	if len(query) > 0 {
+		u, err := url.Parse(targetURL)
+		if err == nil {
+			q := u.Query()
+			for k, v := range query {
+				q.Set(k, v)
+			}
+			u.RawQuery = q.Encode()
+			targetURL = u.String()
+		}
+	}
+
 	headers := cloneMap(clientHeaders)
 
 	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
@@ -784,7 +1001,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		headers["Accept"] = "application/json"
 	}
 
-	requestLog := &ReqeustLog{
+	requestLog := &RequestLog{
 		Platform: kind,
 		Provider: provider.Name,
 		Model:    model,
@@ -829,59 +1046,75 @@ func (prs *ProviderRelayService) forwardRequest(
 		}
 	}()
 
-	req := xrequest.New().
-		SetHeaders(headers).
-		SetQueryParams(query).
-		SetRetry(1, 500*time.Millisecond).
-		SetTimeout(32 * time.Hour) // 32小时超时，适配超大型项目分析
+	requestTimeout := 32 * time.Hour // 给模型足够思考时间
 
-	reqBody := bytes.NewReader(bodyBytes)
-	req = req.SetBody(reqBody)
+	// 使用标准 http.Client + http.NewRequestWithContext
+	// 这能确保 context 取消时请求真正被中断
+	reqCtx, cancelFunc := context.WithTimeout(c.Request.Context(), requestTimeout)
+	defer cancelFunc()
 
-	resp, err := req.Post(targetURL)
+	httpReq, reqErr := http.NewRequestWithContext(reqCtx, "POST", targetURL, bytes.NewReader(bodyBytes))
+	if reqErr != nil {
+		return false, reqErr
+	}
+	// 设置 GetBody 以支持 RetryTransport 重试时重置请求体
+	httpReq.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+	}
+	for k, v := range headers {
+		httpReq.Header.Set(k, v)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// 使用带网络级重试的 http.Client（超时由 context 控制）
+	// 网络级重试：1 次，间隔 500ms，仅针对瞬时网络错误（TCP reset、DNS 失败等）
+	// 应用层重试由外层 BlacklistService 控制，处理 API 级别错误
+	httpClient := newRetryHTTPClient(1, 500*time.Millisecond)
+	httpResp, err := httpClient.Do(httpReq)
 
 	// 无论成功失败，先尝试记录 HttpCode
-	if resp != nil {
-		requestLog.HttpCode = resp.StatusCode()
+	if httpResp != nil {
+		requestLog.HttpCode = httpResp.StatusCode
 	}
 
 	if err != nil {
-		// resp 存在但 err != nil：可能是客户端中断，不计入失败
-		if resp != nil && requestLog.HttpCode == 0 {
+		// 检查是否是 context 超时或取消
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Printf("[INFO] Provider %s 请求超时（context deadline exceeded）\n", provider.Name)
+			return false, fmt.Errorf("request timeout: %w", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			fmt.Printf("[INFO] Provider %s 请求被取消（context canceled）\n", provider.Name)
+			return false, fmt.Errorf("%w: %v", errClientAbort, err)
+		}
+		// 响应存在但状态码为0：可能是客户端中断
+		if httpResp != nil && requestLog.HttpCode == 0 {
 			fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, err)
 		}
 		return false, err
 	}
 
-	if resp == nil {
+	// 检查响应是否存在
+	if httpResp == nil {
 		return false, fmt.Errorf("empty response")
 	}
+	defer httpResp.Body.Close()
 
-	status := requestLog.HttpCode
-
-	if resp.Error() != nil {
-		// resp 存在、有错误、但状态码为 0：客户端中断，不计入失败
-		if status == 0 {
-			fmt.Printf("[INFO] Provider %s 响应错误但状态码为0，判定为客户端中断\n", provider.Name)
-			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
-		}
-		return false, resp.Error()
-	}
+	status := httpResp.StatusCode
+	requestLog.HttpCode = status
 
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		if copyErr != nil {
+		if copyErr := writeProxiedResponse(c, httpResp, kind, requestLog); copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
 		return true, nil
 	}
 
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		if copyErr != nil {
+		if copyErr := writeProxiedResponse(c, httpResp, kind, requestLog); copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
 		// 只要provider返回了2xx状态码，就算成功（复制失败是客户端问题，不是provider问题）
@@ -889,6 +1122,72 @@ func (prs *ProviderRelayService) forwardRequest(
 	}
 
 	return false, fmt.Errorf("upstream status %d", status)
+}
+
+// writeProxiedResponse 写入代理响应（复制响应头、状态码、响应体）
+// 用于避免 forwardRequest 中 status 0 和 status 2xx 的重复代码
+func writeProxiedResponse(c *gin.Context, httpResp *http.Response, kind string, requestLog *RequestLog) error {
+	// 复制响应头（过滤掉逐跳头）
+	for k, vv := range httpResp.Header {
+		if isHopByHopHeader(k) {
+			continue
+		}
+		for _, v := range vv {
+			c.Writer.Header().Add(k, v)
+		}
+	}
+	c.Writer.WriteHeader(httpResp.StatusCode)
+
+	// 流式复制 body 并通过 hook 提取 token 用量
+	hook := RequestLogHook(c, kind, requestLog)
+	return copyResponseBodyWithHook(httpResp.Body, c.Writer, hook)
+}
+
+// copyResponseBodyWithHook 流式复制响应 body 到 writer，同时调用 hook 处理数据
+// 用于在流式传输过程中解析 SSE 数据提取 token 用量
+func copyResponseBodyWithHook(body io.Reader, writer io.Writer, hook func([]byte) []byte) error {
+	buf := make([]byte, responseBufferSize)
+
+	for {
+		n, readErr := body.Read(buf)
+		if n > 0 {
+			data := buf[:n]
+
+			// 调用 hook 处理数据（用于解析 token 用量）
+			// 使用 panic recovery 保护，避免 hook 异常导致服务器崩溃
+			if hook != nil {
+				data = safeCallHook(hook, data)
+			}
+
+			// 写入客户端
+			if _, writeErr := writer.Write(data); writeErr != nil {
+				return writeErr
+			}
+
+			// 对于流式响应，立即 flush
+			if flusher, ok := writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			return readErr
+		}
+	}
+}
+
+// safeCallHook 安全地调用 hook 函数，捕获可能的 panic
+// 如果 hook 发生 panic，记录错误并返回原始数据，不影响响应传输
+func safeCallHook(hook func([]byte) []byte, data []byte) (result []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[ERROR] Hook panicked: %v\nStack: %s\n", r, debug.Stack())
+			result = data // 返回原始数据，确保响应不中断
+		}
+	}()
+	return hook(data)
 }
 
 // extractUserID 从请求头中提取 user_id（用于缓存亲和性）
@@ -1028,7 +1327,7 @@ func (prs *ProviderRelayService) tryGeminiAffinityProvider(
 	endpoint string,
 	bodyBytes []byte,
 	isStream bool,
-	requestLog *ReqeustLog,
+	requestLog *RequestLog,
 	startTime time.Time,
 ) GeminiAffinityTryResult {
 	result := GeminiAffinityTryResult{}
@@ -1186,8 +1485,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	return nil
 }
 
-func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []byte) (bool, []byte) { // SSE 钩子：累计字节和解析 token 用量
-	return func(data []byte) (bool, []byte) {
+// RequestLogHook SSE 钩子：解析 token 用量，返回原始数据（不做修改）
+func RequestLogHook(c *gin.Context, kind string, usage *RequestLog) func(data []byte) []byte {
+	return func(data []byte) []byte {
 		payload := strings.TrimSpace(string(data))
 
 		parserFn := ClaudeCodeParseTokenUsageFromResponse
@@ -1199,11 +1499,11 @@ func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []
 		}
 		parseEventPayload(payload, parserFn, usage)
 
-		return true, data
+		return data
 	}
 }
 
-func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog) {
+func parseEventPayload(payload string, parser func(string, *RequestLog), usage *RequestLog) {
 	lines := strings.Split(payload, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -1213,7 +1513,7 @@ func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *
 	}
 }
 
-type ReqeustLog struct {
+type RequestLog struct {
 	ID                int64   `json:"id"`
 	Platform          string  `json:"platform"` // claude、codex 或 gemini
 	Model             string  `json:"model"`
@@ -1239,7 +1539,7 @@ type ReqeustLog struct {
 }
 
 // claude code usage parser
-func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+func ClaudeCodeParseTokenUsageFromResponse(data string, usage *RequestLog) {
 	usage.InputTokens += int(gjson.Get(data, "message.usage.input_tokens").Int())
 	usage.OutputTokens += int(gjson.Get(data, "message.usage.output_tokens").Int())
 	usage.CacheCreateTokens += int(gjson.Get(data, "message.usage.cache_creation_input_tokens").Int())
@@ -1250,7 +1550,7 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 }
 
 // codex usage parser
-func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+func CodexParseTokenUsageFromResponse(data string, usage *RequestLog) {
 	usage.InputTokens += int(gjson.Get(data, "response.usage.input_tokens").Int())
 	usage.OutputTokens += int(gjson.Get(data, "response.usage.output_tokens").Int())
 	usage.CacheReadTokens += int(gjson.Get(data, "response.usage.input_tokens_details.cached_tokens").Int())
@@ -1259,7 +1559,7 @@ func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 
 // gemini usage parser (流式响应专用)
 // Gemini SSE 流中每个 chunk 都会携带完整的 usageMetadata，需取最大值而非累加
-func GeminiParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+func GeminiParseTokenUsageFromResponse(data string, usage *RequestLog) {
 	usageResult := gjson.Get(data, "usageMetadata")
 	if !usageResult.Exists() {
 		return
@@ -1267,9 +1567,9 @@ func GeminiParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 	mergeGeminiUsageMetadata(usageResult, usage)
 }
 
-// mergeGeminiUsageMetadata 合并 Gemini usageMetadata 到 ReqeustLog（取最大值去重）
+// mergeGeminiUsageMetadata 合并 Gemini usageMetadata 到 RequestLog（取最大值去重）
 // Gemini 流式响应特点：每个 chunk 包含截止当前的累计用量，因此取最大值即可
-func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
+func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *RequestLog) {
 	if !usage.Exists() || reqLog == nil {
 		return
 	}
@@ -1300,7 +1600,7 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 // streamGeminiResponseWithHook 流式传输 Gemini 响应并通过 Hook 提取 token 用量
 // 【修复】维护跨 chunk 缓冲，确保完整 SSE 事件解析
 // Gemini SSE 格式: "data: {json}\n\n" 或 "data: [DONE]\n\n"
-func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *ReqeustLog) error {
+func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *RequestLog) error {
 	buf := make([]byte, 8192)   // 增大缓冲区减少系统调用
 	var lineBuf strings.Builder // 跨 chunk 行缓冲
 
@@ -1335,7 +1635,7 @@ func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *
 
 // parseGeminiSSEWithBuffer 使用缓冲处理跨 chunk 的 SSE 事件
 // 【修复】解决 JSON 被 TCP 分割到多个 chunk 导致解析失败的问题
-func parseGeminiSSEWithBuffer(chunk string, lineBuf *strings.Builder, requestLog *ReqeustLog) {
+func parseGeminiSSEWithBuffer(chunk string, lineBuf *strings.Builder, requestLog *RequestLog) {
 	// 将当前 chunk 追加到缓冲
 	lineBuf.WriteString(chunk)
 	content := lineBuf.String()
@@ -1371,7 +1671,7 @@ func parseGeminiSSEWithBuffer(chunk string, lineBuf *strings.Builder, requestLog
 
 // parseGeminiSSELine 解析单个 SSE 事件提取 usageMetadata
 // 【优化】只在包含 usageMetadata 时才调用 gjson 解析
-func parseGeminiSSELine(event string, requestLog *ReqeustLog) {
+func parseGeminiSSELine(event string, requestLog *RequestLog) {
 	lines := strings.Split(event, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -1489,7 +1789,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		fmt.Printf("[Gemini] 共 %d 个 Level 分组: %v\n", len(sortedLevels), sortedLevels)
 
 		// 请求日志
-		requestLog := &ReqeustLog{
+		requestLog := &RequestLog{
 			Platform:     "gemini",
 			IsStream:     isStream,
 			InputTokens:  0,
@@ -1563,12 +1863,12 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 							break
 						}
 
-						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
+						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 尝试 %d/%d\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider)
 
 						ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 						if ok {
-							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
+							fmt.Printf("[Gemini] ✓ 成功: %s | 尝试 %d 次\n", provider.Name, retryCount+1)
 							_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
 							prs.setLastUsedProvider("gemini", provider.Name)
 							return
@@ -1585,7 +1885,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						lastError = errMsg
 						lastProvider = provider.Name
 
-						fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
+						fmt.Printf("[Gemini] ✗ 失败: %s | 尝试 %d/%d | 错误: %s\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errMsg)
 
 						// 记录失败次数（可能触发拉黑）
@@ -1750,7 +2050,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	endpoint string,
 	bodyBytes []byte,
 	isStream bool,
-	requestLog *ReqeustLog,
+	requestLog *RequestLog,
 ) (success bool, errMsg string, responseWritten bool) {
 	providerStart := time.Now()
 
@@ -1787,7 +2087,12 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	}
 
 	// 发送请求
-	client := &http.Client{Timeout: 300 * time.Second}
+	// 使用带网络级重试的 HTTP 客户端，处理瞬时网络错误
+	// 【修复】使用 context 超时而非直接修改共享客户端的 Timeout 字段，避免影响其他请求
+	client := newRetryHTTPClient(1, 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 300*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
 	resp, err := client.Do(req)
 	providerDuration := time.Since(providerStart).Seconds()
 
@@ -1850,7 +2155,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 // parseGeminiUsageMetadata 从 Gemini 非流式响应中提取用量，填充 request_log
 // 复用 mergeGeminiUsageMetadata 统一解析逻辑
-func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
+func parseGeminiUsageMetadata(body []byte, reqLog *RequestLog) {
 	if len(body) == 0 || reqLog == nil {
 		return
 	}
@@ -2033,7 +2338,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							break
 						}
 
-						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 尝试 %d/%d | Model: %s\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
@@ -2041,7 +2346,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						duration := time.Since(startTime)
 
 						if ok {
-							fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+							fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 尝试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
 							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
 								fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
@@ -2058,7 +2363,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						if err != nil {
 							errorMsg = err.Error()
 						}
-						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 尝试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
 
 						// 客户端中断不计入失败次数，直接返回
