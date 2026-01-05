@@ -140,7 +140,7 @@ func main() {
 	// 启动定时检查（如果启用）
 	if updateService.IsAutoCheckEnabled() {
 		go func() {
-			time.Sleep(10 * time.Second) // 延迟10秒，等待应用完成初始化
+			time.Sleep(10 * time.Second)     // 延迟10秒，等待应用完成初始化
 			updateService.CheckUpdateAsync() // 启动时检查一次
 			updateService.StartDailyCheck()  // 启动每日8点定时检查
 		}()
@@ -230,6 +230,7 @@ func main() {
 			application.NewService(consoleService),
 			application.NewService(customCliService),
 			application.NewService(networkService),
+			application.NewService(providerRelay),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

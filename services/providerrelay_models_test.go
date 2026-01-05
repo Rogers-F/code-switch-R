@@ -4,15 +4,49 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 )
 
+// cleanupProviderFile removes the provider config file to ensure test isolation
+func cleanupProviderFile(t *testing.T, kind string) {
+	t.Helper()
+	path, err := providerFilePath(kind)
+	if err != nil {
+		return // Ignore errors, file may not exist
+	}
+	os.Remove(path)
+}
+
+// cleanupAllTestProviders removes all provider config files used in tests
+func cleanupAllTestProviders(t *testing.T) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(home, ".code-switch")
+
+	// Clean up claude-code.json
+	os.Remove(filepath.Join(dir, "claude-code.json"))
+
+	// Clean up custom provider files
+	providersDir := filepath.Join(dir, "providers")
+	os.Remove(filepath.Join(providersDir, "mytool.json"))
+}
+
 // TestModelsHandler 测试 /v1/models 端点处理器
 func TestModelsHandler(t *testing.T) {
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
+
+	// 清理测试数据，确保测试隔离
+	t.Cleanup(func() {
+		cleanupProviderFile(t, "claude")
+	})
 
 	// 创建模拟的上游服务器
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,15 +74,15 @@ func TestModelsHandler(t *testing.T) {
 			"object": "list",
 			"data": []map[string]interface{}{
 				{
-					"id":      "claude-sonnet-4",
-					"object":  "model",
-					"created": 1234567890,
+					"id":       "claude-sonnet-4",
+					"object":   "model",
+					"created":  1234567890,
 					"owned_by": "anthropic",
 				},
 				{
-					"id":      "claude-opus-4",
-					"object":  "model",
-					"created": 1234567890,
+					"id":       "claude-opus-4",
+					"object":   "model",
+					"created":  1234567890,
 					"owned_by": "anthropic",
 				},
 			},
@@ -62,8 +96,9 @@ func TestModelsHandler(t *testing.T) {
 
 	// 创建测试用的 ProviderService
 	providerService := NewProviderService()
-	blacklistService := NewBlacklistService()
-	notificationService := NewNotificationService()
+	settingsService := NewSettingsService()
+	notificationService := NewNotificationService(nil)
+	blacklistService := NewBlacklistService(settingsService, notificationService)
 
 	// 创建测试用的 provider（使用模拟服务器的 URL）
 	testProvider := Provider{
@@ -82,7 +117,7 @@ func TestModelsHandler(t *testing.T) {
 	}
 
 	// 创建 ProviderRelayService
-	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, "")
+	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, nil, "")
 
 	// 创建测试路由
 	router := gin.New()
@@ -126,6 +161,11 @@ func TestCustomModelsHandler(t *testing.T) {
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
 
+	// 清理测试数据，确保测试隔离
+	t.Cleanup(func() {
+		cleanupProviderFile(t, "custom:mytool")
+	})
+
 	// 创建模拟的上游服务器
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 验证请求方法
@@ -164,8 +204,9 @@ func TestCustomModelsHandler(t *testing.T) {
 
 	// 创建测试用的 ProviderService
 	providerService := NewProviderService()
-	blacklistService := NewBlacklistService()
-	notificationService := NewNotificationService()
+	settingsService := NewSettingsService()
+	notificationService := NewNotificationService(nil)
+	blacklistService := NewBlacklistService(settingsService, notificationService)
 
 	// 创建测试用的 provider（使用模拟服务器的 URL）
 	testProvider := Provider{
@@ -186,7 +227,7 @@ func TestCustomModelsHandler(t *testing.T) {
 	}
 
 	// 创建 ProviderRelayService
-	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, "")
+	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, nil, "")
 
 	// 创建测试路由
 	router := gin.New()
@@ -229,13 +270,17 @@ func TestCustomModelsHandler(t *testing.T) {
 func TestModelsHandler_NoProviders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	// 清理任何遗留的测试 provider 配置，确保测试从干净状态开始
+	cleanupAllTestProviders(t)
+
 	// 创建空的 ProviderService
 	providerService := NewProviderService()
-	blacklistService := NewBlacklistService()
-	notificationService := NewNotificationService()
+	settingsService := NewSettingsService()
+	notificationService := NewNotificationService(nil)
+	blacklistService := NewBlacklistService(settingsService, notificationService)
 
 	// 创建 ProviderRelayService（没有配置任何 provider）
-	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, "")
+	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, nil, "")
 
 	// 创建测试路由
 	router := gin.New()
