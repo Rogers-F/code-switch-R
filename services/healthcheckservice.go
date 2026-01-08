@@ -66,16 +66,16 @@ type HealthCheckHistory struct {
 
 // ProviderTimeline Provider 时间线（用于前端展示）
 type ProviderTimeline struct {
-	ProviderID                 int64                `json:"providerId"`
-	ProviderName               string               `json:"providerName"`
-	Platform                   string               `json:"platform"`
-	AvailabilityMonitorEnabled bool                 `json:"availabilityMonitorEnabled"`
-	ConnectivityAutoBlacklist  bool                 `json:"connectivityAutoBlacklist"`
-	AvailabilityConfig         *AvailabilityConfig  `json:"availabilityConfig,omitempty"` // 高级配置
-	Items                      []HealthCheckResult  `json:"items"`                        // 历史记录
-	Latest                     *HealthCheckResult   `json:"latest"`                       // 最新一条
-	Uptime                     float64              `json:"uptime"`                       // 可用率
-	AvgLatencyMs               int                  `json:"avgLatencyMs"`                 // 平均延迟
+	ProviderID                 int64               `json:"providerId"`
+	ProviderName               string              `json:"providerName"`
+	Platform                   string              `json:"platform"`
+	AvailabilityMonitorEnabled bool                `json:"availabilityMonitorEnabled"`
+	ConnectivityAutoBlacklist  bool                `json:"connectivityAutoBlacklist"`
+	AvailabilityConfig         *AvailabilityConfig `json:"availabilityConfig,omitempty"` // 高级配置
+	Items                      []HealthCheckResult `json:"items"`                        // 历史记录
+	Latest                     *HealthCheckResult  `json:"latest"`                       // 最新一条
+	Uptime                     float64             `json:"uptime"`                       // 可用率
+	AvgLatencyMs               int                 `json:"avgLatencyMs"`                 // 平均延迟
 }
 
 // AvailabilityFailureCounter 可用性失败计数器（独立于真实请求）
@@ -93,7 +93,7 @@ type HealthCheckService struct {
 	settingsService  *SettingsService
 
 	mu            sync.RWMutex
-	failCounters  map[string]*AvailabilityFailureCounter // key: platform:providerName
+	failCounters  map[string]*AvailabilityFailureCounter  // key: platform:providerName
 	latestResults map[string]map[int64]*HealthCheckResult // platform -> providerID -> result
 
 	// 后台轮询
@@ -572,7 +572,7 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 		switch authType {
 		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
-			req.Header.Set("anthropic-version", "2023-06-01")
+			req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
 		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		default:
@@ -672,16 +672,16 @@ func (hcs *HealthCheckService) getEffectiveModel(provider *Provider, platform st
 		return provider.AvailabilityConfig.TestModel
 	}
 
-	// 平台默认模型
+	// 平台默认模型 - 使用 -latest 别名避免硬编码日期版本
 	switch strings.ToLower(platform) {
 	case "claude":
-		return "claude-3-5-haiku-20241022"
+		return "claude-3-5-haiku-latest"
 	case "codex":
 		return "gpt-4o-mini"
 	case "gemini":
-		return "gemini-1.5-flash"
+		return "gemini-1.5-flash-latest"
 	default:
-		return "gpt-3.5-turbo"
+		return "gpt-4o-mini"
 	}
 }
 

@@ -1011,14 +1011,13 @@ func (prs *ProviderRelayService) forwardRequest(
 		}
 	}
 
-	// 使用标准库 http.Header 处理请求头，避免大小写问题
-	headers := make(http.Header)
-	for k, v := range clientHeaders {
-		headers[k] = v
-	}
+	// 使用 buildForwardHeaders 构建转发请求头（支持 Provider 级别 Header 配置）
+	// 按优先级处理：原请求 Headers → StripHeaders → OverrideHeaders → ExtraHeaders
+	headers := buildForwardHeaders(clientHeaders, &provider)
 
 	// 根据原始请求的认证方式设置转发请求头
 	// 原始请求用 Authorization 就用 Authorization，原始请求用 x-api-key 就用 x-api-key
+	// 注意：认证头最后设置，确保覆盖任何 OverrideHeaders 中的错误配置
 	switch authMethod {
 	case AuthMethodXAPIKey:
 		// 原始请求使用 x-api-key，转发也使用 x-api-key
@@ -1161,12 +1160,12 @@ func (prs *ProviderRelayService) forwardRequest(
 		return io.NopCloser(bytes.NewReader(bodyBytes)), nil
 	}
 	// 复制 headers 到请求（headers 已经是 http.Header 类型）
+	// Content-Type 已由 cloneHeaders() 从原请求复制，无需强制覆盖
 	for k, values := range headers {
 		for _, v := range values {
 			httpReq.Header.Add(k, v)
 		}
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
 
 	// 使用带网络级重试的 http.Client（超时由 context 控制）
 	// 网络级重试：1 次，间隔 500ms，仅针对瞬时网络错误（TCP reset、DNS 失败等）
@@ -1531,7 +1530,7 @@ func (prs *ProviderRelayService) tryGeminiAffinityProvider(
 }
 
 // cloneHeaders 克隆请求头，返回 http.Header 类型
-// 过滤掉认证相关的头（Authorization, x-api-key），因为转发时会根据原始请求的认证方式重新设置
+// 过滤掉认证相关的头（Authorization, x-api-key, x-goog-api-key），因为转发时会根据原始请求的认证方式重新设置
 // 同时过滤掉 hop-by-hop headers
 func cloneHeaders(header http.Header) http.Header {
 	cloned := make(http.Header)
@@ -1540,7 +1539,8 @@ func cloneHeaders(header http.Header) http.Header {
 		canonicalKey := http.CanonicalHeaderKey(key)
 
 		// 跳过认证相关的头（会在转发时根据 authMethod 重新设置）
-		if canonicalKey == "Authorization" || canonicalKey == "X-Api-Key" {
+		// 包括：Authorization (Bearer), X-Api-Key (Anthropic), X-Goog-Api-Key (Gemini)
+		if canonicalKey == "Authorization" || canonicalKey == "X-Api-Key" || canonicalKey == "X-Goog-Api-Key" {
 			continue
 		}
 
@@ -1553,6 +1553,40 @@ func cloneHeaders(header http.Header) http.Header {
 		cloned[canonicalKey] = append([]string(nil), values...)
 	}
 	return cloned
+}
+
+// buildForwardHeaders 构建转发请求的 Headers（不含认证头）
+// 按优先级处理：1. 复制原请求 Headers → 2. 移除 StripHeaders → 3. 应用 OverrideHeaders → 4. 应用 ExtraHeaders
+// 认证头由调用方根据 Provider.APIKey + authMethod 单独设置
+func buildForwardHeaders(original http.Header, provider *Provider) http.Header {
+	// 复制 headers（如果 original 已经是 cloneHeaders 的结果，此处仅做浅拷贝开销可接受）
+	headers := make(http.Header, len(original))
+	for k, v := range original {
+		headers[k] = append([]string(nil), v...)
+	}
+
+	if provider == nil {
+		return headers
+	}
+
+	// Step 2: 移除指定 Headers
+	for _, h := range provider.StripHeaders {
+		headers.Del(h)
+	}
+
+	// Step 3: 强制覆盖 (注意：不应包含认证头，认证头会被调用方覆盖)
+	for k, v := range provider.OverrideHeaders {
+		headers.Set(k, v)
+	}
+
+	// Step 4: 额外添加（仅当 key 不存在时添加）
+	for k, v := range provider.ExtraHeaders {
+		if headers.Get(k) == "" {
+			headers.Set(k, v)
+		}
+	}
+
+	return headers
 }
 
 func cloneMap(m map[string]string) map[string]string {

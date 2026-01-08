@@ -138,7 +138,7 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		switch authTypeLower {
 		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
-			req.Header.Set("anthropic-version", "2023-06-01")
+			req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
 		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		default:
