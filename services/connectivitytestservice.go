@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -133,16 +134,13 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
-		// authType 已通过 getEffectiveAuthType 展开（auto/空→平台默认）
-		authTypeLower := strings.ToLower(authType)
-		switch authTypeLower {
+		// authType 已通过 getEffectiveAuthType 标准化为小写（auto/空→平台默认，未知→bearer+警告）
+		switch authType {
 		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
 			req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
-		case "bearer":
-			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		default:
-			// 未知值回退到 Bearer（与 providerrelay.go 保持一致）
+			// bearer 或其他（getEffectiveAuthType 已处理未知值并记录警告）
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		}
 	}
@@ -213,6 +211,7 @@ func (cts *ConnectivityTestService) getEffectiveEndpoint(provider *Provider, pla
 
 // getEffectiveAuthType 获取有效认证方式（含平台默认值）
 // auto 或空值时返回平台默认，与 providerrelay.go 保持一致
+// 始终返回小写字符串以简化调用方逻辑
 func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, platform string) string {
 	authType := strings.TrimSpace(provider.ConnectivityAuthType)
 	authTypeLower := strings.ToLower(authType)
@@ -223,7 +222,13 @@ func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, pla
 		}
 		return "bearer"
 	}
-	return authType
+	// 已知值直接返回小写
+	if authTypeLower == "bearer" || authTypeLower == "x-api-key" {
+		return authTypeLower
+	}
+	// 未知值回退到 bearer，记录警告以便排查
+	slog.Warn("Unknown auth type, falling back to Bearer", "authType", authType, "platform", platform)
+	return "bearer"
 }
 
 // buildTestRequest 根据端点构建测试请求体

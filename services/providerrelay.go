@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -92,6 +93,7 @@ func determineAuthMethod(provider *Provider, requestHeader http.Header) AuthMeth
 	default:
 		// 自定义 Header 名称场景：暂时按 Bearer 处理
 		// 注意：自定义 Header 应通过 OverrideHeaders 实现，这里仅作兜底
+		slog.Warn("Unknown auth type, falling back to Bearer", "authType", authType, "provider", provider.Name)
 		return AuthMethodBearer
 	}
 }
