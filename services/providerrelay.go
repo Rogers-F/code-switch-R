@@ -71,6 +71,31 @@ func detectAuthMethod(header http.Header) AuthMethod {
 	return AuthMethodBearer
 }
 
+// determineAuthMethod 根据 Provider 配置和原始请求确定最终的认证方式
+// 优先级：Provider.ConnectivityAuthType (当显式设置为 bearer/x-api-key 时) > 自动检测原始请求
+// 当 Provider 配置为 "auto" 或空值时，使用自动检测逻辑
+func determineAuthMethod(provider *Provider, requestHeader http.Header) AuthMethod {
+	if provider == nil {
+		return detectAuthMethod(requestHeader)
+	}
+
+	authType := strings.TrimSpace(strings.ToLower(provider.ConnectivityAuthType))
+
+	switch authType {
+	case "bearer":
+		return AuthMethodBearer
+	case "x-api-key":
+		return AuthMethodXAPIKey
+	case "auto", "":
+		// 自动检测原始请求的认证方式
+		return detectAuthMethod(requestHeader)
+	default:
+		// 自定义 Header 名称场景：暂时按 Bearer 处理
+		// 注意：自定义 Header 应通过 OverrideHeaders 实现，这里仅作兜底
+		return AuthMethodBearer
+	}
+}
+
 // httpHeaderToMap 将 http.Header 转换为 map[string]string
 // 用于与需要 map[string]string 的函数（如 SanitizeHeaders）兼容
 func httpHeaderToMap(h http.Header) map[string]string {
@@ -693,8 +718,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 		query := flattenQuery(c.Request.URL.Query())
 		clientHeaders := cloneHeaders(c.Request.Header)
-		// 检测原始请求的认证方式（Authorization 还是 x-api-key）
-		authMethod := detectAuthMethod(c.Request.Header)
+		// 注意：认证方式在每个 provider 转发时由 determineAuthMethod() 动态计算
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
@@ -758,6 +782,8 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
+						// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+						authMethod := determineAuthMethod(&provider, c.Request.Header)
 						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 						duration := time.Since(startTime)
 
@@ -842,7 +868,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		if cachedProviderName != "" {
 			affinityResult := prs.tryAffinityProvider(
 				c, kind, affinityKey, cachedProviderName, active,
-				endpoint, query, clientHeaders, bodyBytes, isStream, requestedModel, authMethod,
+				endpoint, query, clientHeaders, bodyBytes, isStream, requestedModel,
 			)
 			if affinityResult.Handled {
 				return // 成功或客户端中断，不再继续
@@ -897,6 +923,8 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				// 获取有效的端点（用户配置优先）
 				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 				startTime := time.Now()
+				// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+				authMethod := determineAuthMethod(&provider, c.Request.Header)
 				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 				duration := time.Since(startTime)
 
@@ -1358,6 +1386,7 @@ type AffinityTryResult struct {
 // tryAffinityProvider 尝试使用缓存的 provider
 // 封装了查找、尝试、成功刷新缓存、失败清除缓存的完整逻辑
 // 返回 AffinityTryResult，调用方根据 Handled 判断是否需要继续降级
+// 注意：认证方式由 Provider 配置决定，不再通过参数传递
 func (prs *ProviderRelayService) tryAffinityProvider(
 	c *gin.Context,
 	kind string,
@@ -1370,7 +1399,6 @@ func (prs *ProviderRelayService) tryAffinityProvider(
 	bodyBytes []byte,
 	isStream bool,
 	requestedModel string,
-	authMethod AuthMethod,
 ) AffinityTryResult {
 	result := AffinityTryResult{}
 
@@ -1410,7 +1438,9 @@ func (prs *ProviderRelayService) tryAffinityProvider(
 
 	effectiveEndpoint := cachedProvider.GetEffectiveEndpoint(endpoint)
 	startTime := time.Now()
-	ok, err := prs.forwardRequest(c, kind, *cachedProvider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
+	// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+	effectiveAuthMethod := determineAuthMethod(cachedProvider, c.Request.Header)
+	ok, err := prs.forwardRequest(c, kind, *cachedProvider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, effectiveAuthMethod)
 	result.Duration = time.Since(startTime)
 
 	if ok {
@@ -2474,8 +2504,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 		query := flattenQuery(c.Request.URL.Query())
 		clientHeaders := cloneHeaders(c.Request.Header)
-		// 检测原始请求的认证方式（Authorization 还是 x-api-key）
-		authMethod := detectAuthMethod(c.Request.Header)
+		// 注意：认证方式在每个 provider 转发时由 determineAuthMethod() 动态计算
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
@@ -2537,6 +2566,8 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
+						// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+						authMethod := determineAuthMethod(&provider, c.Request.Header)
 						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 						duration := time.Since(startTime)
 
@@ -2627,7 +2658,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		if cachedProviderName != "" {
 			affinityResult := prs.tryAffinityProvider(
 				c, kind, affinityKey, cachedProviderName, active,
-				endpoint, query, clientHeaders, bodyBytes, isStream, requestedModel, authMethod,
+				endpoint, query, clientHeaders, bodyBytes, isStream, requestedModel,
 			)
 			if affinityResult.Handled {
 				return // 成功或客户端中断，不再继续
@@ -2676,6 +2707,8 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
 				startTime := time.Now()
+				// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+				authMethod := determineAuthMethod(&provider, c.Request.Header)
 				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 				duration := time.Since(startTime)
 

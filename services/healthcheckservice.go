@@ -559,29 +559,24 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	req.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
 		// 根据认证方式设置请求头
-		authTypeRaw := strings.TrimSpace(provider.ConnectivityAuthType)
-		authType := strings.ToLower(authTypeRaw)
-		if authType == "" {
-			// 空值时使用平台默认（claude: x-api-key, codex: bearer）
-			if strings.ToLower(platform) == "claude" {
-				authType = "x-api-key"
-			} else {
-				authType = "bearer"
-			}
-		}
+		authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
 		switch authType {
+		case "auto", "":
+			// 自动检测：使用平台默认（claude: x-api-key, codex: bearer）
+			if strings.ToLower(platform) == "claude" {
+				req.Header.Set("x-api-key", provider.APIKey)
+				req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
+			} else {
+				req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+			}
 		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
 			req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
 		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		default:
-			// 自定义 Header 名
-			headerName := authTypeRaw
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			req.Header.Set(headerName, provider.APIKey)
+			// 未知值回退到 Bearer（与 providerrelay.go 保持一致）
+			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		}
 	}
 

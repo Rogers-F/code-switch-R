@@ -133,7 +133,7 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
-		// authType 已在上方获取
+		// authType 已通过 getEffectiveAuthType 展开（auto/空→平台默认）
 		authTypeLower := strings.ToLower(authType)
 		switch authTypeLower {
 		case "x-api-key":
@@ -142,12 +142,8 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		default:
-			// 自定义 Header 名
-			headerName := strings.TrimSpace(authType)
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			req.Header.Set(headerName, provider.APIKey)
+			// 未知值回退到 Bearer（与 providerrelay.go 保持一致）
+			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		}
 	}
 
@@ -216,17 +212,18 @@ func (cts *ConnectivityTestService) getEffectiveEndpoint(provider *Provider, pla
 }
 
 // getEffectiveAuthType 获取有效认证方式（含平台默认值）
-// 返回值保留原始大小写，用于自定义 Header 名
+// auto 或空值时返回平台默认，与 providerrelay.go 保持一致
 func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, platform string) string {
 	authType := strings.TrimSpace(provider.ConnectivityAuthType)
-	if authType != "" {
-		return authType
+	authTypeLower := strings.ToLower(authType)
+	// auto 或空值时使用平台默认
+	if authTypeLower == "auto" || authType == "" {
+		if strings.ToLower(platform) == "claude" {
+			return "x-api-key"
+		}
+		return "bearer"
 	}
-	// 平台默认认证方式
-	if strings.ToLower(platform) == "claude" {
-		return "x-api-key"
-	}
-	return "bearer"
+	return authType
 }
 
 // buildTestRequest 根据端点构建测试请求体

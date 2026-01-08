@@ -381,8 +381,7 @@
           "availabilityTestEndpoint": "e.g., /v1/messages",
           "connectivityTestModel": "Select or use default",
           "customModel": "Or enter custom model",
-          "customEndpoint": "Or enter custom endpoint",
-          "customAuthHeader": "Custom header name (e.g. Authorization, X-Custom-Key)"
+          "customEndpoint": "Or enter custom endpoint"
         },
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
@@ -396,7 +395,7 @@
           "connectivityCheck": "When enabled, connectivity to this provider will be tested periodically; enabling this may consume a small amount of tokens",
           "connectivityTestModel": "Select a model for connectivity testing, or leave empty to use platform default",
           "connectivityTestEndpoint": "Select or enter API endpoint path",
-          "connectivityAuthType": "Default is Bearer. Use X-API-Key for Anthropic-style APIs. Enter custom header name in the text field if needed."
+          "connectivityAuthType": "Auto (default): Automatically detect and preserve the original request's auth method. Select Bearer or X-API-Key to force a specific method. This applies to both request forwarding and connectivity tests."
         },
         "actions": {
           "cancel": "Cancel",

@@ -646,12 +646,6 @@
                       </ListboxOptions>
                     </div>
                   </Listbox>
-                  <BaseInput
-                    v-model="customAuthHeader"
-                    type="text"
-                    :placeholder="t('components.main.form.placeholders.customAuthHeader')"
-                    class="mt-2"
-                  />
                   <span class="field-hint">{{ t('components.main.form.hints.connectivityAuthType') }}</span>
                 </div>
 
@@ -2375,8 +2369,8 @@ const getDefaultEndpoint = (platform: string) => {
   return defaults[platform] || '/v1/chat/completions'
 }
 
-// 获取平台默认认证方式（默认 Bearer，与 v2.2.x 保持一致）
-const getDefaultAuthType = (_platform: string) => 'bearer'
+// 获取平台默认认证方式（v2.3.x 改为 auto，由后端自动检测）
+const getDefaultAuthType = (_platform: string) => 'auto'
 
 // 手动测试连通性
 const handleTestConnectivity = async () => {
@@ -2605,14 +2599,14 @@ const modalState = reactive({
 })
 
 // 认证方式相关状态
-const selectedAuthType = ref<string>('bearer')
-const customAuthHeader = ref<string>('')
+const selectedAuthType = ref<string>('auto')
 const authTypeOptions = computed(() => [
+  { value: 'auto', label: 'Auto' },
   { value: 'bearer', label: 'Bearer' },
   { value: 'x-api-key', label: 'X-API-Key' },
 ])
-const resolveEffectiveAuthType = () =>
-  customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(modalState.tabId)
+// 返回保存到配置的认证方式
+const resolveEffectiveAuthType = () => selectedAuthType.value || 'auto'
 
 const editingCard = ref<AutomationCard | null>(null)
 const confirmState = reactive({ open: false, card: null as AutomationCard | null, tabId: tabs[0].id as ProviderTab })
@@ -2624,7 +2618,6 @@ const openCreateModal = () => {
   Object.assign(modalState.form, defaultFormValues(activeTab.value))
   // 初始化认证方式为平台默认
   selectedAuthType.value = getDefaultAuthType(activeTab.value)
-  customAuthHeader.value = ''
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
@@ -2669,20 +2662,10 @@ const openEditModal = (card: AutomationCard) => {
     connectivityTestEndpoint: '',
     connectivityAuthType: card.connectivityAuthType || '',
   })
-  // 初始化认证方式状态
-  const storedAuth = (card.connectivityAuthType || '').trim()
-  const lower = storedAuth.toLowerCase()
-  if (!storedAuth) {
-    selectedAuthType.value = getDefaultAuthType(activeTab.value)
-    customAuthHeader.value = ''
-  } else if (lower === 'bearer' || lower === 'x-api-key') {
-    selectedAuthType.value = lower
-    customAuthHeader.value = ''
-  } else {
-    // 自定义 Header 名
-    selectedAuthType.value = getDefaultAuthType(activeTab.value)
-    customAuthHeader.value = storedAuth
-  }
+  // 初始化认证方式状态（仅支持 auto/bearer/x-api-key，其他值回退到 auto）
+  const storedAuth = (card.connectivityAuthType || '').trim().toLowerCase()
+  const validAuthTypes = ['auto', 'bearer', 'x-api-key']
+  selectedAuthType.value = validAuthTypes.includes(storedAuth) ? storedAuth : 'auto'
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
