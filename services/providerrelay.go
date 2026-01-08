@@ -53,6 +53,59 @@ type ProviderRelayService struct {
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
 
+// skipReasons tracks the count of providers skipped during filtering
+type skipReasons struct {
+	disabled         int // disabled or missing URL/APIKey
+	configInvalid    int // configuration validation failed
+	modelUnsupported int // does not support requested model
+	blacklisted      int // temporarily unavailable (blacklisted)
+}
+
+// total returns the total count of all skip reasons
+func (s *skipReasons) total() int {
+	return s.disabled + s.configInvalid + s.modelUnsupported + s.blacklisted
+}
+
+// formatKind formats the kind parameter for user-friendly display
+func formatKind(kind string) string {
+	if strings.HasPrefix(kind, "custom:") {
+		toolID := strings.TrimPrefix(kind, "custom:")
+		return fmt.Sprintf("custom CLI '%s'", toolID)
+	}
+	return kind
+}
+
+// buildNoProviderError builds a user-friendly error message with detailed skip reasons
+// kind parameter is used to display platform type when requestedModel is empty
+func buildNoProviderError(requestedModel string, kind string, reasons skipReasons) string {
+	if requestedModel == "" {
+		if kind != "" {
+			return fmt.Sprintf("no providers available for %s", formatKind(kind))
+		}
+		return "no providers available"
+	}
+
+	var details []string
+	if reasons.modelUnsupported > 0 {
+		details = append(details, fmt.Sprintf("%d not supporting this model", reasons.modelUnsupported))
+	}
+	if reasons.blacklisted > 0 {
+		details = append(details, fmt.Sprintf("%d temporarily unavailable (blacklisted, retry later or check quota)", reasons.blacklisted))
+	}
+	if reasons.configInvalid > 0 {
+		details = append(details, fmt.Sprintf("%d with invalid config", reasons.configInvalid))
+	}
+	if reasons.disabled > 0 {
+		details = append(details, fmt.Sprintf("%d disabled or missing credentials", reasons.disabled))
+	}
+
+	errMsg := fmt.Sprintf("no providers available for model '%s'", requestedModel)
+	if len(details) > 0 {
+		errMsg += " (" + strings.Join(details, ", ") + ")"
+	}
+	return errMsg
+}
+
 // AuthMethod 表示原始请求使用的认证方式
 type AuthMethod int
 
@@ -552,8 +605,7 @@ func (prs *ProviderRelayService) validateConfig() []string {
 			}
 
 			// 检查是否配置了模型白名单或映射
-			if (p.SupportedModels == nil || len(p.SupportedModels) == 0) &&
-				(p.ModelMapping == nil || len(p.ModelMapping) == 0) {
+			if len(p.SupportedModels) == 0 && len(p.ModelMapping) == 0 {
 				warnings = append(warnings, fmt.Sprintf(
 					"[%s/%s] 未配置 supportedModels 或 modelMapping，将假设支持所有模型（可能导致降级失败）",
 					kind, p.Name))
@@ -645,31 +697,32 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		active := make([]Provider, 0, len(providers))
-		skippedCount := 0
+		reasons := skipReasons{} // track skip reasons
 		for _, provider := range providers {
-			// 基础过滤：enabled、URL、APIKey
+			// Basic filter: enabled, URL, APIKey
 			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+				reasons.disabled++
 				continue
 			}
 
-			// 配置验证：失败则自动跳过
+			// Config validation: auto-skip on failure
 			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
-				fmt.Printf("[WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
-				skippedCount++
+				fmt.Printf("[WARN] Provider %s config validation failed, skipped: %v\n", provider.Name, errs)
+				reasons.configInvalid++
 				continue
 			}
 
-			// 核心过滤：只保留支持请求模型的 provider
+			// Model filter: only keep providers supporting the requested model
 			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
-				fmt.Printf("[INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
-				skippedCount++
+				fmt.Printf("[INFO] Provider %s does not support model %s, skipped\n", provider.Name, requestedModel)
+				reasons.modelUnsupported++
 				continue
 			}
 
-			// 黑名单检查：跳过已拉黑的 provider
+			// Blacklist check: skip blacklisted providers
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
-				fmt.Printf("⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
-				skippedCount++
+				fmt.Printf("⛔ Provider %s blacklisted until %v\n", provider.Name, until.Format("15:04:05"))
+				reasons.blacklisted++
 				continue
 			}
 
@@ -677,20 +730,20 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		if len(active) == 0 {
-			if requestedModel != "" {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedCount),
-				})
-			} else {
-				c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
-			}
+			errMsg := buildNoProviderError(requestedModel, kind, reasons)
+			c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
 			return
 		}
 
-		fmt.Printf("[INFO] 找到 %d 个可用的 provider（已过滤 %d 个）：", len(active), skippedCount)
-		for _, p := range active {
-			fmt.Printf("%s ", p.Name)
+		// Build provider names list
+		providerNames := make([]string, len(active))
+		for i, p := range active {
+			providerNames[i] = p.Name
 		}
+		fmt.Printf("[INFO] Providers: total=%d, active=%d, skipped=%d (disabled=%d, config=%d, model=%d, blacklist=%d): %s\n",
+			len(providers), len(active), reasons.total(),
+			reasons.disabled, reasons.configInvalid, reasons.modelUnsupported, reasons.blacklisted,
+			strings.Join(providerNames, ", "))
 		fmt.Println()
 
 		// 【5分钟同源缓存】检查是否有缓存的 provider
@@ -2460,30 +2513,31 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			return
 		}
 
-		// 过滤可用的 providers
+		// Filter available providers
 		active := make([]Provider, 0, len(providers))
-		skippedCount := 0
+		reasons := skipReasons{} // track skip reasons
 		for _, provider := range providers {
 			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+				reasons.disabled++
 				continue
 			}
 
 			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
-				fmt.Printf("[CustomCLI][WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
-				skippedCount++
+				fmt.Printf("[CustomCLI][WARN] Provider %s config validation failed, skipped: %v\n", provider.Name, errs)
+				reasons.configInvalid++
 				continue
 			}
 
 			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
-				fmt.Printf("[CustomCLI][INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
-				skippedCount++
+				fmt.Printf("[CustomCLI][INFO] Provider %s does not support model %s, skipped\n", provider.Name, requestedModel)
+				reasons.modelUnsupported++
 				continue
 			}
 
-			// 黑名单检查
+			// Blacklist check
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
-				fmt.Printf("[CustomCLI] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
-				skippedCount++
+				fmt.Printf("[CustomCLI] ⛔ Provider %s blacklisted until %v\n", provider.Name, until.Format("15:04:05"))
+				reasons.blacklisted++
 				continue
 			}
 
@@ -2491,21 +2545,20 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		}
 
 		if len(active) == 0 {
-			if requestedModel != "" {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedCount),
-				})
-			} else {
-				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("no providers available for %s", kind)})
-			}
+			errMsg := buildNoProviderError(requestedModel, kind, reasons)
+			c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
 			return
 		}
 
-		fmt.Printf("[CustomCLI][INFO] 找到 %d 个可用的 provider（已过滤 %d 个）：", len(active), skippedCount)
-		for _, p := range active {
-			fmt.Printf("%s ", p.Name)
+		// Build provider names list
+		providerNames := make([]string, len(active))
+		for i, p := range active {
+			providerNames[i] = p.Name
 		}
-		fmt.Println()
+		fmt.Printf("[CustomCLI][INFO] Providers: total=%d, active=%d, skipped=%d (disabled=%d, config=%d, model=%d, blacklist=%d): %s\n",
+			len(providers), len(active), reasons.total(),
+			reasons.disabled, reasons.configInvalid, reasons.modelUnsupported, reasons.blacklisted,
+			strings.Join(providerNames, ", "))
 
 		// 按 Level 分组
 		levelGroups := make(map[int][]Provider)
