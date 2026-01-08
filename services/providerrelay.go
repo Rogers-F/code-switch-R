@@ -1246,11 +1246,17 @@ func (prs *ProviderRelayService) forwardRequest(
 	requestLog.HttpCode = status
 
 	// 状态码为 0 且无错误：当作成功处理
+	// 注意：status=0 通常发生在以下场景：
+	// 1. HTTP/2 或某些代理服务器在特殊情况下可能不设置状态码
+	// 2. 连接成功但响应解析异常时的防御性处理
+	// 3. 某些非标准HTTP实现的兼容性处理
+	// 这是防御性编程，确保即使遇到异常状态码也能正常处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
 		if copyErr := writeProxiedResponseWithCollector(c, httpResp, kind, requestLog, responseCollector); copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
+		// responseWritten: always true after writeProxiedResponseWithCollector returns
 		return true, nil
 	}
 
@@ -1259,15 +1265,30 @@ func (prs *ProviderRelayService) forwardRequest(
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
 		// 只要provider返回了2xx状态码，就算成功（复制失败是客户端问题，不是provider问题）
+		// responseWritten: always true after writeProxiedResponseWithCollector returns
+		// 与 Gemini handler 的三元组 (success, errMsg, responseWritten) 语义一致：
+		// 一旦响应头写入客户端，即使流式传输中断也不会触发重试
 		return true, nil
 	}
 
-	// 对于非 2xx 响应，也尝试收集响应体（用于错误调试）
-	if responseCollector != nil && httpResp.Body != nil {
-		respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, int64(MaxResponseBodySize)))
-		responseCollector.Write(respBody)
+	// 对于非 2xx 响应，读取响应体用于错误调试和日志记录
+	var respBody []byte
+	if httpResp.Body != nil {
+		respBody, _ = io.ReadAll(io.LimitReader(httpResp.Body, int64(MaxResponseBodySize)))
+		if responseCollector != nil {
+			responseCollector.Write(respBody)
+		}
 	}
 
+	// 返回错误信息时包含上游响应体，便于调试和日志分析
+	if len(respBody) > 0 {
+		// 限制错误信息中的响应体长度，避免日志过长
+		bodyPreview := string(respBody)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500] + "...(truncated)"
+		}
+		return false, fmt.Errorf("upstream status %d: %s", status, bodyPreview)
+	}
 	return false, fmt.Errorf("upstream status %d", status)
 }
 
