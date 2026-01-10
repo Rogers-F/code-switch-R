@@ -113,6 +113,7 @@ func main() {
 	mcpService := services.NewMCPService()
 	skillService := services.NewSkillService()
 	promptService := services.NewPromptService()
+	configBackupService := services.NewConfigBackupService(mcpService, geminiService, promptService)
 	envCheckService := services.NewEnvCheckService()
 	importService := services.NewImportService(providerService, mcpService)
 	deeplinkService := services.NewDeepLinkService(providerService)
@@ -140,7 +141,7 @@ func main() {
 	// 启动定时检查（如果启用）
 	if updateService.IsAutoCheckEnabled() {
 		go func() {
-			time.Sleep(10 * time.Second) // 延迟10秒，等待应用完成初始化
+			time.Sleep(10 * time.Second)     // 延迟10秒，等待应用完成初始化
 			updateService.CheckUpdateAsync() // 启动时检查一次
 			updateService.StartDailyCheck()  // 启动每日8点定时检查
 		}()
@@ -218,16 +219,17 @@ func main() {
 			application.NewService(mcpService),
 			application.NewService(skillService),
 			application.NewService(promptService),
+			application.NewService(configBackupService),
 			application.NewService(envCheckService),
 			application.NewService(importService),
-				application.NewService(deeplinkService),
-				application.NewService(speedTestService),
-				application.NewService(connectivityTestService),
-				application.NewService(healthCheckService),
-				application.NewService(dockService),
-				application.NewService(versionService),
-				application.NewService(geminiService),
-				application.NewService(consoleService),
+			application.NewService(deeplinkService),
+			application.NewService(speedTestService),
+			application.NewService(connectivityTestService),
+			application.NewService(healthCheckService),
+			application.NewService(dockService),
+			application.NewService(versionService),
+			application.NewService(geminiService),
+			application.NewService(consoleService),
 			application.NewService(customCliService),
 			application.NewService(networkService),
 		},

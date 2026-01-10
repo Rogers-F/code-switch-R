@@ -58,6 +58,14 @@ func (s *PromptService) Stop() error {
 	return nil
 }
 
+// ReloadFromDisk 重新从磁盘加载 prompts.json
+// 用于导入配置后刷新内存状态，避免 UI 仍显示旧数据。
+func (s *PromptService) ReloadFromDisk() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.load()
+}
+
 // GetPrompts 获取指定平台的所有提示词
 func (s *PromptService) GetPrompts(platform string) (map[string]Prompt, error) {
 	s.mu.Lock()

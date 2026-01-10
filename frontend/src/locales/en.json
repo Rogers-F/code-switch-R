@@ -520,6 +520,7 @@
         "power": "Permission settings",
         "update": "Application update",
         "blacklist": "Blacklist Settings",
+        "configBackup": "Config Export/Import",
         "dataImport": "Data Import",
         "connectivity": "Connectivity Test"
       },
@@ -590,6 +591,32 @@
         "nothingToImport": "Nothing to import (all may have been imported)",
         "failed": "Import failed",
         "fileNotFound": "Config file not found, please check the path"
+      },
+      "backup": {
+        "exportPath": "Export path",
+        "exportPathPlaceholder": "Enter export file path (.zip)",
+        "includeSecrets": "Include secrets",
+        "includeSecretsHint": "Exports API Keys/Tokens and other sensitive data. Store carefully.",
+        "includeDatabase": "Include database",
+        "includeDatabaseHint": "Includes app.db (blacklist/log history). File may be large.",
+        "exportAction": "Export action",
+        "exportBtn": "Export config",
+        "exporting": "Exporting...",
+        "importPath": "Import file path",
+        "importPathPlaceholder": "Enter backup zip file path",
+        "preserveSecrets": "Preserve local secrets",
+        "preserveSecretsHint": "If secrets are empty in the backup, keep existing API Keys/Tokens on this machine.",
+        "importDatabase": "Import database",
+        "importDatabaseHint": "Import app.db (may overwrite local history).",
+        "importAction": "Import action",
+        "importBtn": "Import config",
+        "importing": "Importing...",
+        "exportSuccess": "Exported {count} files\\n{path}",
+        "exportFailed": "Export failed",
+        "importConfirm": "Import will overwrite current config and create backups. Continue?",
+        "importSuccess": "Imported {imported} files (skipped {skipped}), backups created: {backups}",
+        "importWarnings": "Warnings:\\n{warnings}",
+        "importFailed": "Import failed"
       }
     },
     "mcp": {

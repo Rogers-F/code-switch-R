@@ -521,6 +521,7 @@
         "exterior": "外观设置",
         "update": "应用更新",
         "blacklist": "拉黑配置",
+        "configBackup": "配置导入/导出",
         "dataImport": "数据导入",
         "connectivity": "连通性检测"
       },
@@ -591,6 +592,32 @@
         "nothingToImport": "没有需要导入的配置（可能已全部导入）",
         "failed": "导入失败",
         "fileNotFound": "配置文件不存在，请检查路径是否正确"
+      },
+      "backup": {
+        "exportPath": "导出路径",
+        "exportPathPlaceholder": "输入导出文件路径（.zip）",
+        "includeSecrets": "包含密钥",
+        "includeSecretsHint": "开启后将导出 API Key/Token 等敏感信息，请谨慎保管",
+        "includeDatabase": "包含数据库",
+        "includeDatabaseHint": "包含 app.db（黑名单/日志等历史数据），文件可能较大",
+        "exportAction": "导出操作",
+        "exportBtn": "导出配置",
+        "exporting": "导出中...",
+        "importPath": "导入文件路径",
+        "importPathPlaceholder": "输入备份 zip 文件路径",
+        "preserveSecrets": "保留本机密钥",
+        "preserveSecretsHint": "导入包中密钥为空时，保留当前已有的 API Key/Token",
+        "importDatabase": "导入数据库",
+        "importDatabaseHint": "导入 app.db（可能覆盖本机历史数据）",
+        "importAction": "导入操作",
+        "importBtn": "导入配置",
+        "importing": "导入中...",
+        "exportSuccess": "导出成功：{count} 个文件\\n{path}",
+        "exportFailed": "导出失败",
+        "importConfirm": "导入会覆盖当前配置并自动创建备份，是否继续？",
+        "importSuccess": "导入完成：{imported} 个文件（跳过 {skipped} 个），创建备份 {backups} 个",
+        "importWarnings": "提示：\\n{warnings}",
+        "importFailed": "导入失败"
       }
     },
     "mcp": {

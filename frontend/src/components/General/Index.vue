@@ -159,6 +159,99 @@
       </section>
 
       <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.configBackup') }}</h2>
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.backup.exportPath')">
+            <input
+              type="text"
+              v-model="backupExportPath"
+              :placeholder="$t('components.general.backup.exportPathPlaceholder')"
+              class="mac-input import-path-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.backup.includeSecrets')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  v-model="backupIncludeSecrets"
+                  :disabled="exportingBackup || importingBackup"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.backup.includeSecretsHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.backup.includeDatabase')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  v-model="backupIncludeDatabase"
+                  :disabled="exportingBackup || importingBackup"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.backup.includeDatabaseHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.backup.exportAction')">
+            <button
+              @click="handleExportBackup"
+              :disabled="exportingBackup || !backupExportPath.trim()"
+              class="action-btn">
+              {{ exportingBackup ? $t('components.general.backup.exporting') : $t('components.general.backup.exportBtn') }}
+            </button>
+          </ListItem>
+        </div>
+
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.backup.importPath')">
+            <input
+              type="text"
+              v-model="backupImportPath"
+              :placeholder="$t('components.general.backup.importPathPlaceholder')"
+              class="mac-input import-path-input"
+            />
+          </ListItem>
+          <ListItem :label="$t('components.general.backup.preserveSecrets')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  v-model="backupPreserveSecrets"
+                  :disabled="exportingBackup || importingBackup"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.backup.preserveSecretsHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.backup.importDatabase')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  v-model="backupImportDatabase"
+                  :disabled="exportingBackup || importingBackup"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.backup.importDatabaseHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.backup.importAction')">
+            <button
+              @click="handleImportBackup"
+              :disabled="importingBackup || !backupImportPath.trim()"
+              class="action-btn">
+              {{ importingBackup ? $t('components.general.backup.importing') : $t('components.general.backup.importBtn') }}
+            </button>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.dataImport') }}</h2>
         <div class="mac-panel">
           <ListItem :label="$t('components.general.import.configPath')">
@@ -277,7 +370,9 @@
 	import { fetchCurrentVersion } from '../../services/version'
 	import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 	import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
+	import { getDefaultExportPath, exportConfig as exportAppConfig, importConfig as importAppConfig } from '../../services/configBackup'
 	import { useI18n } from 'vue-i18n'
+	import { extractErrorMessage } from '../../utils/error'
 
 const { t } = useI18n()
 
@@ -316,6 +411,17 @@ const importStatus = ref<ConfigImportStatus | null>(null)
 const importPath = ref('')
 const importing = ref(false)
 const importLoading = ref(true)
+
+// 本应用配置导出/导入
+const backupExportPath = ref('')
+const backupIncludeSecrets = ref(false)
+const backupIncludeDatabase = ref(false)
+const exportingBackup = ref(false)
+
+const backupImportPath = ref('')
+const backupImportDatabase = ref(false)
+const backupPreserveSecrets = ref(true)
+const importingBackup = ref(false)
 
 const goBack = () => {
   router.push('/')
@@ -616,6 +722,65 @@ const handleImport = async () => {
   }
 }
 
+const loadBackupDefaults = async () => {
+  try {
+    backupExportPath.value = await getDefaultExportPath()
+  } catch (error) {
+    console.error('failed to load default export path', error)
+  }
+}
+
+const handleExportBackup = async () => {
+  if (exportingBackup.value || !backupExportPath.value.trim()) return
+  exportingBackup.value = true
+  try {
+    const result = await exportAppConfig(backupExportPath.value.trim(), {
+      include_secrets: backupIncludeSecrets.value,
+      include_database: backupIncludeDatabase.value
+    })
+    alert(t('components.general.backup.exportSuccess', { count: result.file_count, path: result.path }))
+  } catch (error) {
+    console.error('export config failed', error)
+    alert(t('components.general.backup.exportFailed') + ': ' + extractErrorMessage(error))
+  } finally {
+    exportingBackup.value = false
+  }
+}
+
+const handleImportBackup = async () => {
+  if (importingBackup.value || !backupImportPath.value.trim()) return
+  const confirmed = confirm(t('components.general.backup.importConfirm'))
+  if (!confirmed) return
+
+  importingBackup.value = true
+  try {
+    const result = await importAppConfig(backupImportPath.value.trim(), {
+      import_database: backupImportDatabase.value,
+      preserve_existing_secrets: backupPreserveSecrets.value
+    })
+
+    let message = t('components.general.backup.importSuccess', {
+      imported: result.imported_files,
+      skipped: result.skipped_files,
+      backups: result.backups_created
+    })
+    if (result.warnings && result.warnings.length > 0) {
+      message += '\n\n' + t('components.general.backup.importWarnings', { warnings: result.warnings.join('\n') })
+    }
+    alert(message)
+
+    // 刷新当前页面展示的配置
+    await loadAppSettings()
+    await loadBlacklistSettings()
+    await loadImportStatus()
+  } catch (error) {
+    console.error('import config failed', error)
+    alert(t('components.general.backup.importFailed') + ': ' + extractErrorMessage(error))
+  } finally {
+    importingBackup.value = false
+  }
+}
+
 onMounted(async () => {
   await loadAppSettings()
 
@@ -634,6 +799,9 @@ onMounted(async () => {
 
   // 加载导入状态
   await loadImportStatus()
+
+  // 初始化导出默认路径
+  await loadBackupDefaults()
 })
 </script>
 
@@ -643,6 +811,10 @@ onMounted(async () => {
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+}
+
+.mac-panel + .mac-panel {
+  margin-top: 12px;
 }
 
 .hint-text {
