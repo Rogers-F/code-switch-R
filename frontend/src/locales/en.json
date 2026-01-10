@@ -3,6 +3,40 @@
     "title": "My App",
     "login": "Login"
   },
+  "update": {
+    "newVersionReady": "New version ready",
+    "installNow": "Install Now",
+    "later": "Later",
+    "installing": "Installing..."
+  },
+  "settings": {
+    "network": {
+      "title": "Network Settings",
+      "listenMode": "Listen Mode",
+      "modes": {
+        "localhost": "Localhost Only (127.0.0.1)",
+        "wslAuto": "WSL Auto-Detect",
+        "lan": "LAN (0.0.0.0)",
+        "custom": "Custom Address"
+      },
+      "customAddress": "Custom Address",
+      "currentAddress": "Current Listen Address",
+      "lanWarningTitle": "Security Warning",
+      "lanWarningText": "LAN mode exposes your API keys to the local network. Only use this in trusted environments.",
+      "wslTitle": "WSL Configuration",
+      "wslAutoConfig": "WSL Auto-Configure",
+      "wslAutoConfigHint": "Automatically configure CLI tools in WSL to use host proxy",
+      "wslStatus": "WSL Status",
+      "wslDetected": "WSL Detected",
+      "wslNotDetected": "WSL Not Detected",
+      "wslDistros": "Detected Distros",
+      "targetCli": "Target CLI Tools",
+      "configureNow": "Configure Now",
+      "configureSuccess": "WSL CLI tools configured successfully",
+      "configureFailed": "Failed to configure WSL CLI tools",
+      "saveFailed": "Failed to save network settings"
+    }
+  },
   "menus": {
     "about": "About",
     "general": "General settings",
@@ -14,11 +48,76 @@
     "mcp": "MCP",
     "skill": "Skills",
     "gemini": "Gemini",
+    "availability": "Availability",
     "speedtest": "Speed Test",
     "env": "Env Check",
     "logs": "Logs",
     "console": "Console",
     "settings": "Settings"
+  },
+  "availability": {
+    "title": "Availability Monitor",
+    "subtitle": "Real-time health monitoring for AI providers",
+    "refreshAll": "Check All",
+    "refreshing": "Checking...",
+    "check": "Check",
+    "providers": "Providers",
+    "lastUpdate": "Last update",
+    "nextRefresh": "Next refresh",
+    "notMonitored": "Not monitored",
+    "noProviders": "No providers yet. Please add provider configuration first.",
+    "stats": {
+      "operational": "Operational",
+      "degraded": "Degraded",
+      "failed": "Failed",
+      "disabled": "Disabled"
+    },
+    "settings": {
+      "title": "Availability Monitor Settings",
+      "failureThreshold": "Auto-blacklist threshold",
+      "failureThresholdHint": "Trigger blacklist after N consecutive failures",
+      "pollInterval": "Poll interval",
+      "pollIntervalHint": "Background check interval",
+      "operationalThreshold": "Operational threshold",
+      "operationalThresholdHint": "Response latency below this is considered operational"
+    },
+    "editConfig": "Edit Config",
+    "enableMonitoring": "Enable Monitoring",
+    "enableToMonitor": "Please enable availability monitoring first",
+    "configTitle": "Advanced Availability Config",
+    "field": {
+      "testModel": "Test Model",
+      "testEndpoint": "Test Endpoint",
+      "timeout": "Timeout (ms)"
+    },
+    "placeholder": {
+      "testModel": "Leave blank to use platform default model",
+      "testEndpoint": "Leave blank to use platform default endpoint",
+      "timeout": "Default 15000"
+    },
+    "hint": {
+      "timeout": "Milliseconds; blank or 0 will use default 15000"
+    },
+    "default": "default",
+    "currentModel": "Current Model",
+    "currentEndpoint": "Current Endpoint",
+    "currentTimeout": "Current Timeout",
+    "defaultModel": "Platform default model",
+    "defaultEndpoint": "Platform default endpoint",
+    "advancedConfig": {
+      "title": "Advanced Config",
+      "testModel": "Test model",
+      "testModelHint": "Uses low-cost model by default",
+      "testEndpoint": "Test endpoint",
+      "testEndpointHint": "Leave empty for default endpoint",
+      "timeout": "Timeout",
+      "timeoutHint": "Default 15 seconds"
+    }
+  },
+  "common": {
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel"
   },
   "prompts": {
     "hero": {
@@ -140,11 +239,42 @@
         "label": "Claude proxy",
         "hostClaude": "Host Claude Code",
         "hostCodex": "Host Codex",
+        "hostGemini": "Host Gemini CLI",
+        "hostOthers": "Host Custom CLI",
         "tooltip": "Route traffic through the local relay to manage API keys centrally.",
         "statusOn": "Managed",
-        "statusOff": "Not managed",
-        "on": "On",
-        "off": "Off"
+        "statusOff": "Not managed"
+      },
+      "customCli": {
+        "selectToolFirst": "Please select a CLI tool first",
+        "noTools": "No custom CLI tools yet",
+        "addTool": "Add CLI Tool",
+        "toolName": "Tool Name",
+        "toolNamePlaceholder": "e.g., Droid, RooCode",
+        "configFiles": "Config Files",
+        "proxySettings": "Proxy Injection Settings",
+        "selectTool": "Select CLI Tool",
+        "createTitle": "New CLI Tool",
+        "editTitle": "Edit CLI Tool",
+        "deleteTitle": "Delete CLI Tool",
+        "deleteMessage": "Are you sure you want to delete {name}? This action cannot be undone.",
+        "primaryConfig": "Primary Config",
+        "labelPlaceholder": "Config file label",
+        "pathPlaceholder": "Config file path, e.g., ~/.droid/config.json",
+        "primary": "Primary",
+        "selectConfigFile": "Select target config file",
+        "unnamed": "Unnamed",
+        "baseUrlFieldPlaceholder": "Base URL field path, e.g., env.ANTHROPIC_BASE_URL",
+        "authTokenFieldPlaceholder": "Auth token field path (optional)",
+        "proxyHint": "Proxy injection writes the local proxy address to the specified config file fields",
+        "nameRequired": "Please enter a tool name",
+        "configRequired": "Please add at least one valid config file path",
+        "createSuccess": "CLI tool created successfully",
+        "updateSuccess": "CLI tool updated successfully",
+        "deleteSuccess": "CLI tool deleted",
+        "saveFailed": "Failed to save CLI tool",
+        "deleteFailed": "Failed to delete CLI tool",
+        "invalidProxyTarget": "Invalid proxy injection target config file"
       },
       "logs": {
         "view": "View logs",
@@ -183,6 +313,14 @@
         "noData": "No data yet today",
         "lastUsed": "In Use"
       },
+      "directApply": {
+        "title": "Direct Apply",
+        "inUse": "In Use",
+        "currentBadge": "Current",
+        "success": "{name} applied",
+        "failed": "Failed to apply",
+        "proxyEnabled": "Disable proxy first"
+      },
       "form": {
         "createTitle": "Add vendor",
         "editTitle": "Edit vendor",
@@ -190,27 +328,61 @@
           "name": "Vendor name",
           "apiUrl": "API endpoint",
           "apiKey": "API key",
+          "apiEndpoint": "API Endpoint Path (optional)",
           "officialSite": "Official site",
           "icon": "Icon",
           "enabled": "Enabled",
           "level": "Priority Level",
-          "connectivityCheck": "Connectivity Check"
+          "availabilityMonitor": "Availability Monitoring",
+          "connectivityAutoBlacklist": "Auto-Blacklist on Failure",
+          "availabilityTestModel": "Test Model (optional)",
+          "availabilityTestEndpoint": "Test Endpoint (optional)",
+          "availabilityTimeout": "Timeout (ms)",
+          "connectivityCheck": "Connectivity Check (deprecated)",
+          "connectivityTestModel": "Test Model",
+          "connectivityTestEndpoint": "Test Endpoint",
+          "connectivityAuthType": "Auth Method"
         },
         "placeholders": {
           "name": "e.g. AICoding.sh",
           "apiUrl": "https://api.aicoding.sh",
           "apiKey": "sk-xxxxx",
+          "apiEndpoint": "Leave blank for default, e.g. /v1/chat/completions",
           "officialSite": "https://vendor.com",
-          "icon": "e.g. aicoding, kimi"
+          "icon": "e.g. aicoding, kimi",
+          "availabilityTestModel": "Leave empty to use platform default",
+          "availabilityTestEndpoint": "e.g., /v1/messages",
+          "connectivityTestModel": "Select or use default",
+          "customModel": "Or enter custom model",
+          "customEndpoint": "Or enter custom endpoint",
+          "customAuthHeader": "Custom header name (e.g. Authorization, X-Custom-Key)"
         },
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
-          "connectivityCheck": "When enabled, connectivity to this provider will be tested periodically; enabling this may consume a small amount of tokens"
+          "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
+          "availabilityMonitor": "Enable background health checks for this provider. Checks are performed periodically to monitor availability.",
+          "connectivityAutoBlacklist": "Automatically blacklist this provider if health checks fail repeatedly",
+          "availabilityAdvancedConfig": "Advanced configuration (test model, endpoint, timeout) can be edited on the Availability page",
+          "availabilityTestModel": "Model to use for health checks. Leave empty to use platform default.",
+          "availabilityTestEndpoint": "API endpoint for health checks. Leave empty to use platform default.",
+          "availabilityTimeout": "Timeout for health check requests in milliseconds (default: 15000)",
+          "connectivityCheck": "When enabled, connectivity to this provider will be tested periodically; enabling this may consume a small amount of tokens",
+          "connectivityTestModel": "Select a model for connectivity testing, or leave empty to use platform default",
+          "connectivityTestEndpoint": "Select or enter API endpoint path",
+          "connectivityAuthType": "Default is Bearer. Use X-API-Key for Anthropic-style APIs. Enter custom header name in the text field if needed."
         },
         "actions": {
           "cancel": "Cancel",
           "save": "Save",
-          "delete": "Delete"
+          "saveAndApply": "Save & Apply",
+          "delete": "Delete",
+          "testConnectivity": "Test Connectivity",
+          "testing": "Testing..."
+        },
+        "connectivity": {
+          "success": "Connected (latency: {latency}ms)",
+          "failed": "Connection failed",
+          "error": "Test error: {error}"
         },
         "switch": {
           "on": "Active",
@@ -273,11 +445,12 @@
         "resetLevelFailed": "Failed to reset level",
         "levelHint": "Has failure record",
         "levelTitle": "Blacklist Level L{level}"
+      },
+      "errors": {
+        "loadAppSettingsFailed": "Failed to load application settings",
+        "loadHeatmapFailed": "Failed to load usage heatmap",
+        "loadProvidersFailed": "Failed to load providers for {tab} tab"
       }
-    },
-    "console": {
-        "eyebrow": "Dashboard",
-        "title": "Tokens usage"
     },
     "logs": {
       "eyebrow": "Request diagnostics",
@@ -363,13 +536,15 @@
         "autoStart": "Launch at login",
         "switchNotify": "Switch Notification",
         "switchNotifyHint": "Send system notification when provider switches or gets blacklisted",
+        "roundRobin": "Same-Level Round Robin",
+        "roundRobinHint": "When enabled, providers at the same Level take turns handling requests; when disabled, always starts from the first",
         "autoUpdate": "Automatic update",
-        "autoConnectivityTest": "Auto connectivity test",
-        "autoConnectivityTestHint": "Test enabled providers every minute",
+        "autoConnectivityTest": "Auto Availability Monitoring",
+        "autoConnectivityTestHint": "Automatically check availability of monitored providers every minute",
         "lastCheck": "Last check",
         "currentVersion": "Current version",
         "latestVersion": "Latest version",
-        "checkNow": "Check",
+        "checkNow": "Check now",
         "manualUpdate": "Manual update",
         "blacklistThreshold": "Failure threshold",
         "blacklistDuration": "Blacklist duration",
@@ -395,7 +570,7 @@
       "update": {
         "checkFailed": "Check failed {count} times in a row",
         "checking": "Checking...",
-        "checkNow": "Check",
+        "checkNow": "Check now",
         "downloading": "Downloading {progress}%",
         "downloadAndInstall": "Download and install",
         "installAndRestart": "Install and restart"
@@ -409,7 +584,7 @@
         "configNotFound": "Config file not found",
         "pendingCount": "{providers} providers, {mcp} MCPs",
         "action": "Import action",
-        "importBtn": "Import",
+        "importBtn": "Import config",
         "importing": "Importing...",
         "success": "Imported: {providers} providers, {mcp} MCP servers",
         "nothingToImport": "Nothing to import (all may have been imported)",
@@ -428,6 +603,31 @@
         "settings": "Open settings",
         "refresh": "Refresh",
         "create": "New server"
+      },
+      "import": {
+        "title": "Batch Import MCP Servers",
+        "inputDesc": "Paste MCP configuration JSON. Supports Claude Desktop format, array format, or server map format.",
+        "placeholder": "{\n  \"mcpServers\": {\n    \"server-name\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-xxx\"]\n    }\n  }\n}",
+        "next": "Next",
+        "parsing": "Parsing...",
+        "back": "Back",
+        "reviewTitle": "Found {count} servers",
+        "selectAll": "Select All",
+        "conflictNotice": "{count} server(s) conflict with existing configuration",
+        "strategySkip": "Skip conflicts",
+        "strategyOverwrite": "Overwrite existing",
+        "status": {
+          "new": "New",
+          "conflict": "Conflict"
+        },
+        "submit": "Import {count}",
+        "importing": "Importing...",
+        "success": "Successfully imported {count} MCP server(s)",
+        "allSkipped": "All servers were skipped, nothing imported",
+        "noServers": "No valid server configuration found",
+        "needName": "Single server config requires a name",
+        "parseError": "Failed to parse JSON",
+        "importError": "Import failed. Please try again."
       },
       "section": {
         "title": "Registered servers",
@@ -457,7 +657,8 @@
       },
       "platforms": {
         "claude": "Claude Code",
-        "codex": "Codex"
+        "codex": "Codex",
+        "gemini": "Gemini CLI"
       },
       "form": {
         "createTitle": "Create MCP server",
@@ -471,6 +672,30 @@
         "website": "Website",
         "tips": "Helper note",
         "tipsHint": "Example: Visit ref.tools to get your API key",
+        "jsonEditor": {
+          "title": "JSON Config",
+          "dirty": "Not applied",
+          "lock": "Lock",
+          "unlock": "Unlock",
+          "apply": "Apply to form",
+          "reset": "Reset",
+          "hint": "This JSON does not include name or platforms. Name, website, tips, and platforms are controlled by the form.",
+          "toast": {
+            "dirtyNotApplied": "JSON changes are not applied. Saving will use the form values."
+          },
+          "errors": {
+            "empty": "Please enter JSON content",
+            "invalidJson": "Invalid JSON: {message}",
+            "mustBeObject": "JSON root must be an object",
+            "typeRequired": "Missing type (must be stdio or http)",
+            "typeInvalid": "type must be stdio or http",
+            "commandRequired": "command is required for stdio servers",
+            "urlRequired": "url is required for http servers",
+            "argsInvalid": "args must be an array of strings",
+            "envInvalid": "env must be an object with string values",
+            "applyFailed": "Failed to apply JSON. Please check the content."
+          }
+        },
         "env": "Environment variables",
         "envKey": "Key",
         "envValue": "Value",
@@ -488,32 +713,14 @@
           "name": "Please enter a server name",
           "command": "Command is required for stdio servers",
           "url": "HTTP servers require a URL",
-          "duplicate": "This name already exists"
+          "duplicate": "This name already exists",
+          "noPlatformSelected": "Please select at least one platform (Claude Code or Codex)"
+        },
+        "warnings": {
+          "savedWithPlaceholders": "✅ Config saved, but not synced to Claude/Codex due to placeholders ({vars}). Please fill placeholders and save again."
         },
         "deleteTitle": "Delete MCP server",
         "deleteMessage": "Are you sure you want to delete {name}? This action cannot be undone."
-      },
-      "jsonImport": {
-        "tabForm": "Form",
-        "tabJson": "Paste JSON",
-        "inputLabel": "Paste MCP Config JSON",
-        "inputPlaceholder": "Supports Claude Desktop format, array format, or single server format...",
-        "formatHint": "Supported formats: {\"mcpServers\": {...}}, [{...}], or {\"command\": ...}",
-        "parse": "Parse",
-        "parsing": "Parsing...",
-        "emptyInput": "Please enter JSON content",
-        "parseError": "Failed to parse JSON",
-        "fillForm": "Form filled. Please provide a server name.",
-        "serverCount": "{count} server(s)",
-        "reset": "Reset",
-        "unnamed": "Unnamed",
-        "importAll": "Import All",
-        "importSuccess": "Successfully imported {count} MCP server(s)",
-        "importError": "Import failed. Please try again.",
-        "conflictWarning": "The following servers already exist: {names}",
-        "conflictSkip": "Skip conflicts",
-        "conflictOverwrite": "Overwrite existing",
-        "conflictRename": "Rename and import"
       }
     },
     "gemini": {
@@ -577,15 +784,30 @@
         "title": "Claude Skill",
         "lead": "Fetch Claude skills from the managed repositories. Click the top-right button to add more sources."
       },
+      "platform": {
+        "claude": "Claude Code",
+        "codex": "Codex"
+      },
+      "groups": {
+        "project": "Project Skills",
+        "user": "User Skills",
+        "available": "Available Skills"
+      },
       "actions": {
         "back": "Back to home",
         "loading": "Processing...",
         "refresh": "Refresh list",
         "view": "View on GitHub",
-        "install": "Install to Claude Code",
+        "install": "Install",
         "uninstall": "Uninstall",
         "installError": "Failed to install {name}. Please retry",
-        "uninstallError": "Failed to uninstall {name}. Please retry"
+        "uninstallError": "Failed to uninstall {name}. Please retry",
+        "toggle": "Enable/Disable",
+        "viewContent": "View Content",
+        "hideContent": "Hide Content",
+        "openFolder": "Open Folder",
+        "loadFailed": "Failed to load content",
+        "toggleError": "Failed to toggle skill status"
       },
       "list": {
         "title": "Available skills",
@@ -594,7 +816,23 @@
         "empty": "No skills detected in the repository.",
         "error": "Failed to load skills. Please check your network and retry.",
         "noDescription": "SKILL.md does not include a description",
-        "missingRepo": "Missing repository information for this skill"
+        "missingRepo": "Missing repository information for this skill",
+        "noInstalled": "No installed skills"
+      },
+      "install": {
+        "title": "Choose Install Location",
+        "desc": "Install {name} to:",
+        "locationLabel": "Install Location",
+        "userLevel": "User Level (Global)",
+        "userLevelDesc": "~/.{platform}/skills/",
+        "projectLevel": "Project Level (Current Directory)",
+        "projectLevelDesc": "./.{platform}/skills/",
+        "gitWarning": "Project skills may need to be added to .gitignore",
+        "installing": "Installing...",
+        "confirm": "Confirm Install"
+      },
+      "license": {
+        "complete": "Complete terms in {file}"
       },
       "repos": {
         "open": "Manage repositories",
@@ -680,10 +918,20 @@
       "templateSaved": "Template saved successfully",
       "templateSaveError": "Failed to save template",
       "jsonParseError": "Invalid JSON format, please check your input",
-      "previewTitle": "Config preview (read-only)",
+      "previewTitle": "Config preview",
       "previewUnknownPath": "Unknown path",
       "smartPasteSuccess": "Parsed {format} config and filled fields",
-      "smartPasteFailed": "Unrecognized paste, please use JSON / TOML / .env content"
+      "smartPasteFailed": "Unrecognized paste, please use JSON / TOML / .env content",
+      "previewEditLocked": "Read-only",
+      "previewEditUnlocked": "Unlocked",
+      "previewApply": "Apply",
+      "previewReset": "Reset",
+      "previewParseError": "Invalid config format, please check syntax",
+      "previewApplySuccess": "Config applied successfully",
+      "saveAllFailed": "All config files failed to save",
+      "savePartialSuccess": "{success} saved, {fail} failed",
+      "tabPreview": "Preview",
+      "tabCurrent": "Current"
     }
   }
 }

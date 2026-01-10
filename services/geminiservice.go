@@ -172,6 +172,10 @@ func (s *GeminiService) UpdateProvider(provider GeminiProvider) error {
 
 	for i, p := range s.providers {
 		if p.ID == provider.ID {
+			// 允许更新 API Key；若未提供（空/全空白）则保留旧值，避免误清空
+			if strings.TrimSpace(provider.APIKey) == "" {
+				provider.APIKey = p.APIKey
+			}
 			s.providers[i] = provider
 			return s.saveProviders()
 		}
@@ -194,7 +198,17 @@ func (s *GeminiService) DeleteProvider(id string) error {
 }
 
 // SwitchProvider 切换到指定供应商
+// 注意：代理启用时禁止切换（与 Claude/Codex 保持一致）
 func (s *GeminiService) SwitchProvider(id string) error {
+	// 代理检查：启用时禁止切换
+	proxyStatus, err := s.ProxyStatus()
+	if err != nil {
+		return fmt.Errorf("检查代理状态失败: %w", err)
+	}
+	if proxyStatus != nil && proxyStatus.Enabled {
+		return fmt.Errorf("本地代理已启用，请先关闭代理再切换供应商")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -689,6 +703,13 @@ func (s *GeminiService) ProxyStatus() (*GeminiProxyStatus, error) {
 	return status, nil
 }
 
+// geminiBaseURLKey 和 geminiAPIKeyKey 用于代理注入
+const (
+	geminiBaseURLKey    = "GOOGLE_GEMINI_BASE_URL"
+	geminiAPIKeyKey     = "GEMINI_API_KEY"
+	geminiProxyTokenVal = "code-switch-r"
+)
+
 // EnableProxy 启用代理
 func (s *GeminiService) EnableProxy() error {
 	dir := getGeminiDir()
@@ -699,25 +720,69 @@ func (s *GeminiService) EnableProxy() error {
 	envPath := getGeminiEnvPath()
 	backupPath := envPath + ".code-switch.backup"
 
-	// 备份现有 .env（如果存在）
-	if _, err := os.Stat(envPath); err == nil {
-		content, readErr := os.ReadFile(envPath)
-		if readErr != nil {
-			return fmt.Errorf("读取现有 .env 失败: %w", readErr)
-		}
-		if err := os.WriteFile(backupPath, content, 0600); err != nil {
-			return fmt.Errorf("备份 .env 失败: %w", err)
-		}
+	// 幂等化检查：状态文件存在则视为已启用，不覆盖基线
+	stateExists, err := ProxyStateExists("gemini")
+	if err != nil {
+		return err
 	}
 
 	// 读取现有配置（如果有）
-	existingEnv, _ := readGeminiEnv()
+	// 注意：不能忽略非 ErrNotExist 的错误，避免覆盖/破坏现有文件
+	existingEnv, readErr := readGeminiEnv()
+	fileExisted := false
+	if readErr != nil {
+		if !os.IsNotExist(readErr) {
+			return fmt.Errorf("读取现有 .env 失败: %w", readErr)
+		}
+		// 文件不存在，使用空 map
+		existingEnv = make(map[string]string)
+	} else {
+		fileExisted = true // 文件存在（即使内容为空也算存在）
+	}
 	if existingEnv == nil {
 		existingEnv = make(map[string]string)
 	}
 
-	// 设置代理 URL
-	existingEnv["GOOGLE_GEMINI_BASE_URL"] = buildProxyURL(s.relayAddr)
+	// 仅首次启用时创建备份和状态文件
+	if !stateExists {
+		// 备份现有 .env（如果存在）
+		if _, statErr := os.Stat(envPath); statErr == nil {
+			content, readFileErr := os.ReadFile(envPath)
+			if readFileErr != nil {
+				return fmt.Errorf("读取现有 .env 失败: %w", readFileErr)
+			}
+			if err := os.WriteFile(backupPath, content, 0600); err != nil {
+				return fmt.Errorf("备份 .env 失败: %w", err)
+			}
+		}
+
+		// 记录启用前的基线到状态文件
+		state := &ProxyState{
+			TargetPath:        envPath,
+			FileExisted:       fileExisted,
+			EnvExisted:        len(existingEnv) > 0,
+			InjectedBaseURL:   buildProxyURL(s.relayAddr),
+			InjectedAuthToken: geminiProxyTokenVal,
+		}
+
+		// 记录原始 BASE_URL（如果 key 存在，即使是空值也记录）
+		// 与 Claude 保持一致：指针表示"是否存在"，空字符串也是有效值
+		if v, ok := existingEnv[geminiBaseURLKey]; ok {
+			state.OriginalBaseURL = &v
+		}
+		// 记录原始 API_KEY（如果 key 存在，即使是空值也记录）
+		if v, ok := existingEnv[geminiAPIKeyKey]; ok {
+			state.OriginalAuthToken = &v
+		}
+
+		if err := SaveProxyState("gemini", state); err != nil {
+			return err
+		}
+	}
+
+	// 设置代理 URL 和占位 API Key（与 Claude/Codex 保持一致）
+	existingEnv[geminiBaseURLKey] = buildProxyURL(s.relayAddr)
+	existingEnv[geminiAPIKeyKey] = geminiProxyTokenVal
 
 	// 写入 .env
 	if err := writeGeminiEnv(existingEnv); err != nil {
@@ -727,26 +792,91 @@ func (s *GeminiService) EnableProxy() error {
 	return nil
 }
 
-// DisableProxy 禁用代理
+// DisableProxy 禁用代理（手术式撤销：仅移除注入的代理配置，保留用户其他编辑）
 func (s *GeminiService) DisableProxy() error {
 	envPath := getGeminiEnvPath()
-	backupPath := envPath + ".code-switch.backup"
 
-	// 删除当前 .env
-	if err := os.Remove(envPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("删除 .env 失败: %w", err)
-	}
-
-	// 恢复备份（如果存在）
-	if _, err := os.Stat(backupPath); err == nil {
-		if err := os.Rename(backupPath, envPath); err != nil {
-			return fmt.Errorf("恢复备份失败: %w", err)
+	// 读取当前 .env（保留用户在代理期间的所有编辑）
+	envConfig, err := readGeminiEnv()
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 配置文件不存在，清理状态文件后返回
+			return DeleteProxyState("gemini")
 		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("检查备份文件失败: %w", err)
+		return fmt.Errorf("读取 .env 失败: %w", err)
+	}
+	if envConfig == nil {
+		envConfig = make(map[string]string)
 	}
 
-	return nil
+	// 尝试加载状态文件
+	state, stateErr := LoadProxyState("gemini")
+	if stateErr != nil {
+		// 兜底：状态文件缺失/损坏时，仅在字段仍等于代理值时才删除
+		// 避免误删用户自定义的直连配置
+		changed := s.fallbackCleanupEnv(envConfig)
+		if changed {
+			if err := writeGeminiEnv(envConfig); err != nil {
+				return fmt.Errorf("写入 .env 失败: %w", err)
+			}
+		}
+		return DeleteProxyState("gemini")
+	}
+
+	// 有状态文件：按基线做"手术式"恢复
+
+	// 1. 恢复或删除 GOOGLE_GEMINI_BASE_URL
+	if state.OriginalBaseURL != nil {
+		envConfig[geminiBaseURLKey] = *state.OriginalBaseURL
+	} else {
+		delete(envConfig, geminiBaseURLKey)
+	}
+
+	// 2. 恢复或删除 GEMINI_API_KEY
+	if state.OriginalAuthToken != nil {
+		envConfig[geminiAPIKeyKey] = *state.OriginalAuthToken
+	} else {
+		delete(envConfig, geminiAPIKeyKey)
+	}
+
+	// 3. 若 .env 变空且启用前不存在文件，则删除文件
+	if len(envConfig) == 0 && !state.FileExisted {
+		if err := os.Remove(envPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("删除空 .env 失败: %w", err)
+		}
+	} else {
+		// 写入修改后的配置
+		if err := writeGeminiEnv(envConfig); err != nil {
+			return fmt.Errorf("写入 .env 失败: %w", err)
+		}
+	}
+
+	return DeleteProxyState("gemini")
+}
+
+// fallbackCleanupEnv 兜底清理：仅删除仍等于代理值的字段
+func (s *GeminiService) fallbackCleanupEnv(envConfig map[string]string) bool {
+	changed := false
+	proxyURL := buildProxyURL(s.relayAddr)
+
+	// 检查 GOOGLE_GEMINI_BASE_URL 是否仍指向代理
+	if v, ok := envConfig[geminiBaseURLKey]; ok {
+		if strings.EqualFold(
+			strings.TrimSuffix(strings.TrimSpace(v), "/"),
+			strings.TrimSuffix(strings.TrimSpace(proxyURL), "/"),
+		) {
+			delete(envConfig, geminiBaseURLKey)
+			changed = true
+		}
+	}
+
+	// 检查 GEMINI_API_KEY 是否为代理占位值
+	if v, ok := envConfig[geminiAPIKeyKey]; ok && v == geminiProxyTokenVal {
+		delete(envConfig, geminiAPIKeyKey)
+		changed = true
+	}
+
+	return changed
 }
 
 // buildProxyURL 构建代理 URL（包含 /gemini 前缀）
@@ -861,4 +991,77 @@ func (s *GeminiService) ReorderProviders(ids []string) error {
 
 	s.providers = newProviders
 	return s.saveProviders()
+}
+
+// ApplySingleProvider 直连应用单一供应商（别名，统一 API 命名）
+// 与 SwitchProvider 功能相同，仅在代理关闭时可用
+func (s *GeminiService) ApplySingleProvider(id string) error {
+	return s.SwitchProvider(id)
+}
+
+// GetDirectAppliedProviderID 返回当前直连应用的 Provider ID
+// 通过读取 CLI 配置文件反推当前使用的 provider
+// 返回值：
+//   - nil: 配置指向本地代理 或 无法匹配到 provider
+//   - *string: 匹配到的 provider ID
+func (s *GeminiService) GetDirectAppliedProviderID() (*string, error) {
+	// 1. 检查代理状态
+	proxyStatus, err := s.ProxyStatus()
+	if err != nil {
+		return nil, fmt.Errorf("检查代理状态失败: %w", err)
+	}
+	// 代理启用时，直连状态无意义
+	if proxyStatus != nil && proxyStatus.Enabled {
+		return nil, nil
+	}
+
+	// 2. 读取当前 .env 配置
+	envConfig, err := readGeminiEnv()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("读取 .env 失败: %w", err)
+	}
+
+	currentBaseURL := envConfig["GOOGLE_GEMINI_BASE_URL"]
+	currentAPIKey := envConfig["GEMINI_API_KEY"]
+
+	// 3. 遍历所有供应商进行匹配（CLI 配置为真源，不依赖 Enabled 状态）
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, p := range s.providers {
+		// 匹配 BaseURL（来自 provider 顶级字段或 EnvConfig）
+		providerBaseURL := p.BaseURL
+		if providerBaseURL == "" && p.EnvConfig != nil {
+			providerBaseURL = p.EnvConfig["GOOGLE_GEMINI_BASE_URL"]
+		}
+
+		// 匹配 APIKey（来自 provider 顶级字段或 EnvConfig）
+		providerAPIKey := p.APIKey
+		if providerAPIKey == "" && p.EnvConfig != nil {
+			providerAPIKey = p.EnvConfig["GEMINI_API_KEY"]
+		}
+
+		// URL + Key 双重匹配（使用 TrimRight 去除所有尾斜杠）
+		urlMatch := strings.EqualFold(
+			strings.TrimRight(strings.TrimSpace(currentBaseURL), "/"),
+			strings.TrimRight(strings.TrimSpace(providerBaseURL), "/"),
+		)
+		keyMatch := currentAPIKey == providerAPIKey
+
+		// OAuth 模式特殊处理：无 API Key 时只匹配 URL
+		if providerAPIKey == "" && currentAPIKey == "" {
+			if urlMatch || (currentBaseURL == "" && providerBaseURL == "") {
+				id := p.ID
+				return &id, nil
+			}
+		} else if urlMatch && keyMatch {
+			id := p.ID
+			return &id, nil
+		}
+	}
+
+	return nil, nil
 }

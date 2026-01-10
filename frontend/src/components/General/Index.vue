@@ -52,6 +52,20 @@
               <span class="hint-text">{{ $t('components.general.label.switchNotifyHint') }}</span>
             </div>
           </ListItem>
+          <ListItem :label="$t('components.general.label.roundRobin')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="roundRobinEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.roundRobinHint') }}</span>
+            </div>
+          </ListItem>
         </div>
       </section>
 
@@ -250,20 +264,20 @@
   </PageLayout>
 </template>
 
-<script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import PageLayout from '../common/PageLayout.vue'
-import ListItem from '../Setting/ListRow.vue'
-import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
-import ThemeSetting from '../Setting/ThemeSetting.vue'
-import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
-import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
-import { fetchCurrentVersion } from '../../services/version'
-import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
-import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
-import { setAutoTestEnabled } from '../../services/connectivity'
-import { useI18n } from 'vue-i18n'
+	<script setup lang="ts">
+	import { ref, onMounted } from 'vue'
+	import { useRouter } from 'vue-router'
+	import { Call } from '@wailsio/runtime'
+	import PageLayout from '../common/PageLayout.vue'
+	import ListItem from '../Setting/ListRow.vue'
+	import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
+	import ThemeSetting from '../Setting/ThemeSetting.vue'
+	import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
+	import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
+	import { fetchCurrentVersion } from '../../services/version'
+	import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
+	import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
+	import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
@@ -276,11 +290,12 @@ const getCachedValue = (key: string, defaultValue: boolean): boolean => {
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
-const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
-const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
-const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
-const settingsLoading = ref(true)
-const saveBusy = ref(false)
+	const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
+	const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
+	const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
+	const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
+	const settingsLoading = ref(true)
+	const saveBusy = ref(false)
 
 // 更新相关状态
 const updateState = ref<UpdateState | null>(null)
@@ -313,29 +328,32 @@ const loadAppSettings = async () => {
     heatmapEnabled.value = data?.show_heatmap ?? true
     homeTitleVisible.value = data?.show_home_title ?? true
     autoStartEnabled.value = data?.auto_start ?? false
-    autoUpdateEnabled.value = data?.auto_update ?? true
-    autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
-    switchNotifyEnabled.value = data?.enable_switch_notify ?? true
+	    autoUpdateEnabled.value = data?.auto_update ?? true
+	    autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
+	    switchNotifyEnabled.value = data?.enable_switch_notify ?? true
+	    roundRobinEnabled.value = data?.enable_round_robin ?? false
 
-    // 缓存到 localStorage，下次打开时直接显示正确状态
-    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
-    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
-  } catch (error) {
-    console.error('failed to load app settings', error)
-    heatmapEnabled.value = true
-    homeTitleVisible.value = true
-    autoStartEnabled.value = false
-    autoUpdateEnabled.value = true
-    autoConnectivityTestEnabled.value = false
-    switchNotifyEnabled.value = true
-  } finally {
-    settingsLoading.value = false
-  }
-}
+	    // 缓存到 localStorage，下次打开时直接显示正确状态
+	    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
+	    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+	    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
+	    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+	    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+	    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+	    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+	  } catch (error) {
+	    console.error('failed to load app settings', error)
+	    heatmapEnabled.value = true
+	    homeTitleVisible.value = true
+	    autoStartEnabled.value = false
+	    autoUpdateEnabled.value = true
+	    autoConnectivityTestEnabled.value = false
+	    switchNotifyEnabled.value = true
+	    roundRobinEnabled.value = false
+	  } finally {
+	    settingsLoading.value = false
+	  }
+	}
 
 const persistAppSettings = async () => {
   if (settingsLoading.value || saveBusy.value) return
@@ -344,31 +362,36 @@ const persistAppSettings = async () => {
     const payload: AppSettings = {
       show_heatmap: heatmapEnabled.value,
       show_home_title: homeTitleVisible.value,
-      auto_start: autoStartEnabled.value,
-      auto_update: autoUpdateEnabled.value,
-      auto_connectivity_test: autoConnectivityTestEnabled.value,
-      enable_switch_notify: switchNotifyEnabled.value,
-    }
-    await saveAppSettings(payload)
+	      auto_start: autoStartEnabled.value,
+	      auto_update: autoUpdateEnabled.value,
+	      auto_connectivity_test: autoConnectivityTestEnabled.value,
+	      enable_switch_notify: switchNotifyEnabled.value,
+	      enable_round_robin: roundRobinEnabled.value,
+	    }
+	    await saveAppSettings(payload)
 
     // 同步自动更新设置到 UpdateService
     await setAutoCheckEnabled(autoUpdateEnabled.value)
 
-    // 同步自动连通性检测设置到 ConnectivityTestService
-    await setAutoTestEnabled(autoConnectivityTestEnabled.value)
+	    // 同步自动可用性监控设置到 HealthCheckService（复用旧字段名）
+	    await Call.ByName(
+	      'codeswitch/services.HealthCheckService.SetAutoAvailabilityPolling',
+	      autoConnectivityTestEnabled.value
+	    )
 
-    // 更新缓存
-    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
-    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+	    // 更新缓存
+	    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
+	    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+	    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
+	    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+	    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+	    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+	    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
 
-    window.dispatchEvent(new CustomEvent('app-settings-updated'))
-  } catch (error) {
-    console.error('failed to save app settings', error)
-  } finally {
+	    window.dispatchEvent(new CustomEvent('app-settings-updated'))
+	  } catch (error) {
+	    console.error('failed to save app settings', error)
+	  } finally {
     saveBusy.value = false
   }
 }

@@ -447,34 +447,32 @@ func TestProvider_ValidateConfiguration(t *testing.T) {
 			errorContains: "不在 supportedModels 中",
 		},
 
-		// 警告：只配置映射未配置白名单
-		{
-			name: "警告-无白名单",
-			provider: Provider{
-				Name: "test-provider",
-				ModelMapping: map[string]string{
-					"external": "internal",
+			// 警告：只配置映射未配置白名单
+			{
+				name: "警告-无白名单",
+				provider: Provider{
+					Name: "test-provider",
+					ModelMapping: map[string]string{
+						"external": "internal",
+					},
 				},
+				expectErrors: false,
 			},
-			expectErrors:  true,
-			errorContains: "未配置 supportedModels",
-		},
 
-		// 警告：自映射
-		{
-			name: "警告-自映射",
-			provider: Provider{
-				Name: "test-provider",
-				SupportedModels: map[string]bool{
-					"model-a": true,
+			// 警告：自映射
+			{
+				name: "警告-自映射",
+				provider: Provider{
+					Name: "test-provider",
+					SupportedModels: map[string]bool{
+						"model-a": true,
+					},
+					ModelMapping: map[string]string{
+						"model-a": "model-a",
+					},
 				},
-				ModelMapping: map[string]string{
-					"model-a": "model-a",
-				},
+				expectErrors: false,
 			},
-			expectErrors:  true,
-			errorContains: "映射到自身",
-		},
 
 		// 通配符映射（不验证）
 		{

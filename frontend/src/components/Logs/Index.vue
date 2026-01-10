@@ -1,129 +1,134 @@
 <template>
-  <PageLayout :eyebrow="t('components.console.eyebrow')" :title="t('components.console.title')">
-    <template #actions>
+  <div class="logs-page">
+    <div class="logs-header">
+      <BaseButton variant="outline" type="button" @click="backToHome">
+        {{ t('components.logs.back') }}
+      </BaseButton>
       <div class="refresh-indicator">
         <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
         <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
           {{ t('components.logs.refresh') }}
         </BaseButton>
       </div>
-    </template>
+    </div>
 
-    <div style="display: flex; flex-direction: column; gap: var(--spacing-section);">
+    <section class="logs-summary" v-if="statsCards.length">
+      <article
+        v-for="card in statsCards"
+        :key="card.key"
+        :class="['summary-card', { 'summary-card--clickable': card.key === 'cost' }]"
+        @click="card.key === 'cost' && openCostDetailModal()"
+      >
+        <div class="summary-card__label">{{ card.label }}</div>
+        <div class="summary-card__value">{{ card.value }}</div>
+        <div class="summary-card__hint">{{ card.hint }}</div>
+      </article>
+    </section>
 
-      <section class="logs-summary" v-if="statsCards.length">
-        <article v-for="card in statsCards" :key="card.key"
-          :class="['summary-card', { 'summary-card--clickable': card.key === 'cost' }]"
-          @click="card.key === 'cost' && openCostDetailModal()">
-          <div class="summary-card__label">{{ card.label }}</div>
-          <div class="summary-card__value">{{ card.value }}</div>
-          <div class="summary-card__hint">{{ card.hint }}</div>
-        </article>
-      </section>
+    <section class="logs-chart">
+      <Line :data="chartData" :options="chartOptions" />
+    </section>
 
-      <section class="logs-chart">
-        <Line :data="chartData" :options="chartOptions" />
-      </section>
+    <form class="logs-filter-row" @submit.prevent="applyFilters">
+      <div class="filter-fields">
+        <label class="filter-field">
+          <span>{{ t('components.logs.filters.platform') }}</span>
+          <select v-model="filters.platform" class="mac-select">
+            <option value="">{{ t('components.logs.filters.allPlatforms') }}</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>{{ t('components.logs.filters.provider') }}</span>
+          <select v-model="filters.provider" class="mac-select">
+            <option value="">{{ t('components.logs.filters.allProviders') }}</option>
+            <option v-for="provider in providerOptions" :key="provider" :value="provider">
+              {{ provider }}
+            </option>
+          </select>
+        </label>
+      </div>
+      <div class="filter-actions">
+        <BaseButton type="submit" :disabled="loading">
+          {{ t('components.logs.query') }}
+        </BaseButton>
+      </div>
+    </form>
 
-      <form class="logs-filter-row" @submit.prevent="applyFilters">
-        <div class="filter-fields">
-          <label class="filter-field">
-            <span>{{ t('components.logs.filters.platform') }}</span>
-            <select v-model="filters.platform" class="mac-select">
-              <option value="">{{ t('components.logs.filters.allPlatforms') }}</option>
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-              <option value="gemini">Gemini</option>
-            </select>
-          </label>
-          <label class="filter-field">
-            <span>{{ t('components.logs.filters.provider') }}</span>
-            <select v-model="filters.provider" class="mac-select">
-              <option value="">{{ t('components.logs.filters.allProviders') }}</option>
-              <option v-for="provider in providerOptions" :key="provider" :value="provider">
-                {{ provider }}
-              </option>
-            </select>
-          </label>
-        </div>
-        <div class="filter-actions">
-          <BaseButton type="submit" :disabled="loading">
-            {{ t('components.logs.query') }}
-          </BaseButton>
-        </div>
-      </form>
+    <section class="logs-table-wrapper">
+      <table class="logs-table">
+        <thead>
+          <tr>
+            <th class="col-time">{{ t('components.logs.table.time') }}</th>
+            <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
+            <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
+            <th class="col-model">{{ t('components.logs.table.model') }}</th>
+            <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
+            <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
+            <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
+            <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in pagedLogs" :key="item.id">
+            <td>{{ formatTime(item.created_at) }}</td>
+            <td>{{ item.platform || '—' }}</td>
+            <td>{{ item.provider || '—' }}</td>
+            <td>{{ item.model || '—' }}</td>
+            <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
+            <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span></td>
+            <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec) }}</span></td>
+            <td class="token-cell">
+              <div>
+                <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
+                <span class="token-value">{{ formatNumber(item.input_tokens) }}</span>
+              </div>
+              <div>
+                <span class="token-label">{{ t('components.logs.tokenLabels.output') }}</span>
+                <span class="token-value">{{ formatNumber(item.output_tokens) }}</span>
+              </div>
+              <div>
+                <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
+                <span class="token-value">{{ formatNumber(item.reasoning_tokens) }}</span>
+              </div>
+              <div>
+                <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
+                <span class="token-value">{{ formatNumber(item.cache_create_tokens) }}</span>
+              </div>
+              <div>
+                <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
+                <span class="token-value">{{ formatNumber(item.cache_read_tokens) }}</span>
+              </div>
+            </td>
+          </tr>
+          <tr v-if="!pagedLogs.length && !loading">
+            <td colspan="8" class="empty">{{ t('components.logs.empty') }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="loading" class="empty">{{ t('components.logs.loading') }}</p>
+    </section>
 
-      <section class="logs-table-wrapper">
-        <table class="logs-table">
-          <thead>
-            <tr>
-              <th class="col-time">{{ t('components.logs.table.time') }}</th>
-              <th class="col-platform">{{ t('components.logs.table.platform') }}</th>
-              <th class="col-provider">{{ t('components.logs.table.provider') }}</th>
-              <th class="col-model">{{ t('components.logs.table.model') }}</th>
-              <th class="col-http">{{ t('components.logs.table.httpCode') }}</th>
-              <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
-              <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
-              <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in pagedLogs" :key="item.id">
-              <td>{{ formatTime(item.created_at) }}</td>
-              <td>{{ item.platform || '—' }}</td>
-              <td>{{ item.provider || '—' }}</td>
-              <td>{{ item.model || '—' }}</td>
-              <td :class="['code', httpCodeClass(item.http_code)]">{{ item.http_code }}</td>
-              <td><span :class="['stream-tag', item.is_stream ? 'on' : 'off']">{{ formatStream(item.is_stream) }}</span>
-              </td>
-              <td><span :class="['duration-tag', durationColor(item.duration_sec)]">{{ formatDuration(item.duration_sec)
-                  }}</span></td>
-              <td class="token-cell">
-                <div>
-                  <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
-                  <span class="token-value">{{ formatNumber(item.input_tokens) }}</span>
-                </div>
-                <div>
-                  <span class="token-label">{{ t('components.logs.tokenLabels.output') }}</span>
-                  <span class="token-value">{{ formatNumber(item.output_tokens) }}</span>
-                </div>
-                <div>
-                  <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
-                  <span class="token-value">{{ formatNumber(item.reasoning_tokens) }}</span>
-                </div>
-                <div>
-                  <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
-                  <span class="token-value">{{ formatNumber(item.cache_create_tokens) }}</span>
-                </div>
-                <div>
-                  <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
-                  <span class="token-value">{{ formatNumber(item.cache_read_tokens) }}</span>
-                </div>
-              </td>
-            </tr>
-            <tr v-if="!pagedLogs.length && !loading">
-              <td colspan="8" class="empty">{{ t('components.logs.empty') }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="loading" class="empty">{{ t('components.logs.loading') }}</p>
-      </section>
-
-      <div class="logs-pagination">
-        <span>{{ page }} / {{ totalPages }}</span>
-        <div class="pagination-actions">
-          <BaseButton variant="outline" size="sm" :disabled="page === 1 || loading" @click="prevPage">
-            ‹
-          </BaseButton>
-          <BaseButton variant="outline" size="sm" :disabled="page >= totalPages || loading" @click="nextPage">
-            ›
-          </BaseButton>
-        </div>
+    <div class="logs-pagination">
+      <span>{{ page }} / {{ totalPages }}</span>
+      <div class="pagination-actions">
+        <BaseButton variant="outline" size="sm" :disabled="page === 1 || loading" @click="prevPage">
+          ‹
+        </BaseButton>
+        <BaseButton variant="outline" size="sm" :disabled="page >= totalPages || loading" @click="nextPage">
+          ›
+        </BaseButton>
       </div>
     </div>
+
     <!-- 金额明细弹窗 -->
-    <BaseModal :open="costDetailModal.open" :title="t('components.logs.costDetail.title')"
-      @close="closeCostDetailModal">
+    <BaseModal
+      :open="costDetailModal.open"
+      :title="t('components.logs.costDetail.title')"
+      @close="closeCostDetailModal"
+    >
       <div class="cost-detail-modal">
         <p v-if="costDetailModal.loading" class="cost-detail-loading">
           {{ t('components.logs.loading') }}
@@ -139,15 +144,13 @@
         </ul>
       </div>
     </BaseModal>
-
-  </PageLayout>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import PageLayout from '../common/PageLayout.vue'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
 import {
@@ -653,16 +656,13 @@ html.dark .summary-card__hint {
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-
 .summary-card--clickable:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(249, 115, 22, 0.15);
 }
-
 .summary-card--clickable:active {
   transform: translateY(0);
 }
-
 html.dark .summary-card--clickable:hover {
   box-shadow: 0 4px 12px rgba(249, 115, 22, 0.25);
 }
@@ -671,19 +671,16 @@ html.dark .summary-card--clickable:hover {
 .cost-detail-modal {
   min-height: 120px;
 }
-
 .cost-detail-loading,
 .cost-detail-empty {
   text-align: center;
   color: #64748b;
   padding: 2rem 0;
 }
-
 html.dark .cost-detail-loading,
 html.dark .cost-detail-empty {
   color: #94a3b8;
 }
-
 .cost-detail-list {
   list-style: none;
   margin: 0;
@@ -692,7 +689,6 @@ html.dark .cost-detail-empty {
   flex-direction: column;
   gap: 0.75rem;
 }
-
 .cost-detail-item {
   display: flex;
   justify-content: space-between;
@@ -702,28 +698,22 @@ html.dark .cost-detail-empty {
   border-radius: 8px;
   transition: background 0.15s ease;
 }
-
 .cost-detail-item:hover {
   background: rgba(148, 163, 184, 0.12);
 }
-
 html.dark .cost-detail-item {
   background: rgba(148, 163, 184, 0.12);
 }
-
 html.dark .cost-detail-item:hover {
   background: rgba(148, 163, 184, 0.18);
 }
-
 .cost-detail-item__name {
   font-weight: 500;
   color: #1e293b;
 }
-
 html.dark .cost-detail-item__name {
   color: #f1f5f9;
 }
-
 .cost-detail-item__value {
   font-weight: 600;
   color: #f97316;

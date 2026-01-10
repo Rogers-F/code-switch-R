@@ -742,6 +742,49 @@ func (bs *BlacklistService) GetBlacklistStatus(platform string) ([]BlacklistStat
 	return statuses, nil
 }
 
+// ShouldUseFixedMode 返回是否应该使用固定拉黑模式（禁用自动降级）
+// 满足以下所有条件时返回 true：
+// 1. 黑名单总开关已启用
+// 2. 且满足以下任一：
+//    - 等级拉黑开启
+//    - 等级拉黑关闭但 fallbackMode="fixed"
+func (bs *BlacklistService) ShouldUseFixedMode() bool {
+	// 首先检查全局开关
+	if !bs.settingsService.IsBlacklistEnabled() {
+		return false // 全局拉黑关闭 → 始终降级
+	}
+
+	config, err := bs.settingsService.GetBlacklistLevelConfig()
+	if err != nil {
+		// 读取失败：使用默认配置
+		log.Printf("[BlacklistService] 读取配置失败，使用默认值: %v", err)
+		defaultConfig := DefaultBlacklistLevelConfig()
+		return defaultConfig.FallbackMode == "fixed"
+	}
+
+	// 等级拉黑开启 → 固定模式
+	if config.EnableLevelBlacklist {
+		return true
+	}
+
+	// 等级拉黑关闭 → 根据 fallbackMode 决定
+	switch config.FallbackMode {
+	case "fixed":
+		return true
+	case "none":
+		return false
+	default:
+		// 未知值：记录警告并视为 none（保持降级）
+		log.Printf("[BlacklistService] 未知的 fallbackMode: %s，视为 none", config.FallbackMode)
+		return false
+	}
+}
+
+// IsBlacklistEnabled 返回拉黑总开关状态（用于固定拉黑模式判断）
+func (bs *BlacklistService) IsBlacklistEnabled() bool {
+	return bs.settingsService.IsBlacklistEnabled()
+}
+
 // IsLevelBlacklistEnabled 返回等级拉黑功能是否开启
 // 用于 proxyHandler 判断是否启用自动降级
 func (bs *BlacklistService) IsLevelBlacklistEnabled() bool {
@@ -750,4 +793,37 @@ func (bs *BlacklistService) IsLevelBlacklistEnabled() bool {
 		return false // 出错时默认关闭（保持降级行为）
 	}
 	return config.EnableLevelBlacklist
+}
+
+// RetryConfig 重试配置（供 proxyHandler 使用）
+type RetryConfig struct {
+	FailureThreshold    int // 失败阈值（达到后触发拉黑）
+	RetryWaitSeconds    int // 重试等待时间（秒）
+	DedupeWindowSeconds int // 去重窗口（秒）
+}
+
+// GetRetryConfig 获取重试相关配置
+// 用于 proxyHandler 实现同 Provider 重试机制
+func (bs *BlacklistService) GetRetryConfig() *RetryConfig {
+	config, err := bs.settingsService.GetBlacklistLevelConfig()
+	if err != nil {
+		// 【修复】读取配置失败时，也尝试从数据库读取阈值
+		// 确保内层重试次数与实际拉黑阈值一致
+		defaultConfig := DefaultBlacklistLevelConfig()
+		result := &RetryConfig{
+			FailureThreshold:    defaultConfig.FailureThreshold,
+			RetryWaitSeconds:    defaultConfig.RetryWaitSeconds,
+			DedupeWindowSeconds: defaultConfig.DedupeWindowSeconds,
+		}
+		// 尝试从数据库读取阈值
+		if dbThreshold, _, dbErr := bs.settingsService.GetBlacklistSettings(); dbErr == nil && dbThreshold > 0 {
+			result.FailureThreshold = dbThreshold
+		}
+		return result
+	}
+	return &RetryConfig{
+		FailureThreshold:    config.FailureThreshold,
+		RetryWaitSeconds:    config.RetryWaitSeconds,
+		DedupeWindowSeconds: config.DedupeWindowSeconds,
+	}
 }

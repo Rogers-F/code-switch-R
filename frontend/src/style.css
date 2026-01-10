@@ -5,16 +5,16 @@
 :root {
   color-scheme: light;
   --mac-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
-  --mac-surface: #FFFFFF;
-  --mac-surface-strong: #FFFFFF;
-  --mac-border: rgba(0, 0, 0, 0.06);
+  --mac-surface: #ffffff;
+  --mac-surface-strong: #f5f5f7;
+  --mac-border: rgba(15, 23, 42, 0.12);
   --mac-divider: rgba(15, 23, 42, 0.12);
   --mac-sidebar: #f2f3f5;
   --mac-sidebar-border: rgba(15, 23, 42, 0.08);
   --mac-text: #1d1d1f;
   --mac-text-secondary: #6e6e73;
   --mac-accent: #0a84ff;
-  --app-background: #F5F5F7;
+  --app-background: linear-gradient(180deg, #f6f7fb 0%, #eef1f7 50%, #e7ebf5 100%);
   --contrib-surface: #f6f8fa;
   --contrib-text: #0f1116;
   --contrib-muted: rgba(15, 23, 42, 0.6);
@@ -29,47 +29,6 @@
   --contrib-tooltip-heading: #0f172a;
   --contrib-tooltip-text: rgba(15, 23, 42, 0.7);
   --contrib-tooltip-value: #0f172a;
-
-  /* 统一间距系统 */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 16px;
-  --spacing-xl: 16px;
-  --spacing-2xl: 16px;
-  --spacing-3xl: 16px;
-
-  /* 页面布局令牌 */
-  --spacing-page: var(--spacing-lg);        /* 页面容器padding: 24px */
-  --spacing-component: var(--spacing-md);   /* 组件间距: 16px */
-  --spacing-section: var(--spacing-lg);     /* 区块间距: 24px */
-  --spacing-tight: var(--spacing-sm);        /* 紧密间距: 8px */
-
-  /* 容器内边距 */
-  --padding-page: var(--spacing-page);      /* 页面容器: 24px */
-  --padding-card: 18px 20px;                /* 卡片内边距 */
-  --padding-panel: 32px;                    /* 面板内边距 */
-  --padding-form: 12px 16px;                /* 表单内边距 */
-
-  /* 圆角系统 */
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-full: 999px;
-
-  /* 阴影系统 */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
-  --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.07);
-  --shadow-float: 0 15px 40px rgba(0, 0, 0, 0.08);
-
-  /* 过渡动画 */
-  --transition-fast: 0.15s ease;
-  --transition-base: 0.2s ease;
-  --transition-slow: 0.3s ease;
 }
 
 html.dark {
@@ -188,7 +147,7 @@ html.dark .mac-sidebar-item:hover {
 
 .mac-panel {
   background: var(--mac-surface);
-  border-radius: 12px;;
+  border-radius: 20px;
   border: 1px solid var(--mac-border);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   overflow: hidden;
@@ -203,7 +162,6 @@ html.dark .mac-sidebar-item:hover {
   font-weight: 700;
   margin-bottom: 10px;
   letter-spacing: 0.02em;
-  margin-top: 10px;
 }
 
 .mac-section-description {
@@ -305,7 +263,7 @@ html.dark .mac-sidebar-item:hover {
 .mac-toast {
   min-width: 240px;
   padding: 12px 18px;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--mac-border);
   background: var(--mac-surface-strong);
   color: var(--mac-text);
@@ -332,6 +290,10 @@ html.dark .mac-sidebar-item:hover {
 
 .mac-toast-error {
   border-color: rgba(255, 69, 58, 0.5);
+}
+
+.mac-toast-warning {
+  border-color: rgba(245, 158, 11, 0.5);
 }
 
 @media (max-width: 960px) {
@@ -385,8 +347,8 @@ html.dark .mac-sidebar-item:hover {
 .contrib-wall {
   position: relative;
   background: var(--contrib-surface, #0f1116);
-  border-radius: 12px;;
-  padding: 10px;
+  border-radius: 24px;
+  padding: 32px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
@@ -566,7 +528,7 @@ html.dark .mac-sidebar-item:hover {
 .automation-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px;
 }
 
 .section-header {
@@ -580,29 +542,9 @@ html.dark .mac-sidebar-item:hover {
   position: relative;
 }
 
-
-/* 左侧占位符，用于居中 tab-group */
+/* 移除左侧占位符，使 tab-group 左对齐 */
 .section-header::before {
-
-  flex: 1;
-  min-width: 0;
-}
-
-.tab-group-container {
-  display: flex;
-  align-items: center;
-  flex: 1; /* 核心：占据左侧所有剩余空间，把右侧按钮挤过去 */
-  min-width: 0; /* 核心：防止 flex 子元素导致父容器溢出 */
-  overflow-x: auto; /* 如果 Tab 太多，允许横向滚动 */
-  padding-right: 16px; /* 与右侧控制区保持安全距离 */
-  
-  /* 隐藏滚动条，保持美观 */
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none;  /* IE 10+ */
-}
-
-.tab-group-container::-webkit-scrollbar { 
-  display: none; /* Chrome/Safari */
+  content: none;
 }
 
 .tab-group {
@@ -712,7 +654,7 @@ html.dark .mac-sidebar-item:hover {
   font-size: 0.65rem;
   font-weight: 600;
   padding: 2px 6px;
-  border-radius: 12px;;
+  border-radius: 10px;
   line-height: 1;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(14, 165, 233, 0.4);
@@ -847,7 +789,7 @@ html.dark .mac-sidebar-item:hover {
   background: color-mix(in srgb, var(--mac-surface-strong) 85%, rgba(0, 0, 0, 0.7));
   color: var(--mac-text);
   padding: 8px 12px;
-  border-radius: 12px;;
+  border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--mac-text-secondary) 25%, transparent);
   font-size: 0.78rem;
   line-height: 1.3;
@@ -1187,12 +1129,12 @@ html.dark .mac-sidebar-item:hover {
 .automation-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .automation-card {
   width: 100%;
-  border-radius: 16px;
+  border-radius: 20px;
   border: 1px solid var(--mac-border);
   background: var(--mac-surface);
   padding: 18px 20px;
@@ -1200,19 +1142,13 @@ html.dark .mac-sidebar-item:hover {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  box-shadow: var(--shadow-card);
-  transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.2s ease;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .automation-card.dragging {
   opacity: 0.6;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-}
-
-.automation-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.06); /* hover 时阴影加深 */
-  border-color: rgba(0,0,0,0.1);
 }
 
 .card-leading {
@@ -1225,7 +1161,7 @@ html.dark .mac-sidebar-item:hover {
 .card-icon {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: 14px;
   display: grid;
   place-items: center;
   font-size: 1.1rem;
@@ -1347,13 +1283,12 @@ html.dark .card-meta {
 }
 
 .ghost-icon {
-  border-radius: 8px; /* 方形圆角更现代 */
-  background: transparent; /* 默认透明 */
-  color: var(--mac-text-secondary);
   border: none;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--mac-text);
   width: 34px;
   height: 34px;
-  border-radius: 12px;;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1372,8 +1307,7 @@ html.dark .ghost-icon {
 }
 
 .ghost-icon:hover {
-  background: rgba(0,0,0,0.05);
-  color: var(--mac-text);
+  background: rgba(15, 23, 42, 0.15);
 }
 
 html.dark .ghost-icon:hover {
@@ -1452,6 +1386,14 @@ html.dark .ghost-icon:hover {
   backdrop-filter: blur(6px);
 }
 
+.modal-overlay-noevent {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
 .modal-wrapper {
   position: relative;
   z-index: 1;
@@ -1467,7 +1409,7 @@ html.dark .ghost-icon:hover {
   width: min(720px, 95vw);
   max-height: 90vh;
   background: var(--mac-surface);
-  border-radius: 12px;;
+  border-radius: 24px;
   border: 1px solid var(--mac-border);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
   display: flex;
@@ -1593,6 +1535,18 @@ html.dark .ghost-icon:hover {
   background: rgba(15, 23, 42, 0.06);
 }
 
+/* 深色模式下的 outline 按钮适配 */
+html.dark .btn-outline {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--mac-text);
+}
+
+html.dark .btn-outline:hover,
+html.dark .btn-outline:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
 .btn-primary {
   background: var(--mac-accent);
   color: #fff;
@@ -1604,6 +1558,59 @@ html.dark .ghost-icon:hover {
   color: #fff;
 }
 
+/* 次要按钮样式（用于控制台等页面） */
+.secondary-btn {
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  padding: 8px 16px;
+  background: var(--mac-surface-strong);
+  color: var(--mac-text);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background: var(--mac-surface);
+  border-color: var(--mac-accent);
+}
+
+.secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondary-btn:focus-visible:not(:disabled) {
+  outline: 2px solid var(--mac-accent);
+  outline-offset: 2px;
+}
+
+.secondary-btn:active:not(:disabled) {
+  background: var(--mac-surface);
+  border-color: var(--mac-accent);
+}
+
+/* 深色模式下的 secondary 按钮 */
+html.dark .secondary-btn {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+html.dark .secondary-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+html.dark .secondary-btn:focus-visible:not(:disabled) {
+  outline-color: rgba(255, 255, 255, 0.6);
+}
+
+html.dark .secondary-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
 .switch-inline {
   display: inline-flex;
   align-items: center;
@@ -1613,6 +1620,21 @@ html.dark .ghost-icon:hover {
 .switch-text {
   font-size: 0.85rem;
   color: var(--mac-text-secondary);
+}
+
+.model-select-combo {
+  display: flex;
+  gap: 8px;
+}
+
+.model-select-combo .model-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-select-combo .model-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .sr-only {
@@ -1767,145 +1789,4 @@ button svg {
   height: 16px !important;
   flex-shrink: 0 !important;
   display: inline-block !important;
-}
-
-/* PageLayout 组件样式 */
-.page-layout {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  width: 100%;
-  background: var(--app-background);
-}
-
-html.dark .page-header {
-  background: rgba(0, 0, 0, 0.6);
-}
-
-.page-header {
-  background: rgba(245, 245, 247, 0.7); /* 降低不透明度 */
-  backdrop-filter: blur(20px); /* 核心：强毛玻璃 */
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--mac-border);
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  transition: all 0.3s ease;
-}
-
-.page-header--sticky {
-  position: sticky;
-  top: 0;
-}
-
-.page-header-content {
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  gap: var(--spacing-section);
-}
-
-.page-title-section {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.page-eyebrow {
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--mac-text);
-}
-
-.page-title {
-  /* font-size: 1.25rem; */
-  font-weight: 400;
-  color: var(--mac-text-secondary);
-  margin: 0 16px;
-  letter-spacing: -0.01em;
-}
-
-.page-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(0,0,0,0.03);
-  padding: 4px;
-  border-radius: 12px;;
-}
-
-.back-button {
-  border: none;
-  background: rgba(15, 23, 42, 0.08);
-  color: var(--mac-text);
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  margin-top: 2px;
-}
-
-.back-button svg {
-  width: 18px;
-  height: 18px;
-  display: block;
-}
-
-.back-button:hover {
-  background: rgba(15, 23, 42, 0.15);
-}
-
-html.dark .back-button {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-html.dark .back-button:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.page-breadcrumbs {
-  padding: 8px 48px 0;
-}
-
-.page-content {
-  flex: 1;
-  padding: var(--padding-page);
-  /* max-width: 1200px; */
-  margin: 0 auto;
-  width: 100%;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .page-header-content {
-    padding: 16px 24px 0;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--spacing-md);
-  }
-
-  .page-title-section {
-    align-items: flex-start;
-  }
-
-  .page-actions {
-    align-self: flex-end;
-  }
-
-  .page-breadcrumbs {
-    padding: 8px 24px 0;
-  }
-
-  .page-content {
-    padding: 16px 24px;
-  }
 }

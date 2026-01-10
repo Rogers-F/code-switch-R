@@ -25,6 +25,7 @@ type BlacklistLevelConfig struct {
 	// 基础配置
 	FailureThreshold    int `json:"failureThreshold"`    // 失败阈值（连续失败次数）
 	DedupeWindowSeconds int `json:"dedupeWindowSeconds"` // 去重窗口（秒）
+	RetryWaitSeconds    int `json:"retryWaitSeconds"`    // 同 Provider 重试等待时间（秒），必须 > DedupeWindowSeconds
 
 	// 降级配置
 	NormalDegradeIntervalHours float64 `json:"normalDegradeIntervalHours"` // 正常降级间隔（小时）
@@ -49,6 +50,7 @@ func DefaultBlacklistLevelConfig() *BlacklistLevelConfig {
 		EnableLevelBlacklist:       false, // 默认关闭，向后兼容
 		FailureThreshold:           3,
 		DedupeWindowSeconds:        2,
+		RetryWaitSeconds:           3, // 必须 > DedupeWindowSeconds，否则重试不会计入失败次数
 		NormalDegradeIntervalHours: 1.0,
 		ForgivenessHours:           3.0,
 		JumpPenaltyWindowHours:     2.5,
@@ -253,6 +255,42 @@ func (ss *SettingsService) SetLevelBlacklistEnabled(enabled bool) error {
 
 	if err != nil {
 		return fmt.Errorf("设置等级拉黑开关失败: %w", err)
+	}
+
+	return nil
+}
+
+// GetIntSetting 获取整数类型的配置值（通用方法）
+// 如果找不到或解析失败，返回 0
+func (ss *SettingsService) GetIntSetting(key string) int {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return 0
+	}
+
+	var valueStr string
+	err = db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, key).Scan(&valueStr)
+	if err != nil {
+		return 0
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		return 0
+	}
+
+	return value
+}
+
+// SetIntSetting 设置整数类型的配置值（通用方法）
+func (ss *SettingsService) SetIntSetting(key string, value int) error {
+	err := GlobalDBQueue.Exec(`
+		INSERT INTO app_settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, key, strconv.Itoa(value))
+
+	if err != nil {
+		return fmt.Errorf("设置 %s 失败: %w", key, err)
 	}
 
 	return nil

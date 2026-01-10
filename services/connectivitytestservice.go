@@ -112,8 +112,18 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		return result
 	}
 
+	// 根据用户配置的端点拼接目标 URL
+	targetURL := cts.buildTargetURL(&provider, platform)
+	authType := cts.getEffectiveAuthType(&provider, platform)
+
+	// 调试日志：打印最终请求信息
+	fmt.Printf("[DEBUG] 连通性测试请求:\n")
+	fmt.Printf("  targetURL: %s\n", targetURL)
+	fmt.Printf("  authType:  %s\n", authType)
+	fmt.Printf("  reqBody:   %s\n", string(reqBody))
+
 	// 创建 HTTP 请求
-	req, err := http.NewRequestWithContext(ctx, "POST", provider.APIURL, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(reqBody))
 	if err != nil {
 		result.Message = fmt.Sprintf("创建请求失败: %v", err)
 		result.SubStatus = SubStatusNetworkError
@@ -123,13 +133,21 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
-		// Claude/Anthropic 使用 x-api-key，OpenAI 使用 Authorization: Bearer
-		if strings.Contains(strings.ToLower(provider.APIURL), "anthropic") ||
-			strings.Contains(strings.ToLower(platform), "claude") {
+		// authType 已在上方获取
+		authTypeLower := strings.ToLower(authType)
+		switch authTypeLower {
+		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
 			req.Header.Set("anthropic-version", "2023-06-01")
-		} else {
+		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+		default:
+			// 自定义 Header 名
+			headerName := strings.TrimSpace(authType)
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			req.Header.Set(headerName, provider.APIKey)
 		}
 	}
 
@@ -180,77 +198,60 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	return result
 }
 
-// buildTestRequest 根据平台构建测试请求体
-func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *Provider) ([]byte, string) {
-	var model string
-	var contentField string
-
-	// 确定模型名称
+// getEffectiveEndpoint 获取有效端点（含平台默认值）
+func (cts *ConnectivityTestService) getEffectiveEndpoint(provider *Provider, platform string) string {
+	endpoint := strings.TrimSpace(provider.ConnectivityTestEndpoint)
+	if endpoint != "" {
+		return endpoint
+	}
+	// 平台默认端点
 	switch strings.ToLower(platform) {
 	case "claude":
-		model = "claude-3-haiku-20240307"
-		contentField = "content"
-		// 如果 provider 配置了支持的模型，使用第一个
-		if provider.SupportedModels != nil && len(provider.SupportedModels) > 0 {
-			for m := range provider.SupportedModels {
-				if provider.SupportedModels[m] {
-					model = m
-					break
-				}
-			}
-		}
-		// Claude/Anthropic 格式
-		reqBody := map[string]interface{}{
-			"model":      model,
-			"max_tokens": 1,
-			"messages": []map[string]string{
-				{"role": "user", "content": "hi"},
-			},
-		}
-		data, _ := json.Marshal(reqBody)
-		return data, contentField
-
+		return "/v1/messages"
 	case "codex":
-		model = "gpt-4o-mini"
-		contentField = "choices"
-		if provider.SupportedModels != nil && len(provider.SupportedModels) > 0 {
-			for m := range provider.SupportedModels {
-				if provider.SupportedModels[m] {
-					model = m
-					break
-				}
-			}
-		}
-		// OpenAI 格式
-		reqBody := map[string]interface{}{
-			"model":      model,
-			"max_tokens": 1,
-			"messages": []map[string]string{
-				{"role": "user", "content": "hi"},
-			},
-		}
-		data, _ := json.Marshal(reqBody)
-		return data, contentField
-
-	case "gemini":
-		contentField = "candidates"
-		// Gemini 格式
-		reqBody := map[string]interface{}{
-			"contents": []map[string]interface{}{
-				{
-					"parts": []map[string]string{
-						{"text": "hi"},
-					},
-				},
-			},
-		}
-		data, _ := json.Marshal(reqBody)
-		return data, contentField
-
+		return "/responses"
 	default:
-		// 默认使用 OpenAI 格式
+		return "/v1/chat/completions"
+	}
+}
+
+// getEffectiveAuthType 获取有效认证方式（含平台默认值）
+// 返回值保留原始大小写，用于自定义 Header 名
+func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, platform string) string {
+	authType := strings.TrimSpace(provider.ConnectivityAuthType)
+	if authType != "" {
+		return authType
+	}
+	// 平台默认认证方式
+	if strings.ToLower(platform) == "claude" {
+		return "x-api-key"
+	}
+	return "bearer"
+}
+
+// buildTestRequest 根据端点构建测试请求体
+func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *Provider) ([]byte, string) {
+	// 平台默认模型
+	platformKey := strings.ToLower(platform)
+	defaults := map[string]string{
+		"claude": "claude-haiku-4-5-20251001",
+		"codex":  "gpt-5.1",
+		"gemini": "gemini-2.5-flash",
+	}
+
+	model := strings.TrimSpace(provider.ConnectivityTestModel)
+	if model == "" {
+		model = defaults[platformKey]
+	}
+	if model == "" {
 		model = "gpt-3.5-turbo"
-		contentField = "choices"
+	}
+
+	// 获取有效端点（含平台默认值）
+	endpoint := strings.ToLower(cts.getEffectiveEndpoint(provider, platform))
+
+	// Anthropic 格式: /v1/messages
+	if strings.Contains(endpoint, "/messages") {
 		reqBody := map[string]interface{}{
 			"model":      model,
 			"max_tokens": 1,
@@ -259,8 +260,32 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 			},
 		}
 		data, _ := json.Marshal(reqBody)
-		return data, contentField
+		return data, "content"
 	}
+
+	// Codex 格式: /responses
+	if strings.Contains(endpoint, "/responses") {
+		reqBody := map[string]interface{}{
+			"model":      model,
+			"max_tokens": 1,
+			"messages": []map[string]string{
+				{"role": "user", "content": "hi"},
+			},
+		}
+		data, _ := json.Marshal(reqBody)
+		return data, "choices"
+	}
+
+	// 默认 OpenAI 格式: /v1/chat/completions
+	reqBody := map[string]interface{}{
+		"model":      model,
+		"max_tokens": 1,
+		"messages": []map[string]string{
+			{"role": "user", "content": "hi"},
+		},
+	}
+	data, _ := json.Marshal(reqBody)
+	return data, "choices"
 }
 
 // determineStatus 根据 HTTP 状态码和延迟判定状态
@@ -328,6 +353,15 @@ func (cts *ConnectivityTestService) truncateMessage(msg string) string {
 	return msg
 }
 
+// buildTargetURL 根据用户配置的端点构建目标 URL
+func (cts *ConnectivityTestService) buildTargetURL(provider *Provider, platform string) string {
+	baseURL := strings.TrimSuffix(provider.APIURL, "/")
+	endpoint := cts.getEffectiveEndpoint(provider, platform)
+	if !strings.HasPrefix(endpoint, "/") {
+		endpoint = "/" + endpoint
+	}
+	return baseURL + endpoint
+}
 // isTimeoutError 检测错误是否为超时类型
 // 超时包括：context.DeadlineExceeded、net.Error.Timeout()、以及错误消息中包含 timeout 的情况
 func isTimeoutError(err error) bool {
@@ -594,4 +628,65 @@ func (cts *ConnectivityTestService) Stop() error {
 		cts.running = false
 	}
 	return nil
+}
+
+// ManualTestResult 手动测试结果
+type ManualTestResult struct {
+	Success   bool   `json:"success"`
+	LatencyMs int    `json:"latencyMs"`
+	HTTPCode  int    `json:"httpCode"`
+	Message   string `json:"message"`
+}
+
+// TestProviderManual 手动测试供应商连通性（供前端测试按钮调用）
+func (cts *ConnectivityTestService) TestProviderManual(
+	platform string,
+	apiURL string,
+	apiKey string,
+	model string,
+	endpoint string,
+	authType string,
+) ManualTestResult {
+	// 调试日志：打印前端传递的参数
+	fmt.Printf("[DEBUG] TestProviderManual 收到参数:\n")
+	fmt.Printf("  platform: %q\n", platform)
+	fmt.Printf("  apiURL:   %q\n", apiURL)
+	fmt.Printf("  apiKey:   %q (len=%d)\n", maskAPIKey(apiKey), len(apiKey))
+	fmt.Printf("  model:    %q\n", model)
+	fmt.Printf("  endpoint: %q\n", endpoint)
+	fmt.Printf("  authType: %q\n", authType)
+
+	// 平台参数校验
+	if platform == "" {
+		platform = "claude"
+	}
+
+	// 构建临时 Provider
+	provider := Provider{
+		APIURL:                   apiURL,
+		APIKey:                   apiKey,
+		ConnectivityTestModel:    model,
+		ConnectivityTestEndpoint: endpoint,
+		ConnectivityAuthType:     authType,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	result := cts.TestProvider(ctx, provider, platform)
+
+	return ManualTestResult{
+		Success:   result.Status == StatusAvailable || result.Status == StatusDegraded,
+		LatencyMs: result.LatencyMs,
+		HTTPCode:  result.HTTPCode,
+		Message:   result.Message,
+	}
+}
+
+// maskAPIKey 隐藏 API Key 的中间部分，用于安全日志输出
+func maskAPIKey(key string) string {
+	if len(key) <= 10 {
+		return "***"
+	}
+	return key[:6] + "..." + key[len(key)-4:]
 }

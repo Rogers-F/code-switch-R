@@ -1,168 +1,6 @@
-<template>
-  <PageLayout :eyebrow="t('prompts.hero.eyebrow')" :title="t('prompts.hero.title')">
-    <div class="section-header">
-      <div class="tab-group-container">
-        <div class="tab-group" role="tablist">
-          <button v-for="platform in platforms" :key="platform.id" class="tab-pill"
-            :class="{ active: activePlatform === platform.id }" @click="activePlatform = platform.id">
-            {{ platform.name }}
-          </button>
-        </div>
-      </div>
-
-      <div class="section-controls">
-        <!-- <div class="stats-bar"> -->
-          <span class="stat-text">
-            {{ t('prompts.stats.total', { count: promptCount }) }}
-          </span>
-          <span v-if="enabledPrompt" class="stat-enabled">
-            {{ t('prompts.stats.enabled') }}: {{ enabledPrompt.name }}
-          </span>
-        <!-- </div> -->
-
-        <div class="divider-vertical"></div>
-
-        <button class="ghost-icon" @click="openCreateModal" :data-tooltip="t('prompts.actions.create')" >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          <!-- {{ t('prompts.actions.create') }} -->
-        </button>
-        <button class="ghost-icon" @click="handleImport" :disabled="loading"  :data-tooltip="t('prompts.actions.import')" >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <!-- {{ t('prompts.actions.import') }} -->
-        </button>
-      </div>
-    </div>
-    <!-- Platform Tabs -->
-    <!-- <div class="platform-tabs">
-      <button
-        v-for="platform in platforms"
-        :key="platform.id"
-        class="platform-tab"
-        :class="{ active: activePlatform === platform.id }"
-        @click="activePlatform = platform.id"
-      >
-        {{ platform.name }}
-      </button>
-    </div> -->
-
-    <!-- Stats Bar -->
-    <!-- <div class="stats-bar">
-      <span class="stat-text">
-        {{ t('prompts.stats.total', { count: promptCount }) }}
-      </span>
-      <span v-if="enabledPrompt" class="stat-enabled">
-        {{ t('prompts.stats.enabled') }}: {{ enabledPrompt.name }}
-      </span>
-    </div> -->
-
-    <!-- Prompt List -->
-    <div class="prompt-list" v-if="!loading">
-      <div v-if="promptList.length === 0" class="empty-state">
-        <p>{{ t('prompts.empty') }}</p>
-      </div>
-
-      <div v-for="prompt in promptList" :key="prompt.id" class="prompt-card" :class="{ enabled: prompt.enabled }">
-        <div class="prompt-main">
-          <button class="toggle-switch" :class="{ on: prompt.enabled }" @click="handleToggleEnabled(prompt)">
-            <span class="toggle-slider"></span>
-          </button>
-          <div class="prompt-info">
-            <h3 class="prompt-name">{{ prompt.name }}</h3>
-            <p v-if="prompt.description" class="prompt-description">
-              {{ prompt.description }}
-            </p>
-          </div>
-        </div>
-        <div class="prompt-actions">
-          <button class="action-btn" @click="openEditModal(prompt)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-          </button>
-          <button class="action-btn danger" @click="deletePrompt(prompt.id)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div v-else class="loading-state">
-      <span>{{ t('prompts.loading') }}</span>
-    </div>
-
-    <!-- Action Buttons -->
-    <!-- <div class="page-actions">
-      <button class="primary-btn" @click="openCreateModal">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        {{ t('prompts.actions.create') }}
-      </button>
-      <button class="secondary-btn" @click="handleImport" :disabled="loading">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="17 8 12 3 7 8"></polyline>
-          <line x1="12" y1="3" x2="12" y2="15"></line>
-        </svg>
-        {{ t('prompts.actions.import') }}
-      </button>
-    </div> -->
-
-    <!-- Edit Modal -->
-    <Teleport to="body">
-      <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-        <div class="modal-content">
-          <h2 class="modal-title">
-            {{ editingPrompt ? t('prompts.form.editTitle') : t('prompts.form.createTitle') }}
-          </h2>
-
-          <div class="form-group">
-            <label>{{ t('prompts.form.name') }}</label>
-            <input v-model="formData.name" type="text" class="form-input"
-              :placeholder="t('prompts.form.namePlaceholder')" />
-          </div>
-
-          <div class="form-group">
-            <label>{{ t('prompts.form.description') }}</label>
-            <input v-model="formData.description" type="text" class="form-input"
-              :placeholder="t('prompts.form.descriptionPlaceholder')" />
-          </div>
-
-          <div class="form-group">
-            <label>{{ t('prompts.form.content') }}</label>
-            <MarkdownEditor v-model="formData.content" />
-          </div>
-
-          <div class="modal-actions">
-            <button class="secondary-btn" @click="showModal = false">
-              {{ t('prompts.form.cancel') }}
-            </button>
-            <button class="primary-btn" @click="savePrompt" :disabled="!formData.name">
-              {{ t('prompts.form.save') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-  </PageLayout>
-</template>
-
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import PageLayout from '../common/PageLayout.vue'
 import MarkdownEditor from '../common/MarkdownEditor.vue'
 import {
   GetPrompts,
@@ -190,6 +28,7 @@ const loading = ref(false)
 const showModal = ref(false)
 const editingPrompt = ref<Prompt | null>(null)
 const currentFileContent = ref<string | null>(null)
+const nameInputRef = ref<HTMLInputElement | null>(null)
 
 // 表单
 const formData = ref({
@@ -233,25 +72,47 @@ async function handleToggleEnabled(prompt: Prompt) {
 function openCreateModal() {
   editingPrompt.value = null
   formData.value = {
-    id: crypto.randomUUID(),
+    id: crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     name: '',
     content: '',
     description: '',
     enabled: false
   }
   showModal.value = true
+  // 等待 DOM 更新后聚焦输入框（修复 macOS WebView 键盘输入问题）
+  nextTick(() => {
+    nameInputRef.value?.focus()
+  })
 }
 
-function openEditModal(prompt: Prompt) {
+async function openEditModal(prompt: Prompt) {
   editingPrompt.value = prompt
+
+  // 如果是已启用的提示词，从文件读取最新内容
+  let content = prompt.content
+  if (prompt.enabled) {
+    try {
+      const fileContent = await GetCurrentFileContent(activePlatform.value)
+      if (fileContent !== null) {
+        content = fileContent
+      }
+    } catch (e) {
+      console.error('Failed to get current file content:', e)
+    }
+  }
+
   formData.value = {
     id: prompt.id,
     name: prompt.name,
-    content: prompt.content,
+    content: content,
     description: prompt.description || '',
     enabled: prompt.enabled
   }
   showModal.value = true
+  // 等待 DOM 更新后聚焦输入框（修复 macOS WebView 键盘输入问题）
+  nextTick(() => {
+    nameInputRef.value?.focus()
+  })
 }
 
 async function savePrompt() {
@@ -302,6 +163,151 @@ onMounted(() => {
 })
 </script>
 
+<template>
+  <div class="prompts-page">
+    <!-- Hero Section -->
+    <div class="page-hero">
+      <p class="hero-eyebrow">{{ t('prompts.hero.eyebrow') }}</p>
+      <h1 class="hero-title">{{ t('prompts.hero.title') }}</h1>
+      <p class="hero-lead">{{ t('prompts.hero.lead') }}</p>
+    </div>
+
+    <!-- Platform Tabs -->
+    <div class="platform-tabs">
+      <button
+        v-for="platform in platforms"
+        :key="platform.id"
+        class="platform-tab"
+        :class="{ active: activePlatform === platform.id }"
+        @click="activePlatform = platform.id"
+      >
+        {{ platform.name }}
+      </button>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <span class="stat-text">
+        {{ t('prompts.stats.total', { count: promptCount }) }}
+      </span>
+      <span v-if="enabledPrompt" class="stat-enabled">
+        {{ t('prompts.stats.enabled') }}: {{ enabledPrompt.name }}
+      </span>
+    </div>
+
+    <!-- Prompt List -->
+    <div class="prompt-list" v-if="!loading">
+      <div v-if="promptList.length === 0" class="empty-state">
+        <p>{{ t('prompts.empty') }}</p>
+      </div>
+
+      <div
+        v-for="prompt in promptList"
+        :key="prompt.id"
+        class="prompt-card"
+        :class="{ enabled: prompt.enabled }"
+      >
+        <div class="prompt-main">
+          <button
+            class="toggle-switch"
+            :class="{ on: prompt.enabled }"
+            @click="handleToggleEnabled(prompt)"
+          >
+            <span class="toggle-slider"></span>
+          </button>
+          <div class="prompt-info">
+            <h3 class="prompt-name">{{ prompt.name }}</h3>
+            <p v-if="prompt.description" class="prompt-description">
+              {{ prompt.description }}
+            </p>
+          </div>
+        </div>
+        <div class="prompt-actions">
+          <button class="action-btn" @click="openEditModal(prompt)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+          </button>
+          <button class="action-btn danger" @click="deletePrompt(prompt.id)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="loading-state">
+      <span>{{ t('prompts.loading') }}</span>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="page-actions">
+      <button class="primary-btn" @click="openCreateModal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        {{ t('prompts.actions.create') }}
+      </button>
+      <button class="secondary-btn" @click="handleImport" :disabled="loading">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        {{ t('prompts.actions.import') }}
+      </button>
+    </div>
+
+    <!-- Edit Modal (不使用 Teleport 以修复 macOS WebView 键盘输入问题) -->
+    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
+      <div class="modal-content" tabindex="-1">
+        <h2 class="modal-title">
+          {{ editingPrompt ? t('prompts.form.editTitle') : t('prompts.form.createTitle') }}
+        </h2>
+
+        <div class="form-group">
+          <label>{{ t('prompts.form.name') }}</label>
+          <input
+            ref="nameInputRef"
+            v-model="formData.name"
+            type="text"
+            class="form-input"
+            :placeholder="t('prompts.form.namePlaceholder')"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>{{ t('prompts.form.description') }}</label>
+          <input
+            v-model="formData.description"
+            type="text"
+            class="form-input"
+            :placeholder="t('prompts.form.descriptionPlaceholder')"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>{{ t('prompts.form.content') }}</label>
+          <MarkdownEditor v-model="formData.content" />
+        </div>
+
+        <div class="modal-actions">
+          <button class="secondary-btn" @click="showModal = false">
+            {{ t('prompts.form.cancel') }}
+          </button>
+          <button class="primary-btn" @click="savePrompt" :disabled="!formData.name">
+            {{ t('prompts.form.save') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style scoped>
 .prompts-page {
   padding: 24px;
@@ -338,7 +344,7 @@ onMounted(() => {
 .platform-tabs {
   display: flex;
   gap: 8px;
-  /* margin-bottom: 20px; */
+  margin-bottom: 20px;
   padding: 4px;
   background: var(--mac-surface);
   border-radius: 12px;
@@ -398,7 +404,6 @@ html.dark .platform-tab:hover {
 }
 
 .prompt-list {
-  margin-top:12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -412,7 +417,7 @@ html.dark .platform-tab:hover {
   padding: 16px 20px;
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);
-  border-radius: 12px;
+  border-radius: 16px;
   transition: all 0.15s ease;
 }
 
@@ -493,7 +498,7 @@ html.dark .toggle-switch {
   height: 34px;
   border: none;
   background: transparent;
-  border-radius: 12px;
+  border-radius: 8px;
   color: var(--mac-text-secondary);
   cursor: pointer;
   display: flex;
@@ -645,16 +650,4 @@ html.dark .action-btn:hover {
   gap: 12px;
   margin-top: 24px;
 }
-
-.section-header {
-  background: var(--mac-surface);
-  padding: 8px 12px;
-  border-radius: 12px;
-  /* 把整个 Header 做成一个条状容器 */
-  border: 1px solid var(--mac-border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 </style>

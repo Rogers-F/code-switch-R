@@ -14,10 +14,32 @@ export type AutomationCard = {
   modelMapping?: Record<string, string>
   // 优先级分组：数字越小优先级越高（1-10，默认 1）
   level?: number
+  // API 端点路径（可选）：覆盖平台默认端点
+  apiEndpoint?: string
   // CLI 配置：存储供应商关联的 CLI 可编辑配置
   cliConfig?: Record<string, any>
-  // 连通性检测开关：是否启用自动连通性检测
+
+  // === 可用性监控配置（新） ===
+  // 可用性监控开关：是否启用后台健康检查
+  availabilityMonitorEnabled?: boolean
+  // 连通性自动拉黑：检测失败时是否自动拉黑该供应商
+  connectivityAutoBlacklist?: boolean
+  // 可用性高级配置：测试模型、端点和超时
+  availabilityConfig?: {
+    testModel?: string      // 测试用模型
+    testEndpoint?: string   // 测试端点路径
+    timeout?: number        // 超时时间（毫秒）
+  }
+
+  // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===
+  /** @deprecated 已迁移到 availabilityMonitorEnabled */
   connectivityCheck?: boolean
+  /** @deprecated 已迁移到 availabilityConfig.testModel */
+  connectivityTestModel?: string
+  /** @deprecated 已迁移到 availabilityConfig.testEndpoint */
+  connectivityTestEndpoint?: string
+  /** @deprecated 已迁移到可用性配置中的认证方式 */
+  connectivityAuthType?: string
 }
 
 export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> = {

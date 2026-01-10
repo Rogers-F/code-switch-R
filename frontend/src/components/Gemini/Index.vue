@@ -163,10 +163,20 @@
               <button class="ghost-icon" :aria-label="t('components.gemini.list.edit')" @click="openEditModal(provider)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path
-                    d="M4 21v-3.5L15.5 6.5a2 2 0 012.83 0l.67.67a2 2 0 010 2.83L7.5 21H4z"
+                    d="M16.474 5.408l2.118 2.117m-.756-3.982L12.109 9.27a2.118 2.118 0 00-.58 1.082L11 13l2.648-.53c.41-.082.786-.283 1.082-.579l5.727-5.727a1.853 1.853 0 10-2.621-2.621z"
                     fill="none"
                     stroke="currentColor"
                     stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M19 15v3a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
                   />
                 </svg>
               </button>
@@ -205,7 +215,12 @@
 
         <label class="form-field">
           <span>{{ t('components.gemini.form.apiKey') }}</span>
-          <BaseInput v-model="modalState.form.apiKey" type="password" :disabled="saving" placeholder="sk-xxx" />
+          <BaseInput
+            v-model="modalState.form.apiKey"
+            type="password"
+            :disabled="saving"
+            placeholder="sk-xxx"
+          />
         </label>
 
         <label class="form-field">
@@ -287,6 +302,7 @@ const modalState = reactive({
   open: false,
   editing: false,
   editingId: '',
+  originalProvider: null as BindingGeminiProvider | null,
   presetMode: false,
   presetName: '',
   form: {
@@ -381,6 +397,7 @@ const openEditModal = (provider: BindingGeminiProvider) => {
   modalState.open = true
   modalState.editing = true
   modalState.editingId = provider.id
+  modalState.originalProvider = provider
   modalState.presetMode = false
   modalState.form.name = provider.name
   modalState.form.baseUrl = provider.baseUrl ?? ''
@@ -390,6 +407,9 @@ const openEditModal = (provider: BindingGeminiProvider) => {
 
 const closeModal = () => {
   modalState.open = false
+  modalState.editing = false
+  modalState.editingId = ''
+  modalState.originalProvider = null
 }
 
 const submitModal = async () => {
@@ -402,15 +422,23 @@ const submitModal = async () => {
         throw new Error('创建供应商失败')
       }
     } else if (modalState.editing) {
-      // 更新
+      // 更新：基于原始对象合并，保留 partnerPromotionKey/category 等字段
+      const original = modalState.originalProvider
+        ?? providers.value.find(p => p.id === modalState.editingId)
+      if (!original) {
+        throw new Error('未找到要更新的供应商')
+      }
+
       await UpdateProvider({
+        ...original,
         id: modalState.editingId,
         name: modalState.form.name,
         baseUrl: modalState.form.baseUrl,
         apiKey: modalState.form.apiKey,
         model: modalState.form.model,
-        enabled: false,
+        enabled: original.enabled, // 保持启用状态不变
         envConfig: {
+          ...(original.envConfig ?? {}),
           GOOGLE_GEMINI_BASE_URL: modalState.form.baseUrl,
           GEMINI_API_KEY: modalState.form.apiKey,
           GEMINI_MODEL: modalState.form.model,
