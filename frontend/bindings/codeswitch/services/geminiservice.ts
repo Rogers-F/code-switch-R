@@ -22,6 +22,14 @@ export function AddProvider(provider: $models.GeminiProvider): $CancellablePromi
 }
 
 /**
+ * ApplySingleProvider 直连应用单一供应商（别名，统一 API 命名）
+ * 与 SwitchProvider 功能相同，仅在代理关闭时可用
+ */
+export function ApplySingleProvider(id: string): $CancellablePromise<void> {
+    return $Call.ByID(3103860642, id);
+}
+
+/**
  * CreateProviderFromPreset 从预设创建供应商
  */
 export function CreateProviderFromPreset(presetName: string, apiKey: string): $CancellablePromise<$models.GeminiProvider | null> {
@@ -38,7 +46,7 @@ export function DeleteProvider(id: string): $CancellablePromise<void> {
 }
 
 /**
- * DisableProxy 禁用代理
+ * DisableProxy 禁用代理（手术式撤销：仅移除注入的代理配置，保留用户其他编辑）
  */
 export function DisableProxy(): $CancellablePromise<void> {
     return $Call.ByID(1809533069);
@@ -58,6 +66,17 @@ export function DuplicateProvider(sourceID: string): $CancellablePromise<$models
  */
 export function EnableProxy(): $CancellablePromise<void> {
     return $Call.ByID(3882720282);
+}
+
+/**
+ * GetDirectAppliedProviderID 返回当前直连应用的 Provider ID
+ * 通过读取 CLI 配置文件反推当前使用的 provider
+ * 返回值：
+ *   - nil: 配置指向本地代理 或 无法匹配到 provider
+ *   - *string: 匹配到的 provider ID
+ */
+export function GetDirectAppliedProviderID(): $CancellablePromise<string | null> {
+    return $Call.ByID(1240445803);
 }
 
 /**
@@ -119,6 +138,7 @@ export function Stop(): $CancellablePromise<void> {
 
 /**
  * SwitchProvider 切换到指定供应商
+ * 注意：代理启用时禁止切换（与 Claude/Codex 保持一致）
  */
 export function SwitchProvider(id: string): $CancellablePromise<void> {
     return $Call.ByID(3824145224, id);

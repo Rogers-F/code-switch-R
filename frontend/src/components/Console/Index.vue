@@ -1,5 +1,10 @@
 <template>
-  <PageLayout :eyebrow="t('components.logs.eyebrow')" :title="t('components.logs.title')" :sticky="true">
+  <PageLayout
+    :eyebrow="t('components.logs.eyebrow')"
+    :title="t('components.logs.title')"
+    :sticky="true"
+    :showBackButton="true"
+  >
     <template #actions>
       <div class="actions-group">
         <button class="secondary-btn" @click="clearLogs">清空日志</button>
@@ -22,10 +27,8 @@
         </div>
 
         <div v-for="(log, index) in logs" :key="index" class="log-entry" :class="getLevelClass(log.level)">
-          <span class="log-timestamp">
-            <p>{{ formatTimestamp(log.timestamp) }}</p>
-            <span class="log-level">{{ log.level }}</span>
-          </span>
+          <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
+          <span class="log-level">{{ log.level }}</span>
           <span class="log-message">{{ log.message }}</span>
         </div>
       </div>
@@ -37,7 +40,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
 
@@ -49,16 +51,11 @@ interface ConsoleLog {
   message: string
 }
 
-const router = useRouter()
 const logs = ref<ConsoleLog[]>([])
 const autoScroll = ref(true)
 const loading = ref(false)
 const logsContainer = ref<HTMLElement>()
 let refreshInterval: number | null = null
-
-const goBack = () => {
-  router.push('/')
-}
 
 const loadLogs = async () => {
   try {
@@ -126,7 +123,6 @@ onUnmounted(() => {
 })
 </script>
 
-
 <style scoped>
 .actions-group {
   display: flex;
@@ -167,6 +163,8 @@ onUnmounted(() => {
   line-height: 1.6;
   background: #1e1e1e;
   color: #d4d4d4;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 html.dark .console-content {

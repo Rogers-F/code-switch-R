@@ -41,6 +41,14 @@ export function GetBlacklistSettingsStruct(): $CancellablePromise<$models.Blackl
 }
 
 /**
+ * GetIntSetting 获取整数类型的配置值（通用方法）
+ * 如果找不到或解析失败，返回 0
+ */
+export function GetIntSetting(key: string): $CancellablePromise<number> {
+    return $Call.ByID(900230874, key);
+}
+
+/**
  * GetLevelBlacklistEnabled 获取等级拉黑开关状态
  */
 export function GetLevelBlacklistEnabled(): $CancellablePromise<boolean> {
@@ -59,6 +67,13 @@ export function IsBlacklistEnabled(): $CancellablePromise<boolean> {
  */
 export function SaveBlacklistLevelConfig(config: $models.BlacklistLevelConfig | null): $CancellablePromise<void> {
     return $Call.ByID(2798699223, config);
+}
+
+/**
+ * SetIntSetting 设置整数类型的配置值（通用方法）
+ */
+export function SetIntSetting(key: string, value: number): $CancellablePromise<void> {
+    return $Call.ByID(1050634246, key, value);
 }
 
 /**

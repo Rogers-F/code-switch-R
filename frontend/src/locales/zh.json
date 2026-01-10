@@ -210,6 +210,33 @@
           "wildcard": "通配符映射，自动展开 claude-sonnet-4 → anthropic/claude-sonnet-4",
           "prefix": "前缀映射"
         }
+      },
+      "headerConfig": {
+        "title": "高级 Header 设置",
+        "add": "添加",
+        "remove": "删除",
+        "keyPlaceholder": "Header 名称",
+        "valuePlaceholder": "Header 值",
+        "extraHeaders": {
+          "label": "额外 Headers",
+          "tooltip": "仅当原请求中不存在该 Header 时才添加"
+        },
+        "overrideHeaders": {
+          "label": "覆盖 Headers",
+          "tooltip": "强制覆盖 Header，无论原请求中是否存在",
+          "authWarning": "认证头（Authorization、X-Api-Key、X-Goog-Api-Key）会被供应商 API 密钥设置覆盖"
+        },
+        "stripHeaders": {
+          "label": "移除 Headers",
+          "tooltip": "在转发请求前移除这些 Headers",
+          "placeholder": "要移除的 Header 名称"
+        },
+        "help": {
+          "title": "Header 优先级：",
+          "extra": "仅在原请求中不存在时添加",
+          "override": "始终应用，覆盖任何已存在的值",
+          "strip": "在转发到供应商前移除"
+        }
       }
     },
     "main": {
@@ -355,8 +382,7 @@
           "availabilityTestEndpoint": "例如：/v1/messages",
           "connectivityTestModel": "选择或使用默认",
           "customModel": "或输入自定义模型",
-          "customEndpoint": "或输入自定义端点",
-          "customAuthHeader": "自定义 Header 名称（如 Authorization、X-Custom-Key）"
+          "customEndpoint": "或输入自定义端点"
         },
         "hints": {
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
@@ -370,7 +396,7 @@
           "connectivityCheck": "启用后会定期检测此供应商的连通性，开启该选项可能会消耗少量 tokens",
           "connectivityTestModel": "选择用于连通性测试的模型，留空则使用平台默认模型",
           "connectivityTestEndpoint": "选择或输入 API 端点路径",
-          "connectivityAuthType": "默认使用 Bearer。Anthropic 官方 API 请选择 X-API-Key。如需自定义请在下方输入 Header 名称。"
+          "connectivityAuthType": "Auto（默认）：自动检测原始请求的认证方式并保持一致。选择 Bearer 或 X-API-Key 可强制使用指定方式。该设置同时应用于请求转发和连通性测试。"
         },
         "actions": {
           "cancel": "取消",
@@ -512,6 +538,31 @@
       "costDetail": {
         "title": "今日消费明细",
         "empty": "今日暂无消费记录"
+      },
+      "detail": {
+        "title": "请求详情",
+        "notFound": "详情不存在",
+        "notFoundHint": "该请求的详情可能已过期或未被记录",
+        "basicInfo": "基本信息",
+        "headers": "请求头",
+        "responseHeaders": "响应头",
+        "noHeaders": "无请求头信息",
+        "requestBody": "请求体",
+        "responseBody": "响应体",
+        "requestUrl": "请求 URL",
+        "copy": "复制",
+        "format": "格式化",
+        "copied": "已复制到剪贴板",
+        "copyFailed": "复制失败",
+        "truncated": "内容已截断（原始大小: {size}）",
+        "viewDetail": "详情",
+        "noDetail": "—"
+      },
+      "recording": {
+        "label": "详情记录",
+        "off": "关闭",
+        "failedOnly": "仅失败",
+        "all": "全部"
       }
     },
     "general": {

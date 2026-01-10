@@ -646,12 +646,6 @@
                       </ListboxOptions>
                     </div>
                   </Listbox>
-                  <BaseInput
-                    v-model="customAuthHeader"
-                    type="text"
-                    :placeholder="t('components.main.form.placeholders.customAuthHeader')"
-                    class="mt-2"
-                  />
                   <span class="field-hint">{{ t('components.main.form.hints.connectivityAuthType') }}</span>
                 </div>
 
@@ -722,6 +716,14 @@
 
                 <div class="form-field">
                   <ModelMappingEditor v-model="modalState.form.modelMapping" />
+                </div>
+
+                <div class="form-field">
+                  <HeaderConfigEditor
+                    v-model:extra-headers="modalState.form.extraHeaders"
+                    v-model:override-headers="modalState.form.overrideHeaders"
+                    v-model:strip-headers="modalState.form.stripHeaders"
+                  />
                 </div>
 
                 <div class="form-field">
@@ -1002,6 +1004,7 @@ import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import ModelWhitelistEditor from '../common/ModelWhitelistEditor.vue'
 import ModelMappingEditor from '../common/ModelMappingEditor.vue'
+import HeaderConfigEditor from '../common/HeaderConfigEditor.vue'
 import CLIConfigEditor from '../common/CLIConfigEditor.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindings/codeswitch/services/providerservice'
@@ -2366,8 +2369,8 @@ const getDefaultEndpoint = (platform: string) => {
   return defaults[platform] || '/v1/chat/completions'
 }
 
-// 获取平台默认认证方式（默认 Bearer，与 v2.2.x 保持一致）
-const getDefaultAuthType = (_platform: string) => 'bearer'
+// 获取平台默认认证方式（v2.3.x 改为 auto，由后端自动检测）
+const getDefaultAuthType = (_platform: string) => 'auto'
 
 // 手动测试连通性
 const handleTestConnectivity = async () => {
@@ -2498,6 +2501,10 @@ type VendorForm = {
     testEndpoint?: string
     timeout?: number
   }
+  // === Header 配置（v0.6.0+） ===
+  extraHeaders?: Record<string, string>
+  overrideHeaders?: Record<string, string>
+  stripHeaders?: string[]
   // === 旧连通性字段（已废弃） ===
   /** @deprecated */
   connectivityCheck?: boolean
@@ -2532,6 +2539,10 @@ const defaultFormValues = (platform?: string): VendorForm => ({
     testEndpoint: getDefaultEndpoint(platform || 'claude'),
     timeout: 15000,
   },
+  // Header 配置（v0.6.0+）
+  extraHeaders: {},
+  overrideHeaders: {},
+  stripHeaders: [],
   // 旧连通性字段（已废弃，置空）
   connectivityCheck: false,
   connectivityTestModel: '',
@@ -2588,14 +2599,14 @@ const modalState = reactive({
 })
 
 // 认证方式相关状态
-const selectedAuthType = ref<string>('bearer')
-const customAuthHeader = ref<string>('')
+const selectedAuthType = ref<string>('auto')
 const authTypeOptions = computed(() => [
+  { value: 'auto', label: 'Auto' },
   { value: 'bearer', label: 'Bearer' },
   { value: 'x-api-key', label: 'X-API-Key' },
 ])
-const resolveEffectiveAuthType = () =>
-  customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(modalState.tabId)
+// 返回保存到配置的认证方式
+const resolveEffectiveAuthType = () => selectedAuthType.value || 'auto'
 
 const editingCard = ref<AutomationCard | null>(null)
 const confirmState = reactive({ open: false, card: null as AutomationCard | null, tabId: tabs[0].id as ProviderTab })
@@ -2607,7 +2618,6 @@ const openCreateModal = () => {
   Object.assign(modalState.form, defaultFormValues(activeTab.value))
   // 初始化认证方式为平台默认
   selectedAuthType.value = getDefaultAuthType(activeTab.value)
-  customAuthHeader.value = ''
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
@@ -2642,26 +2652,20 @@ const openEditModal = (card: AutomationCard) => {
         getDefaultEndpoint(activeTab.value),
       timeout: card.availabilityConfig?.timeout || 15000,
     },
+    // Header 配置（v0.6.0+）
+    extraHeaders: card.extraHeaders || {},
+    overrideHeaders: card.overrideHeaders || {},
+    stripHeaders: card.stripHeaders || [],
     // 旧连通性字段不再写入表单
     connectivityCheck: false,
     connectivityTestModel: '',
     connectivityTestEndpoint: '',
     connectivityAuthType: card.connectivityAuthType || '',
   })
-  // 初始化认证方式状态
-  const storedAuth = (card.connectivityAuthType || '').trim()
-  const lower = storedAuth.toLowerCase()
-  if (!storedAuth) {
-    selectedAuthType.value = getDefaultAuthType(activeTab.value)
-    customAuthHeader.value = ''
-  } else if (lower === 'bearer' || lower === 'x-api-key') {
-    selectedAuthType.value = lower
-    customAuthHeader.value = ''
-  } else {
-    // 自定义 Header 名
-    selectedAuthType.value = getDefaultAuthType(activeTab.value)
-    customAuthHeader.value = storedAuth
-  }
+  // 初始化认证方式状态（仅支持 auto/bearer/x-api-key，其他值回退到 auto）
+  const storedAuth = (card.connectivityAuthType || '').trim().toLowerCase()
+  const validAuthTypes = ['auto', 'bearer', 'x-api-key']
+  selectedAuthType.value = validAuthTypes.includes(storedAuth) ? storedAuth : 'auto'
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
   modalState.open = true
@@ -2718,6 +2722,10 @@ const submitModal = async () => {
           getDefaultEndpoint(modalState.tabId),
         timeout: modalState.form.availabilityConfig?.timeout || 15000,
       },
+      // Header 配置（v0.6.0+）
+      extraHeaders: modalState.form.extraHeaders || {},
+      overrideHeaders: modalState.form.overrideHeaders || {},
+      stripHeaders: modalState.form.stripHeaders || [],
       // 旧连通性字段清空（避免再次写入）
       connectivityCheck: false,
       connectivityTestModel: '',
@@ -2754,6 +2762,10 @@ const submitModal = async () => {
           getDefaultEndpoint(modalState.tabId),
         timeout: modalState.form.availabilityConfig?.timeout || 15000,
       },
+      // Header 配置（v0.6.0+）
+      extraHeaders: modalState.form.extraHeaders || {},
+      overrideHeaders: modalState.form.overrideHeaders || {},
+      stripHeaders: modalState.form.stripHeaders || [],
       // 旧连通性字段清空
       connectivityCheck: false,
       connectivityTestModel: '',

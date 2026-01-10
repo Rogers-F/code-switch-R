@@ -91,6 +91,10 @@ func main() {
 	}
 	log.Println("✅ 数据库写入队列已启动")
 
+	// 【新增】初始化请求详情缓存
+	services.InitRequestDetailCache()
+	log.Println("✅ 请求详情缓存已初始化")
+
 	// 【修复】第三步：创建服务（现在可以安全使用数据库了）
 	suiService, errt := services.NewSuiStore()
 	if errt != nil {
@@ -129,6 +133,7 @@ func main() {
 	consoleService := services.NewConsoleService()
 	customCliService := services.NewCustomCliService(providerRelay.Addr())
 	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
+	requestDetailService := services.NewRequestDetailService()
 
 	// 应用待处理的更新
 	go func() {
@@ -232,6 +237,8 @@ func main() {
 			application.NewService(consoleService),
 			application.NewService(customCliService),
 			application.NewService(networkService),
+			application.NewService(providerRelay),
+			application.NewService(requestDetailService),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

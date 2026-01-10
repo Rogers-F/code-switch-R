@@ -1792,7 +1792,7 @@ func (prs *ProviderRelayService) forwardRequestIsolated(
 		headers["Accept"] = "application/json"
 	}
 
-	requestLog := &ReqeustLog{
+	requestLog := &RequestLog{
 		Platform: kind,
 		Provider: provider.Name,
 		Model:    model,
@@ -1912,7 +1912,7 @@ func (prs *ProviderRelayService) forwardRequestStream(
 		headers["Accept"] = "application/json"
 	}
 
-	requestLog := &ReqeustLog{
+	requestLog := &RequestLog{
 		Platform: kind,
 		Provider: provider.Name,
 		Model:    model,
@@ -1951,7 +1951,7 @@ func (prs *ProviderRelayService) forwardRequestStream(
 
 	// 流式响应：判断状态码后直接写入
 	if status >= 200 && status < 300 || status == 0 {
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		_, copyErr := resp.ToHttpResponseWriter(c.Writer, RequestLogHook(c, kind, requestLog))
 		if copyErr != nil {
 			fmt.Printf("[WARN] 流式复制响应失败: %v\n", copyErr)
 		}
@@ -1959,7 +1959,7 @@ func (prs *ProviderRelayService) forwardRequestStream(
 	}
 
 	if status >= 400 && status < 500 {
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		_, copyErr := resp.ToHttpResponseWriter(c.Writer, RequestLogHook(c, kind, requestLog))
 		if copyErr != nil {
 			fmt.Printf("[WARN] 流式复制响应失败: %v\n", copyErr)
 		}
@@ -1970,7 +1970,7 @@ func (prs *ProviderRelayService) forwardRequestStream(
 }
 
 // writeRequestLog 写入请求日志
-func (prs *ProviderRelayService) writeRequestLog(requestLog *ReqeustLog) {
+func (prs *ProviderRelayService) writeRequestLog(requestLog *RequestLog) {
 	// 【修复】防御性判空
 	if GlobalDBQueueLogs == nil {
 		fmt.Printf("[WARN] 数据库队列未初始化，跳过日志写入\n")

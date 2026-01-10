@@ -2,23 +2,30 @@ package services
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/daodao97/xgo/xdb"
-	"github.com/daodao97/xgo/xrequest"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// responseBufferSize 是流式响应复制时使用的缓冲区大小
+const responseBufferSize = 32 * 1024 // 32KB
 
 // LastUsedProvider 最后使用的供应商信息
 // @author sm
@@ -33,7 +40,8 @@ type ProviderRelayService struct {
 	geminiService       *GeminiService
 	blacklistService    *BlacklistService
 	notificationService *NotificationService
-	appSettings         *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
+	appSettings         *AppSettingsService   // 应用设置服务（用于获取轮询开关状态）
+	affinityManager     *CacheAffinityManager // 5分钟同源缓存亲和性管理器
 	server              *http.Server
 	addr                string
 	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
@@ -45,6 +53,314 @@ type ProviderRelayService struct {
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
 
+// skipReasons tracks the count of providers skipped during filtering
+type skipReasons struct {
+	disabled         int // disabled or missing URL/APIKey
+	configInvalid    int // configuration validation failed
+	modelUnsupported int // does not support requested model
+	blacklisted      int // temporarily unavailable (blacklisted)
+}
+
+// total returns the total count of all skip reasons
+func (s *skipReasons) total() int {
+	return s.disabled + s.configInvalid + s.modelUnsupported + s.blacklisted
+}
+
+// formatKind formats the kind parameter for user-friendly display
+func formatKind(kind string) string {
+	if strings.HasPrefix(kind, "custom:") {
+		toolID := strings.TrimPrefix(kind, "custom:")
+		return fmt.Sprintf("custom CLI '%s'", toolID)
+	}
+	return kind
+}
+
+// buildNoProviderError builds a user-friendly error message with detailed skip reasons
+// kind parameter is used to display platform type when requestedModel is empty
+func buildNoProviderError(requestedModel string, kind string, reasons skipReasons) string {
+	if requestedModel == "" {
+		if kind != "" {
+			return fmt.Sprintf("no providers available for %s", formatKind(kind))
+		}
+		return "no providers available"
+	}
+
+	var details []string
+	if reasons.modelUnsupported > 0 {
+		details = append(details, fmt.Sprintf("%d not supporting this model", reasons.modelUnsupported))
+	}
+	if reasons.blacklisted > 0 {
+		details = append(details, fmt.Sprintf("%d temporarily unavailable (blacklisted, retry later or check quota)", reasons.blacklisted))
+	}
+	if reasons.configInvalid > 0 {
+		details = append(details, fmt.Sprintf("%d with invalid config", reasons.configInvalid))
+	}
+	if reasons.disabled > 0 {
+		details = append(details, fmt.Sprintf("%d disabled or missing credentials", reasons.disabled))
+	}
+
+	errMsg := fmt.Sprintf("no providers available for model '%s'", requestedModel)
+	if len(details) > 0 {
+		errMsg += " (" + strings.Join(details, ", ") + ")"
+	}
+	return errMsg
+}
+
+// AuthMethod 表示原始请求使用的认证方式
+type AuthMethod int
+
+const (
+	AuthMethodBearer  AuthMethod = iota // Authorization: Bearer xxx
+	AuthMethodXAPIKey                   // x-api-key: xxx
+)
+
+// detectAuthMethod 检测原始请求使用的认证方式
+// 使用 http.Header.Get 进行大小写无关的匹配
+func detectAuthMethod(header http.Header) AuthMethod {
+	// 优先检查 x-api-key（使用 http.Header.Get 自动处理大小写）
+	if header.Get("X-Api-Key") != "" {
+		return AuthMethodXAPIKey
+	}
+	// 默认使用 Authorization Bearer
+	return AuthMethodBearer
+}
+
+// determineAuthMethod 根据 Provider 配置和原始请求确定最终的认证方式
+// 优先级：Provider.ConnectivityAuthType (当显式设置为 bearer/x-api-key 时) > 自动检测原始请求
+// 当 Provider 配置为 "auto" 或空值时，使用自动检测逻辑
+func determineAuthMethod(provider *Provider, requestHeader http.Header) AuthMethod {
+	if provider == nil {
+		return detectAuthMethod(requestHeader)
+	}
+
+	authType := strings.TrimSpace(strings.ToLower(provider.ConnectivityAuthType))
+
+	switch authType {
+	case "bearer":
+		return AuthMethodBearer
+	case "x-api-key":
+		return AuthMethodXAPIKey
+	case "auto", "":
+		// 自动检测原始请求的认证方式
+		return detectAuthMethod(requestHeader)
+	default:
+		// 自定义 Header 名称场景：暂时按 Bearer 处理
+		// 注意：自定义 Header 应通过 OverrideHeaders 实现，这里仅作兜底
+		slog.Warn("Unknown auth type, falling back to Bearer", "authType", authType, "provider", provider.Name)
+		return AuthMethodBearer
+	}
+}
+
+// httpHeaderToMap 将 http.Header 转换为 map[string]string
+// 用于与需要 map[string]string 的函数（如 SanitizeHeaders）兼容
+func httpHeaderToMap(h http.Header) map[string]string {
+	result := make(map[string]string, len(h))
+	for k, v := range h {
+		if len(v) > 0 {
+			result[k] = v[len(v)-1] // 取最后一个值
+		}
+	}
+	return result
+}
+
+// hopByHopHeaders 是不应该被代理转发的逐跳头（hop-by-hop headers）
+// 参考 RFC 2616 Section 13.5.1 和 RFC 7230 Section 6.1
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+}
+
+// defaultRetryHTTPClient 是共享的带网络级重试的 HTTP 客户端
+// 使用 sync.Once 确保只初始化一次，避免每次请求创建新的 Transport 造成资源泄漏
+var (
+	defaultRetryHTTPClient     *http.Client
+	defaultRetryHTTPClientOnce sync.Once
+)
+
+// RetryTransport 是一个支持网络级错误自动重试的 http.RoundTripper
+// 用于处理瞬时网络抖动（TCP reset、DNS 解析失败等），避免直接计入应用层失败次数
+type RetryTransport struct {
+	Base       http.RoundTripper
+	MaxRetries int           // 最大重试次数
+	RetryDelay time.Duration // 重试间隔
+}
+
+// RoundTrip 实现 http.RoundTripper 接口，支持网络级错误重试
+func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var lastErr error
+	base := rt.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+
+	for attempt := 0; attempt <= rt.MaxRetries; attempt++ {
+		// 检查 context 是否已取消
+		if req.Context().Err() != nil {
+			return nil, req.Context().Err()
+		}
+
+		// 重试时重置 request body（如果 GetBody 可用）
+		if attempt > 0 && req.GetBody != nil {
+			newBody, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("failed to reset request body for retry: %w", err)
+			}
+			req.Body = newBody
+		}
+
+		resp, err := base.RoundTrip(req)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+
+		// 检查是否是 context 取消/超时
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+
+		// 判断是否是网络级别的瞬时错误（值得重试）
+		if !isTransientNetworkError(err) {
+			return nil, err
+		}
+
+		// 最后一次尝试不等待
+		if attempt < rt.MaxRetries {
+			fmt.Printf("[RetryTransport] 网络错误，%dms 后重试（%d/%d）: %v\n",
+				rt.RetryDelay.Milliseconds(), attempt+1, rt.MaxRetries, err)
+			time.Sleep(rt.RetryDelay)
+		}
+	}
+
+	return nil, lastErr
+}
+
+// isTransientNetworkError 判断是否是值得重试的瞬时网络错误
+func isTransientNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// 使用类型断言检测网络错误（比字符串匹配更可靠）
+	// 检查是否是 net.Error（网络超时等）
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// 检查是否是 net.OpError（连接级别错误）
+	// 只重试 reset/broken pipe 等瞬时错误，不重试 connection refused（服务器可能已关闭）
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		errStr := strings.ToLower(opErr.Error())
+		return strings.Contains(errStr, "reset") ||
+			strings.Contains(errStr, "broken pipe")
+	}
+
+	// 检查是否是 DNS 错误
+	// 只重试临时 DNS 错误（如超时、服务器不可达），不重试永久错误如 NXDOMAIN
+	// 注意：Temporary() 方法已废弃，使用 IsTemporary 字段代替
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		// IsNotFound 表示域名不存在（NXDOMAIN），不应重试
+		if dnsErr.IsNotFound {
+			return false
+		}
+		// IsTemporary 表示临时性 DNS 错误（超时、服务器暂时不可达等）
+		// IsTimeout 表示 DNS 查询超时，也应该重试
+		// 注意：IsTemporary 默认为 false，需要显式检查 IsTimeout
+		return dnsErr.IsTemporary || dnsErr.IsTimeout
+	}
+
+	// 回退：字符串匹配处理未被上述类型覆盖的错误
+	// 使用更精确的模式避免误匹配（如 "Geoffrey" 包含 "eof"）
+	errStr := strings.ToLower(err.Error())
+	transientErrors := []string{
+		"unexpected eof",
+		"read: eof",
+		" eof",  // 空格前缀避免误匹配如 "Geoffrey"
+		"eof\n", // 行尾 eof
+		"broken pipe",
+		"connection reset by peer",
+		"tls handshake timeout",
+	}
+
+	for _, te := range transientErrors {
+		if strings.Contains(errStr, te) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// newRetryHTTPClient 返回带有网络级重试的 HTTP 客户端
+// 使用默认参数（1 次重试，500ms 间隔）时返回共享的单例客户端，避免资源泄漏
+// 自定义参数时创建新客户端（罕见场景）
+//
+// 【资源管理注意事项】
+// - 使用默认参数时返回共享单例，无需关闭
+// - 自定义参数时返回新客户端，其 Transport 包含连接池
+// - 如需关闭自定义客户端，可调用 client.CloseIdleConnections()
+// - 建议：尽量复用客户端实例，避免频繁创建/销毁带来的资源开销
+//
+// 【并发安全】
+// - 不要直接修改返回客户端的 Timeout 字段，这会影响共享单例的所有调用方
+// - 应使用 context.WithTimeout 或 context.WithDeadline 控制单次请求超时
+func newRetryHTTPClient(maxRetries int, retryDelay time.Duration) *http.Client {
+	// 使用默认参数时返回共享的单例客户端
+	// 注意：maxRetries <= 0 被视为"使用默认值"（1次重试），而非"不重试"
+	// 如需完全禁用重试，应使用标准 http.Client 而非此函数
+	if (maxRetries <= 0 || maxRetries == 1) && (retryDelay <= 0 || retryDelay == 500*time.Millisecond) {
+		defaultRetryHTTPClientOnce.Do(func() {
+			defaultRetryHTTPClient = &http.Client{
+				Transport: &RetryTransport{
+					Base: &http.Transport{
+						MaxIdleConns:        100,
+						IdleConnTimeout:     90 * time.Second,
+						MaxIdleConnsPerHost: 10,
+					},
+					MaxRetries: 1,
+					RetryDelay: 500 * time.Millisecond,
+				},
+			}
+		})
+		return defaultRetryHTTPClient
+	}
+
+	// 自定义参数时创建新客户端
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+	if retryDelay <= 0 {
+		retryDelay = 500 * time.Millisecond
+	}
+
+	return &http.Client{
+		Transport: &RetryTransport{
+			Base: &http.Transport{
+				MaxIdleConns:        100,
+				IdleConnTimeout:     90 * time.Second,
+				MaxIdleConnsPerHost: 10,
+			},
+			MaxRetries: maxRetries,
+			RetryDelay: retryDelay,
+		},
+	}
+}
+
+// isHopByHopHeader 检查给定的 header 是否是逐跳头
+func isHopByHopHeader(header string) bool {
+	return hopByHopHeaders[header]
+}
+
 func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, addr string) *ProviderRelayService {
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
@@ -53,12 +369,16 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 	// 【修复】数据库初始化已移至 main.go 的 InitDatabase()
 	// 此处不再调用 xdb.Inits()、ensureRequestLogTable()、ensureBlacklistTables()
 
+	// 初始化 5 分钟同源缓存亲和性管理器
+	affinityManager := NewCacheAffinityManager(5 * time.Minute)
+
 	return &ProviderRelayService{
 		providerService:     providerService,
 		geminiService:       geminiService,
 		blacklistService:    blacklistService,
 		notificationService: notificationService,
 		appSettings:         appSettings,
+		affinityManager:     affinityManager,
 		addr:                addr,
 		lastUsed: map[string]*LastUsedProvider{
 			"claude": nil,
@@ -235,6 +555,11 @@ func (prs *ProviderRelayService) Start() error {
 		fmt.Println("========================================")
 	}
 
+	// 启动缓存亲和性管理器的后台清理任务
+	if prs.affinityManager != nil {
+		prs.affinityManager.StartCleanupTask()
+	}
+
 	router := gin.Default()
 	prs.registerRoutes(router)
 
@@ -280,8 +605,7 @@ func (prs *ProviderRelayService) validateConfig() []string {
 			}
 
 			// 检查是否配置了模型白名单或映射
-			if (p.SupportedModels == nil || len(p.SupportedModels) == 0) &&
-				(p.ModelMapping == nil || len(p.ModelMapping) == 0) {
+			if len(p.SupportedModels) == 0 && len(p.ModelMapping) == 0 {
 				warnings = append(warnings, fmt.Sprintf(
 					"[%s/%s] 未配置 supportedModels 或 modelMapping，将假设支持所有模型（可能导致降级失败）",
 					kind, p.Name))
@@ -304,6 +628,11 @@ func (prs *ProviderRelayService) validateConfig() []string {
 }
 
 func (prs *ProviderRelayService) Stop() error {
+	// 停止缓存亲和性管理器的后台清理任务
+	if prs.affinityManager != nil {
+		prs.affinityManager.StopCleanupTask()
+	}
+
 	if prs.server == nil {
 		return nil
 	}
@@ -331,7 +660,7 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	// 自定义 CLI 工具端点（路由格式: /custom/:toolId/v1/messages）
 	// toolId 用于区分不同的 CLI 工具，对应 provider kind 为 "custom:{toolId}"
 	router.POST("/custom/:toolId/v1/messages", prs.customCliProxyHandler())
-	
+
 	// 自定义 CLI 工具的 /v1/models 端点
 	router.GET("/custom/:toolId/v1/models", prs.customModelsHandler())
 }
@@ -357,6 +686,10 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[WARN] 请求未指定模型名，无法执行模型智能降级\n")
 		}
 
+		// 【5分钟同源缓存】提取 user_id 用于缓存亲和性
+		userID := prs.extractUserID(c)
+		affinityKey := GenerateAffinityKey(userID, kind, requestedModel)
+
 		providers, err := prs.providerService.LoadProviders(kind)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load providers"})
@@ -364,31 +697,32 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		active := make([]Provider, 0, len(providers))
-		skippedCount := 0
+		reasons := skipReasons{} // track skip reasons
 		for _, provider := range providers {
-			// 基础过滤：enabled、URL、APIKey
+			// Basic filter: enabled, URL, APIKey
 			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+				reasons.disabled++
 				continue
 			}
 
-			// 配置验证：失败则自动跳过
+			// Config validation: auto-skip on failure
 			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
-				fmt.Printf("[WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
-				skippedCount++
+				fmt.Printf("[WARN] Provider %s config validation failed, skipped: %v\n", provider.Name, errs)
+				reasons.configInvalid++
 				continue
 			}
 
-			// 核心过滤：只保留支持请求模型的 provider
+			// Model filter: only keep providers supporting the requested model
 			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
-				fmt.Printf("[INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
-				skippedCount++
+				fmt.Printf("[INFO] Provider %s does not support model %s, skipped\n", provider.Name, requestedModel)
+				reasons.modelUnsupported++
 				continue
 			}
 
-			// 黑名单检查：跳过已拉黑的 provider
+			// Blacklist check: skip blacklisted providers
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
-				fmt.Printf("⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
-				skippedCount++
+				fmt.Printf("⛔ Provider %s blacklisted until %v\n", provider.Name, until.Format("15:04:05"))
+				reasons.blacklisted++
 				continue
 			}
 
@@ -396,21 +730,27 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		if len(active) == 0 {
-			if requestedModel != "" {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedCount),
-				})
-			} else {
-				c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
-			}
+			errMsg := buildNoProviderError(requestedModel, kind, reasons)
+			c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
 			return
 		}
 
-		fmt.Printf("[INFO] 找到 %d 个可用的 provider（已过滤 %d 个）：", len(active), skippedCount)
-		for _, p := range active {
-			fmt.Printf("%s ", p.Name)
+		// Build provider names list
+		providerNames := make([]string, len(active))
+		for i, p := range active {
+			providerNames[i] = p.Name
 		}
+		fmt.Printf("[INFO] Providers: total=%d, active=%d, skipped=%d (disabled=%d, config=%d, model=%d, blacklist=%d): %s\n",
+			len(providers), len(active), reasons.total(),
+			reasons.disabled, reasons.configInvalid, reasons.modelUnsupported, reasons.blacklisted,
+			strings.Join(providerNames, ", "))
 		fmt.Println()
+
+		// 【5分钟同源缓存】检查是否有缓存的 provider
+		cachedProviderName := ""
+		if prs.affinityManager != nil {
+			cachedProviderName = prs.affinityManager.Get(affinityKey)
+		}
 
 		// 按 Level 分组
 		levelGroups := make(map[int][]Provider)
@@ -433,6 +773,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 		query := flattenQuery(c.Request.URL.Query())
 		clientHeaders := cloneHeaders(c.Request.Header)
+		// 注意：认证方式在每个 provider 转发时由 determineAuthMethod() 动态计算
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
@@ -492,15 +833,17 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							break
 						}
 
-						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 尝试 %d/%d | Model: %s\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+						// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+						authMethod := determineAuthMethod(&provider, c.Request.Header)
+						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 						duration := time.Since(startTime)
 
 						if ok {
-							fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+							fmt.Printf("[INFO] ✓ 成功: %s | 尝试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
 							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
 								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
@@ -517,7 +860,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						if err != nil {
 							errorMsg = err.Error()
 						}
-						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+						fmt.Printf("[WARN] ✗ 失败: %s | 尝试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
 
 						// 客户端中断不计入失败次数，直接返回
@@ -576,6 +919,23 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		var lastDuration time.Duration
 		totalAttempts := 0
 
+		// 【5分钟同源缓存】如果有缓存的 provider，优先尝试
+		if cachedProviderName != "" {
+			affinityResult := prs.tryAffinityProvider(
+				c, kind, affinityKey, cachedProviderName, active,
+				endpoint, query, clientHeaders, bodyBytes, isStream, requestedModel,
+			)
+			if affinityResult.Handled {
+				return // 成功或客户端中断，不再继续
+			}
+			if affinityResult.UsedProvider != "" {
+				totalAttempts++
+				lastError = affinityResult.LastError
+				lastProvider = affinityResult.UsedProvider
+				lastDuration = affinityResult.Duration
+			}
+		}
+
 		for _, level := range levels {
 			providersInLevel := levelGroups[level]
 
@@ -587,6 +947,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 			for i, provider := range providersInLevel {
+				// 【5分钟同源缓存】跳过已经尝试过的缓存 provider
+				if provider.Name == cachedProviderName {
+					fmt.Printf("[INFO]   跳过已尝试的缓存 provider: %s\n", provider.Name)
+					continue
+				}
+
 				totalAttempts++
 
 				// 获取实际应该使用的模型名
@@ -612,11 +978,18 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				// 获取有效的端点（用户配置优先）
 				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+				// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+				authMethod := determineAuthMethod(&provider, c.Request.Header)
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 				duration := time.Since(startTime)
 
 				if ok {
 					fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
+
+					// 【5分钟同源缓存】设置缓存亲和性
+					if prs.affinityManager != nil {
+						prs.affinityManager.Set(affinityKey, provider.Name)
+					}
 
 					// 成功：清零连续失败计数
 					if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
@@ -686,9 +1059,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			totalAttempts, lastProvider, errorMsg)
 
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":         fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
-			"last_provider": lastProvider,
-			"last_duration": fmt.Sprintf("%.2fs", lastDuration.Seconds()),
+			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
+			"last_provider":  lastProvider,
+			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
 			"total_attempts": totalAttempts,
 		})
 	}
@@ -700,43 +1073,64 @@ func (prs *ProviderRelayService) forwardRequest(
 	provider Provider,
 	endpoint string,
 	query map[string]string,
-	clientHeaders map[string]string,
+	clientHeaders http.Header,
 	bodyBytes []byte,
 	isStream bool,
 	model string,
+	authMethod AuthMethod,
 ) (bool, error) {
 	targetURL := joinURL(provider.APIURL, endpoint)
-	headers := cloneMap(clientHeaders)
 
-	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
-	switch authType {
-	case "x-api-key":
-		// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
-		headers["x-api-key"] = provider.APIKey
-		headers["anthropic-version"] = "2023-06-01"
-	case "", "bearer":
-		// 默认使用 Bearer token（兼容所有第三方中转）
-		headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
-	default:
-		// 自定义 Header 名
-		headerName := strings.TrimSpace(provider.ConnectivityAuthType)
-		if headerName == "" || strings.EqualFold(headerName, "custom") {
-			headerName = "Authorization"
+	// 添加查询参数（使用 url.Parse 进行正确的 URL 操作）
+	if len(query) > 0 {
+		u, err := url.Parse(targetURL)
+		if err == nil {
+			q := u.Query()
+			for k, v := range query {
+				q.Set(k, v)
+			}
+			u.RawQuery = q.Encode()
+			targetURL = u.String()
 		}
-		headers[headerName] = provider.APIKey
 	}
 
-	if _, ok := headers["Accept"]; !ok {
-		headers["Accept"] = "application/json"
+	// 使用 buildForwardHeaders 构建转发请求头（支持 Provider 级别 Header 配置）
+	// 按优先级处理：原请求 Headers → StripHeaders → OverrideHeaders → ExtraHeaders
+	headers := buildForwardHeaders(clientHeaders, &provider)
+
+	// 根据原始请求的认证方式设置转发请求头
+	// 原始请求用 Authorization 就用 Authorization，原始请求用 x-api-key 就用 x-api-key
+	// 注意：认证头最后设置，确保覆盖任何 OverrideHeaders 中的错误配置
+	switch authMethod {
+	case AuthMethodXAPIKey:
+		// 原始请求使用 x-api-key，转发也使用 x-api-key
+		headers.Set("X-Api-Key", provider.APIKey)
+		// 删除可能存在的 Authorization 头
+		headers.Del("Authorization")
+	default:
+		// 原始请求使用 Authorization Bearer，转发也使用 Authorization
+		headers.Set("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey))
+		// 删除可能存在的 x-api-key 头
+		headers.Del("X-Api-Key")
 	}
 
-	requestLog := &ReqeustLog{
+	if headers.Get("Accept") == "" {
+		headers.Set("Accept", "application/json")
+	}
+
+	requestLog := &RequestLog{
 		Platform: kind,
 		Provider: provider.Name,
 		Model:    model,
 		IsStream: isStream,
 	}
+
+	// 【请求详情缓存】准备响应收集器
+	var responseCollector *strings.Builder
+	var respHeaders map[string]string // 响应头（用于请求详情缓存）
+	shouldRecordDetail := GlobalRequestDetailCache != nil &&
+		GlobalRequestDetailCache.GetMode() != RequestDetailModeOff
+
 	start := time.Now()
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
@@ -773,82 +1167,534 @@ func (prs *ProviderRelayService) forwardRequest(
 
 		if err != nil {
 			fmt.Printf("写入 request_log 失败: %v\n", err)
+			return
+		}
+
+		// 【请求详情缓存】获取刚插入的 ID 并存储详情
+		if shouldRecordDetail && GlobalRequestDetailCache.ShouldRecord(requestLog.HttpCode) {
+			// 使用毫秒时间戳作为 ID（13位数字在 JavaScript 安全整数范围内）
+			// 注意：UnixNano 是 19 位，超出 JS Number.MAX_SAFE_INTEGER (16位)，会丢失精度
+			seqID := time.Now().UnixMilli()
+
+			// 准备请求体（截断）
+			reqBody, reqTruncated := TruncateBody(string(bodyBytes), MaxRequestBodySize)
+
+			// 准备响应体（截断）
+			respBody := ""
+			respTruncated := false
+			if responseCollector != nil {
+				collectedData := responseCollector.String()
+
+				// 检查响应是否是 gzip 压缩的，如果是则解压
+				if respHeaders != nil {
+					if encoding, ok := respHeaders["Content-Encoding"]; ok && strings.EqualFold(encoding, "gzip") {
+						if decompressed, err := decompressGzip([]byte(collectedData)); err == nil {
+							collectedData = string(decompressed)
+						}
+						// 解压失败时保留原始数据（可能显示乱码，但至少有数据）
+					}
+				}
+
+				respBody, respTruncated = TruncateBody(collectedData, MaxResponseBodySize)
+			}
+
+			// 使用请求完成时的时间（与数据库 created_at 时间对齐，便于匹配）
+			completedAt := time.Now()
+			detail := &RequestDetail{
+				SequenceID:      seqID,
+				Platform:        kind,
+				Provider:        provider.Name,
+				Model:           model,
+				RequestURL:      targetURL,
+				RequestBody:     reqBody,
+				ResponseBody:    respBody,
+				Headers:         SanitizeHeaders(httpHeaderToMap(headers)),
+				ResponseHeaders: respHeaders,
+				HttpCode:        requestLog.HttpCode,
+				Timestamp:       completedAt,
+				DurationMs:      int64(requestLog.DurationSec * 1000),
+				Truncated:       reqTruncated || respTruncated,
+				RequestSize:     len(bodyBytes),
+				ResponseSize:    len(respBody),
+			}
+
+			GlobalRequestDetailCache.Store(detail)
 		}
 	}()
 
-	req := xrequest.New().
-		SetHeaders(headers).
-		SetQueryParams(query).
-		SetRetry(1, 500*time.Millisecond).
-		SetTimeout(32 * time.Hour) // 32小时超时，适配超大型项目分析
+	// 初始化响应收集器
+	if shouldRecordDetail {
+		responseCollector = &strings.Builder{}
+	}
 
 	// 某些中转（如 bigmodel/z.ai 的 Anthropic 兼容层）需要默认注入 thinking 参数以启用推理
 	bodyBytes = prs.injectThinkingIfNeeded(bodyBytes, provider.APIURL)
+	requestTimeout := 32 * time.Hour // 给模型足够思考时间
 
-	reqBody := bytes.NewReader(bodyBytes)
-	req = req.SetBody(reqBody)
+	// 使用标准 http.Client + http.NewRequestWithContext
+	// 这能确保 context 取消时请求真正被中断
+	reqCtx, cancelFunc := context.WithTimeout(c.Request.Context(), requestTimeout)
+	defer cancelFunc()
 
-	resp, err := req.Post(targetURL)
+	httpReq, reqErr := http.NewRequestWithContext(reqCtx, "POST", targetURL, bytes.NewReader(bodyBytes))
+	if reqErr != nil {
+		return false, reqErr
+	}
+	// 设置 GetBody 以支持 RetryTransport 重试时重置请求体
+	httpReq.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+	}
+	// 复制 headers 到请求（headers 已经是 http.Header 类型）
+	// Content-Type 已由 cloneHeaders() 从原请求复制，无需强制覆盖
+	for k, values := range headers {
+		for _, v := range values {
+			httpReq.Header.Add(k, v)
+		}
+	}
+
+	// 使用带网络级重试的 http.Client（超时由 context 控制）
+	// 网络级重试：1 次，间隔 500ms，仅针对瞬时网络错误（TCP reset、DNS 失败等）
+	// 应用层重试由外层 BlacklistService 控制，处理 API 级别错误
+	httpClient := newRetryHTTPClient(1, 500*time.Millisecond)
+	httpResp, err := httpClient.Do(httpReq)
 
 	// 无论成功失败，先尝试记录 HttpCode
-	if resp != nil {
-		requestLog.HttpCode = resp.StatusCode()
+	if httpResp != nil {
+		requestLog.HttpCode = httpResp.StatusCode
 	}
 
 	if err != nil {
-		// resp 存在但 err != nil：可能是客户端中断，不计入失败
-		if resp != nil && requestLog.HttpCode == 0 {
+		// 检查是否是 context 超时或取消
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Printf("[INFO] Provider %s 请求超时（context deadline exceeded）\n", provider.Name)
+			return false, fmt.Errorf("request timeout: %w", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			fmt.Printf("[INFO] Provider %s 请求被取消（context canceled）\n", provider.Name)
+			return false, fmt.Errorf("%w: %v", errClientAbort, err)
+		}
+		// 响应存在但状态码为0：可能是客户端中断
+		if httpResp != nil && requestLog.HttpCode == 0 {
 			fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, err)
 		}
 		return false, err
 	}
 
-	if resp == nil {
+	// 检查响应是否存在
+	if httpResp == nil {
 		return false, fmt.Errorf("empty response")
 	}
+	defer httpResp.Body.Close()
 
-	status := requestLog.HttpCode
-
-	if resp.Error() != nil {
-		// resp 存在、有错误、但状态码为 0：客户端中断，不计入失败
-		if status == 0 {
-			fmt.Printf("[INFO] Provider %s 响应错误但状态码为0，判定为客户端中断\n", provider.Name)
-			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
+	// 【请求详情缓存】保存响应头
+	if shouldRecordDetail {
+		respHeaders = make(map[string]string)
+		for k, vv := range httpResp.Header {
+			if len(vv) > 0 {
+				respHeaders[k] = vv[0] // 只保存第一个值
+			}
 		}
-		return false, resp.Error()
 	}
 
+	status := httpResp.StatusCode
+	requestLog.HttpCode = status
+
 	// 状态码为 0 且无错误：当作成功处理
+	// 注意：status=0 通常发生在以下场景：
+	// 1. HTTP/2 或某些代理服务器在特殊情况下可能不设置状态码
+	// 2. 连接成功但响应解析异常时的防御性处理
+	// 3. 某些非标准HTTP实现的兼容性处理
+	// 这是防御性编程，确保即使遇到异常状态码也能正常处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		if copyErr != nil {
+		if copyErr := writeProxiedResponseWithCollector(c, httpResp, kind, requestLog, responseCollector); copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
+		// responseWritten: always true after writeProxiedResponseWithCollector returns
 		return true, nil
 	}
 
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		if copyErr != nil {
+		if copyErr := writeProxiedResponseWithCollector(c, httpResp, kind, requestLog, responseCollector); copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
 		// 只要provider返回了2xx状态码，就算成功（复制失败是客户端问题，不是provider问题）
+		// responseWritten: always true after writeProxiedResponseWithCollector returns
+		// 与 Gemini handler 的三元组 (success, errMsg, responseWritten) 语义一致：
+		// 一旦响应头写入客户端，即使流式传输中断也不会触发重试
 		return true, nil
 	}
 
+	// 对于非 2xx 响应，读取响应体用于错误调试和日志记录
+	var respBody []byte
+	if httpResp.Body != nil {
+		respBody, _ = io.ReadAll(io.LimitReader(httpResp.Body, int64(MaxResponseBodySize)))
+		if responseCollector != nil {
+			responseCollector.Write(respBody)
+		}
+	}
+
+	// 返回错误信息时包含上游响应体，便于调试和日志分析
+	if len(respBody) > 0 {
+		// 限制错误信息中的响应体长度，避免日志过长
+		bodyPreview := string(respBody)
+		if len(bodyPreview) > 500 {
+			bodyPreview = bodyPreview[:500] + "...(truncated)"
+		}
+		return false, fmt.Errorf("upstream status %d: %s", status, bodyPreview)
+	}
 	return false, fmt.Errorf("upstream status %d", status)
 }
 
-func cloneHeaders(header http.Header) map[string]string {
-	cloned := make(map[string]string, len(header))
-	for key, values := range header {
-		if len(values) > 0 {
-			cloned[key] = values[len(values)-1]
+// writeProxiedResponse 写入代理响应（复制响应头、状态码、响应体）
+// 用于避免 forwardRequest 中 status 0 和 status 2xx 的重复代码
+func writeProxiedResponse(c *gin.Context, httpResp *http.Response, kind string, requestLog *RequestLog) error {
+	return writeProxiedResponseWithCollector(c, httpResp, kind, requestLog, nil)
+}
+
+// writeProxiedResponseWithCollector 写入代理响应，同时可选地收集响应内容
+func writeProxiedResponseWithCollector(c *gin.Context, httpResp *http.Response, kind string, requestLog *RequestLog, collector *strings.Builder) error {
+	// 复制响应头（过滤掉逐跳头）
+	for k, vv := range httpResp.Header {
+		if isHopByHopHeader(k) {
+			continue
+		}
+		for _, v := range vv {
+			c.Writer.Header().Add(k, v)
 		}
 	}
+	c.Writer.WriteHeader(httpResp.StatusCode)
+
+	// 流式复制 body 并通过 hook 提取 token 用量
+	hook := RequestLogHook(c, kind, requestLog)
+	return copyResponseBodyWithHookAndCollector(httpResp.Body, c.Writer, hook, collector)
+}
+
+// copyResponseBodyWithHook 流式复制响应 body 到 writer，同时调用 hook 处理数据
+// 用于在流式传输过程中解析 SSE 数据提取 token 用量
+func copyResponseBodyWithHook(body io.Reader, writer io.Writer, hook func([]byte) []byte) error {
+	return copyResponseBodyWithHookAndCollector(body, writer, hook, nil)
+}
+
+// copyResponseBodyWithHookAndCollector 流式复制响应 body，同时可选地收集响应内容
+func copyResponseBodyWithHookAndCollector(body io.Reader, writer io.Writer, hook func([]byte) []byte, collector *strings.Builder) error {
+	buf := make([]byte, responseBufferSize)
+	collectedSize := 0
+	maxCollectSize := MaxStreamResponseSize
+
+	for {
+		n, readErr := body.Read(buf)
+		if n > 0 {
+			data := buf[:n]
+
+			// 调用 hook 处理数据（用于解析 token 用量）
+			// 使用 panic recovery 保护，避免 hook 异常导致服务器崩溃
+			if hook != nil {
+				data = safeCallHook(hook, data)
+			}
+
+			// 收集响应内容（用于请求详情缓存）
+			if collector != nil && collectedSize < maxCollectSize {
+				remaining := maxCollectSize - collectedSize
+				toWrite := len(data)
+				if toWrite > remaining {
+					toWrite = remaining
+				}
+				collector.Write(data[:toWrite])
+				collectedSize += toWrite
+			}
+
+			// 写入客户端
+			if _, writeErr := writer.Write(data); writeErr != nil {
+				return writeErr
+			}
+
+			// 对于流式响应，立即 flush
+			if flusher, ok := writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			return readErr
+		}
+	}
+}
+
+// safeCallHook 安全地调用 hook 函数，捕获可能的 panic
+// 如果 hook 发生 panic，记录错误并返回原始数据，不影响响应传输
+func safeCallHook(hook func([]byte) []byte, data []byte) (result []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[ERROR] Hook panicked: %v\nStack: %s\n", r, debug.Stack())
+			result = data // 返回原始数据，确保响应不中断
+		}
+	}()
+	return hook(data)
+}
+
+// extractUserID 从请求头中提取 user_id（用于缓存亲和性）
+// 通过对 Authorization header 中的 API Key 进行 hash 处理来生成唯一标识
+func (prs *ProviderRelayService) extractUserID(c *gin.Context) string {
+	// 使用 http.Header.Get 进行大小写无关的匹配
+	authHeader := c.Request.Header.Get("Authorization")
+	if authHeader == "" {
+		authHeader = c.Request.Header.Get("X-Api-Key")
+	}
+	if authHeader == "" {
+		return "anonymous"
+	}
+	// 移除 "Bearer " 前缀
+	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+	apiKey = strings.TrimSpace(apiKey)
+	return HashAPIKey(apiKey)
+}
+
+// AffinityTryResult 缓存亲和性尝试结果
+type AffinityTryResult struct {
+	Handled      bool          // 是否已处理完成（成功或客户端中断）
+	UsedProvider string        // 使用的 provider 名称
+	LastError    error         // 最后的错误
+	Duration     time.Duration // 耗时
+}
+
+// tryAffinityProvider 尝试使用缓存的 provider
+// 封装了查找、尝试、成功刷新缓存、失败清除缓存的完整逻辑
+// 返回 AffinityTryResult，调用方根据 Handled 判断是否需要继续降级
+// 注意：认证方式由 Provider 配置决定，不再通过参数传递
+func (prs *ProviderRelayService) tryAffinityProvider(
+	c *gin.Context,
+	kind string,
+	affinityKey string,
+	cachedProviderName string,
+	activeProviders []Provider,
+	endpoint string,
+	query map[string]string,
+	clientHeaders http.Header,
+	bodyBytes []byte,
+	isStream bool,
+	requestedModel string,
+) AffinityTryResult {
+	result := AffinityTryResult{}
+
+	if cachedProviderName == "" {
+		return result
+	}
+
+	fmt.Printf("[INFO] 🎯 发现缓存的 provider: %s，优先尝试\n", cachedProviderName)
+
+	// 查找缓存的 provider
+	var cachedProvider *Provider
+	for i := range activeProviders {
+		if activeProviders[i].Name == cachedProviderName {
+			cachedProvider = &activeProviders[i]
+			break
+		}
+	}
+
+	if cachedProvider == nil {
+		fmt.Printf("[INFO] 缓存的 provider %s 不在可用列表中，跳过\n", cachedProviderName)
+		return result
+	}
+
+	result.UsedProvider = cachedProvider.Name
+
+	// 准备请求
+	effectiveModel := cachedProvider.GetEffectiveModel(requestedModel)
+	currentBodyBytes := bodyBytes
+
+	if effectiveModel != requestedModel && requestedModel != "" {
+		fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", cachedProvider.Name, requestedModel, effectiveModel)
+		modifiedBody, modErr := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+		if modErr == nil {
+			currentBodyBytes = modifiedBody
+		}
+	}
+
+	effectiveEndpoint := cachedProvider.GetEffectiveEndpoint(endpoint)
+	startTime := time.Now()
+	// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+	effectiveAuthMethod := determineAuthMethod(cachedProvider, c.Request.Header)
+	ok, err := prs.forwardRequest(c, kind, *cachedProvider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, effectiveAuthMethod)
+	result.Duration = time.Since(startTime)
+
+	if ok {
+		fmt.Printf("[INFO] ✓ 缓存命中成功: %s | 耗时: %.2fs\n", cachedProvider.Name, result.Duration.Seconds())
+
+		// 刷新缓存（延长 TTL）
+		if prs.affinityManager != nil {
+			prs.affinityManager.Set(affinityKey, cachedProvider.Name)
+		}
+
+		if recErr := prs.blacklistService.RecordSuccess(kind, cachedProvider.Name); recErr != nil {
+			fmt.Printf("[WARN] 清零失败计数失败: %v\n", recErr)
+		}
+		prs.setLastUsedProvider(kind, cachedProvider.Name)
+		result.Handled = true
+		return result
+	}
+
+	// 缓存的 provider 失败，清除缓存
+	fmt.Printf("[WARN] ✗ 缓存的 provider 失败: %s | 错误: %v | 耗时: %.2fs\n",
+		cachedProvider.Name, err, result.Duration.Seconds())
+	if prs.affinityManager != nil {
+		prs.affinityManager.Invalidate(affinityKey)
+	}
+
+	result.LastError = err
+
+	// 客户端中断不计入失败次数
+	if errors.Is(err, errClientAbort) {
+		result.Handled = true // 客户端中断，不再继续降级
+		return result
+	}
+
+	if recErr := prs.blacklistService.RecordFailure(kind, cachedProvider.Name); recErr != nil {
+		fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", recErr)
+	}
+
+	return result
+}
+
+// GeminiAffinityTryResult Gemini 缓存亲和性尝试结果
+type GeminiAffinityTryResult struct {
+	Handled         bool   // 是否已处理完成（成功或响应已写入）
+	UsedProvider    string // 使用的 provider 名称
+	LastError       string // 最后的错误信息
+	ResponseWritten bool   // 响应是否已部分写入客户端
+}
+
+// tryGeminiAffinityProvider 尝试使用缓存的 Gemini provider
+// 封装了查找、尝试、成功刷新缓存、失败清除缓存的完整逻辑
+func (prs *ProviderRelayService) tryGeminiAffinityProvider(
+	c *gin.Context,
+	affinityKey string,
+	cachedProviderName string,
+	activeProviders []GeminiProvider,
+	endpoint string,
+	bodyBytes []byte,
+	isStream bool,
+	requestLog *RequestLog,
+	startTime time.Time,
+) GeminiAffinityTryResult {
+	result := GeminiAffinityTryResult{}
+
+	if cachedProviderName == "" {
+		return result
+	}
+
+	fmt.Printf("[Gemini] 🎯 发现缓存的 provider: %s，优先尝试\n", cachedProviderName)
+
+	// 查找缓存的 provider
+	var cachedProvider *GeminiProvider
+	for i := range activeProviders {
+		if activeProviders[i].Name == cachedProviderName {
+			cachedProvider = &activeProviders[i]
+			break
+		}
+	}
+
+	if cachedProvider == nil {
+		fmt.Printf("[Gemini] 缓存的 provider %s 不在可用列表中，跳过\n", cachedProviderName)
+		return result
+	}
+
+	result.UsedProvider = cachedProvider.Name
+	requestLog.Provider = cachedProvider.Name
+	requestLog.Model = cachedProvider.Model
+
+	ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, cachedProvider, endpoint, bodyBytes, isStream, requestLog)
+	result.ResponseWritten = responseWritten
+
+	if ok {
+		// 刷新缓存（延长 TTL）
+		if prs.affinityManager != nil {
+			prs.affinityManager.Set(affinityKey, cachedProvider.Name)
+		}
+		_ = prs.blacklistService.RecordSuccess("gemini", cachedProvider.Name)
+		prs.setLastUsedProvider("gemini", cachedProvider.Name)
+		fmt.Printf("[Gemini] ✓ 缓存命中成功 | Provider: %s | 总耗时: %.2fs\n", cachedProvider.Name, time.Since(startTime).Seconds())
+		result.Handled = true
+		return result
+	}
+
+	// 缓存的 provider 失败，清除缓存
+	fmt.Printf("[Gemini] ⚠️ 缓存的 provider 失败: %s | 错误: %s\n", cachedProvider.Name, errMsg)
+	if prs.affinityManager != nil {
+		prs.affinityManager.Invalidate(affinityKey)
+	}
+	_ = prs.blacklistService.RecordFailure("gemini", cachedProvider.Name)
+	result.LastError = errMsg
+
+	if responseWritten {
+		fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s\n", cachedProvider.Name)
+		result.Handled = true
+	}
+
+	return result
+}
+
+// cloneHeaders 克隆请求头，返回 http.Header 类型
+// 过滤掉认证相关的头（Authorization, x-api-key, x-goog-api-key），因为转发时会根据原始请求的认证方式重新设置
+// 同时过滤掉 hop-by-hop headers
+func cloneHeaders(header http.Header) http.Header {
+	cloned := make(http.Header)
+	for key, values := range header {
+		// 使用 http.CanonicalHeaderKey 进行标准化比较
+		canonicalKey := http.CanonicalHeaderKey(key)
+
+		// 跳过认证相关的头（会在转发时根据 authMethod 重新设置）
+		// 包括：Authorization (Bearer), X-Api-Key (Anthropic), X-Goog-Api-Key (Gemini)
+		if canonicalKey == "Authorization" || canonicalKey == "X-Api-Key" || canonicalKey == "X-Goog-Api-Key" {
+			continue
+		}
+
+		// 跳过 hop-by-hop headers
+		if hopByHopHeaders[canonicalKey] {
+			continue
+		}
+
+		// 复制所有值
+		cloned[canonicalKey] = append([]string(nil), values...)
+	}
 	return cloned
+}
+
+// buildForwardHeaders 构建转发请求的 Headers（不含认证头）
+// 按优先级处理：1. 复制原请求 Headers → 2. 移除 StripHeaders → 3. 应用 OverrideHeaders → 4. 应用 ExtraHeaders
+// 认证头由调用方根据 Provider.APIKey + authMethod 单独设置
+func buildForwardHeaders(original http.Header, provider *Provider) http.Header {
+	// 复制 headers（如果 original 已经是 cloneHeaders 的结果，此处仅做浅拷贝开销可接受）
+	headers := make(http.Header, len(original))
+	for k, v := range original {
+		headers[k] = append([]string(nil), v...)
+	}
+
+	if provider == nil {
+		return headers
+	}
+
+	// Step 2: 移除指定 Headers
+	for _, h := range provider.StripHeaders {
+		headers.Del(h)
+	}
+
+	// Step 3: 强制覆盖 (注意：不应包含认证头，认证头会被调用方覆盖)
+	for k, v := range provider.OverrideHeaders {
+		headers.Set(k, v)
+	}
+
+	// Step 4: 额外添加（仅当 key 不存在时添加）
+	for k, v := range provider.ExtraHeaders {
+		if headers.Get(k) == "" {
+			headers.Set(k, v)
+		}
+	}
+
+	return headers
 }
 
 func cloneMap(m map[string]string) map[string]string {
@@ -939,8 +1785,9 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	return nil
 }
 
-func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []byte) (bool, []byte) { // SSE 钩子：累计字节和解析 token 用量
-	return func(data []byte) (bool, []byte) {
+// RequestLogHook SSE 钩子：解析 token 用量，返回原始数据（不做修改）
+func RequestLogHook(c *gin.Context, kind string, usage *RequestLog) func(data []byte) []byte {
+	return func(data []byte) []byte {
 		payload := strings.TrimSpace(string(data))
 
 		parserFn := ClaudeCodeParseTokenUsageFromResponse
@@ -952,11 +1799,11 @@ func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []
 		}
 		parseEventPayload(payload, parserFn, usage)
 
-		return true, data
+		return data
 	}
 }
 
-func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *ReqeustLog) {
+func parseEventPayload(payload string, parser func(string, *RequestLog), usage *RequestLog) {
 	lines := strings.Split(payload, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -966,7 +1813,7 @@ func parseEventPayload(payload string, parser func(string, *ReqeustLog), usage *
 	}
 }
 
-type ReqeustLog struct {
+type RequestLog struct {
 	ID                int64   `json:"id"`
 	Platform          string  `json:"platform"` // claude、codex 或 gemini
 	Model             string  `json:"model"`
@@ -989,10 +1836,11 @@ type ReqeustLog struct {
 	Ephemeral1hCost   float64 `json:"ephemeral_1h_cost"`
 	TotalCost         float64 `json:"total_cost"`
 	HasPricing        bool    `json:"has_pricing"`
+	RequestDetailID   int64   `json:"request_detail_id,omitempty"` // 关联的请求详情 ID（内存缓存）
 }
 
 // claude code usage parser
-func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+func ClaudeCodeParseTokenUsageFromResponse(data string, usage *RequestLog) {
 	usage.InputTokens += int(gjson.Get(data, "message.usage.input_tokens").Int())
 	usage.OutputTokens += int(gjson.Get(data, "message.usage.output_tokens").Int())
 	usage.CacheCreateTokens += int(gjson.Get(data, "message.usage.cache_creation_input_tokens").Int())
@@ -1003,7 +1851,7 @@ func ClaudeCodeParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 }
 
 // codex usage parser
-func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+func CodexParseTokenUsageFromResponse(data string, usage *RequestLog) {
 	usage.InputTokens += int(gjson.Get(data, "response.usage.input_tokens").Int())
 	usage.OutputTokens += int(gjson.Get(data, "response.usage.output_tokens").Int())
 	usage.CacheReadTokens += int(gjson.Get(data, "response.usage.input_tokens_details.cached_tokens").Int())
@@ -1012,7 +1860,7 @@ func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 
 // gemini usage parser (流式响应专用)
 // Gemini SSE 流中每个 chunk 都会携带完整的 usageMetadata，需取最大值而非累加
-func GeminiParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
+func GeminiParseTokenUsageFromResponse(data string, usage *RequestLog) {
 	usageResult := gjson.Get(data, "usageMetadata")
 	if !usageResult.Exists() {
 		return
@@ -1020,9 +1868,9 @@ func GeminiParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 	mergeGeminiUsageMetadata(usageResult, usage)
 }
 
-// mergeGeminiUsageMetadata 合并 Gemini usageMetadata 到 ReqeustLog（取最大值去重）
+// mergeGeminiUsageMetadata 合并 Gemini usageMetadata 到 RequestLog（取最大值去重）
 // Gemini 流式响应特点：每个 chunk 包含截止当前的累计用量，因此取最大值即可
-func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
+func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *RequestLog) {
 	if !usage.Exists() || reqLog == nil {
 		return
 	}
@@ -1053,8 +1901,8 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 // streamGeminiResponseWithHook 流式传输 Gemini 响应并通过 Hook 提取 token 用量
 // 【修复】维护跨 chunk 缓冲，确保完整 SSE 事件解析
 // Gemini SSE 格式: "data: {json}\n\n" 或 "data: [DONE]\n\n"
-func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *ReqeustLog) error {
-	buf := make([]byte, 8192) // 增大缓冲区减少系统调用
+func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *RequestLog) error {
+	buf := make([]byte, 8192)   // 增大缓冲区减少系统调用
 	var lineBuf strings.Builder // 跨 chunk 行缓冲
 
 	for {
@@ -1088,7 +1936,7 @@ func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *
 
 // parseGeminiSSEWithBuffer 使用缓冲处理跨 chunk 的 SSE 事件
 // 【修复】解决 JSON 被 TCP 分割到多个 chunk 导致解析失败的问题
-func parseGeminiSSEWithBuffer(chunk string, lineBuf *strings.Builder, requestLog *ReqeustLog) {
+func parseGeminiSSEWithBuffer(chunk string, lineBuf *strings.Builder, requestLog *RequestLog) {
 	// 将当前 chunk 追加到缓冲
 	lineBuf.WriteString(chunk)
 	content := lineBuf.String()
@@ -1124,7 +1972,7 @@ func parseGeminiSSEWithBuffer(chunk string, lineBuf *strings.Builder, requestLog
 
 // parseGeminiSSELine 解析单个 SSE 事件提取 usageMetadata
 // 【优化】只在包含 usageMetadata 时才调用 gjson 解析
-func parseGeminiSSELine(event string, requestLog *ReqeustLog) {
+func parseGeminiSSELine(event string, requestLog *RequestLog) {
 	lines := strings.Split(event, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -1191,6 +2039,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 判断是否为流式请求
 		isStream := strings.Contains(endpoint, ":streamGenerateContent") || strings.Contains(query, "alt=sse")
 
+		// 【5分钟同源缓存】提取 user_id 和模型名
+		userID := prs.extractUserID(c)
+		geminiModel := extractGeminiModelFromEndpoint(endpoint)
+		affinityKey := GenerateAffinityKey(userID, "gemini", geminiModel)
+
 		// 加载 Gemini providers
 		providers := prs.geminiService.GetProviders()
 		if len(providers) == 0 {
@@ -1237,7 +2090,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		fmt.Printf("[Gemini] 共 %d 个 Level 分组: %v\n", len(sortedLevels), sortedLevels)
 
 		// 请求日志
-		requestLog := &ReqeustLog{
+		requestLog := &RequestLog{
 			Platform:     "gemini",
 			IsStream:     isStream,
 			InputTokens:  0,
@@ -1311,12 +2164,12 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 							break
 						}
 
-						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
+						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 尝试 %d/%d\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider)
 
 						ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 						if ok {
-							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
+							fmt.Printf("[Gemini] ✓ 成功: %s | 尝试 %d 次\n", provider.Name, retryCount+1)
 							_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
 							prs.setLastUsedProvider("gemini", provider.Name)
 							return
@@ -1333,7 +2186,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						lastError = errMsg
 						lastProvider = provider.Name
 
-						fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
+						fmt.Printf("[Gemini] ✗ 失败: %s | 尝试 %d/%d | 错误: %s\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errMsg)
 
 						// 记录失败次数（可能触发拉黑）
@@ -1379,6 +2232,27 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}
 
 		var lastError string
+
+		// 【5分钟同源缓存】检查是否有缓存的 provider
+		cachedProviderName := ""
+		if prs.affinityManager != nil {
+			cachedProviderName = prs.affinityManager.Get(affinityKey)
+		}
+
+		// 【5分钟同源缓存】如果有缓存的 provider，优先尝试
+		if cachedProviderName != "" {
+			affinityResult := prs.tryGeminiAffinityProvider(
+				c, affinityKey, cachedProviderName, activeProviders,
+				endpoint, bodyBytes, isStream, requestLog, start,
+			)
+			if affinityResult.Handled {
+				return // 成功或响应已写入，不再继续
+			}
+			if affinityResult.UsedProvider != "" {
+				lastError = affinityResult.LastError
+			}
+		}
+
 		for _, level := range sortedLevels {
 			providersInLevel := levelGroups[level]
 
@@ -1390,6 +2264,12 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 			for idx, provider := range providersInLevel {
+				// 【5分钟同源缓存】跳过已经尝试过的缓存 provider
+				if provider.Name == cachedProviderName {
+					fmt.Printf("[Gemini]   跳过已尝试的缓存 provider: %s\n", provider.Name)
+					continue
+				}
+
 				fmt.Printf("[Gemini]   [%d/%d] Provider: %s\n", idx+1, len(providersInLevel), provider.Name)
 
 				// 预填日志，失败也能落库
@@ -1398,6 +2278,10 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 				ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
 				if ok {
+					// 【5分钟同源缓存】设置缓存亲和性
+					if prs.affinityManager != nil {
+						prs.affinityManager.Set(affinityKey, provider.Name)
+					}
 					_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
 					// 记录最后使用的供应商
 					prs.setLastUsedProvider("gemini", provider.Name)
@@ -1467,7 +2351,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	endpoint string,
 	bodyBytes []byte,
 	isStream bool,
-	requestLog *ReqeustLog,
+	requestLog *RequestLog,
 ) (success bool, errMsg string, responseWritten bool) {
 	providerStart := time.Now()
 
@@ -1504,7 +2388,12 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	}
 
 	// 发送请求
-	client := &http.Client{Timeout: 300 * time.Second}
+	// 使用带网络级重试的 HTTP 客户端，处理瞬时网络错误
+	// 【修复】使用 context 超时而非直接修改共享客户端的 Timeout 字段，避免影响其他请求
+	client := newRetryHTTPClient(1, 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 300*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
 	resp, err := client.Do(req)
 	providerDuration := time.Since(providerStart).Seconds()
 
@@ -1567,7 +2456,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 // parseGeminiUsageMetadata 从 Gemini 非流式响应中提取用量，填充 request_log
 // 复用 mergeGeminiUsageMetadata 统一解析逻辑
-func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
+func parseGeminiUsageMetadata(body []byte, reqLog *RequestLog) {
 	if len(body) == 0 || reqLog == nil {
 		return
 	}
@@ -1659,6 +2548,10 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			fmt.Printf("[CustomCLI][WARN] 请求未指定模型名，无法执行模型智能降级\n")
 		}
 
+		// 【5分钟同源缓存】提取 user_id 用于缓存亲和性
+		userID := prs.extractUserID(c)
+		affinityKey := GenerateAffinityKey(userID, kind, requestedModel)
+
 		// 加载该 CLI 工具的 providers
 		providers, err := prs.providerService.LoadProviders(kind)
 		if err != nil {
@@ -1666,30 +2559,31 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			return
 		}
 
-		// 过滤可用的 providers
+		// Filter available providers
 		active := make([]Provider, 0, len(providers))
-		skippedCount := 0
+		reasons := skipReasons{} // track skip reasons
 		for _, provider := range providers {
 			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
+				reasons.disabled++
 				continue
 			}
 
 			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
-				fmt.Printf("[CustomCLI][WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
-				skippedCount++
+				fmt.Printf("[CustomCLI][WARN] Provider %s config validation failed, skipped: %v\n", provider.Name, errs)
+				reasons.configInvalid++
 				continue
 			}
 
 			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
-				fmt.Printf("[CustomCLI][INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
-				skippedCount++
+				fmt.Printf("[CustomCLI][INFO] Provider %s does not support model %s, skipped\n", provider.Name, requestedModel)
+				reasons.modelUnsupported++
 				continue
 			}
 
-			// 黑名单检查
+			// Blacklist check
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
-				fmt.Printf("[CustomCLI] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
-				skippedCount++
+				fmt.Printf("[CustomCLI] ⛔ Provider %s blacklisted until %v\n", provider.Name, until.Format("15:04:05"))
+				reasons.blacklisted++
 				continue
 			}
 
@@ -1697,21 +2591,20 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		}
 
 		if len(active) == 0 {
-			if requestedModel != "" {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedCount),
-				})
-			} else {
-				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("no providers available for %s", kind)})
-			}
+			errMsg := buildNoProviderError(requestedModel, kind, reasons)
+			c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
 			return
 		}
 
-		fmt.Printf("[CustomCLI][INFO] 找到 %d 个可用的 provider（已过滤 %d 个）：", len(active), skippedCount)
-		for _, p := range active {
-			fmt.Printf("%s ", p.Name)
+		// Build provider names list
+		providerNames := make([]string, len(active))
+		for i, p := range active {
+			providerNames[i] = p.Name
 		}
-		fmt.Println()
+		fmt.Printf("[CustomCLI][INFO] Providers: total=%d, active=%d, skipped=%d (disabled=%d, config=%d, model=%d, blacklist=%d): %s\n",
+			len(providers), len(active), reasons.total(),
+			reasons.disabled, reasons.configInvalid, reasons.modelUnsupported, reasons.blacklisted,
+			strings.Join(providerNames, ", "))
 
 		// 按 Level 分组
 		levelGroups := make(map[int][]Provider)
@@ -1733,6 +2626,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 		query := flattenQuery(c.Request.URL.Query())
 		clientHeaders := cloneHeaders(c.Request.Header)
+		// 注意：认证方式在每个 provider 转发时由 determineAuthMethod() 动态计算
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
@@ -1790,15 +2684,17 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							break
 						}
 
-						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 尝试 %d/%d | Model: %s\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
 						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+						// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+						authMethod := determineAuthMethod(&provider, c.Request.Header)
+						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 						duration := time.Since(startTime)
 
 						if ok {
-							fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+							fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 尝试 %d 次 | 耗时: %.2fs\n",
 								provider.Name, retryCount+1, duration.Seconds())
 							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
 								fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
@@ -1815,7 +2711,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						if err != nil {
 							errorMsg = err.Error()
 						}
-						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 尝试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
 
 						// 客户端中断不计入失败次数，直接返回
@@ -1874,6 +2770,29 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		var lastDuration time.Duration
 		totalAttempts := 0
 
+		// 【5分钟同源缓存】检查是否有缓存的 provider
+		cachedProviderName := ""
+		if prs.affinityManager != nil {
+			cachedProviderName = prs.affinityManager.Get(affinityKey)
+		}
+
+		// 【5分钟同源缓存】如果有缓存的 provider，优先尝试
+		if cachedProviderName != "" {
+			affinityResult := prs.tryAffinityProvider(
+				c, kind, affinityKey, cachedProviderName, active,
+				endpoint, query, clientHeaders, bodyBytes, isStream, requestedModel,
+			)
+			if affinityResult.Handled {
+				return // 成功或客户端中断，不再继续
+			}
+			if affinityResult.UsedProvider != "" {
+				totalAttempts++
+				lastError = affinityResult.LastError
+				lastProvider = affinityResult.UsedProvider
+				lastDuration = affinityResult.Duration
+			}
+		}
+
 		for _, level := range levels {
 			providersInLevel := levelGroups[level]
 
@@ -1885,6 +2804,12 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 			for i, provider := range providersInLevel {
+				// 【5分钟同源缓存】跳过已经尝试过的缓存 provider
+				if provider.Name == cachedProviderName {
+					fmt.Printf("[CustomCLI][INFO]   跳过已尝试的缓存 provider: %s\n", provider.Name)
+					continue
+				}
+
 				totalAttempts++
 
 				effectiveModel := provider.GetEffectiveModel(requestedModel)
@@ -1904,11 +2829,19 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
 				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
+				// 根据 Provider 配置决定认证方式（auto 时自动检测原始请求）
+				authMethod := determineAuthMethod(&provider, c.Request.Header)
+				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, authMethod)
 				duration := time.Since(startTime)
 
 				if ok {
 					fmt.Printf("[CustomCLI][INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
+
+					// 【5分钟同源缓存】设置缓存亲和性
+					if prs.affinityManager != nil {
+						prs.affinityManager.Set(affinityKey, provider.Name)
+					}
+
 					if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
 						fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
 					}
@@ -2057,27 +2990,27 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// 复制客户端请求头
-	for key, values := range c.Request.Header {
+	// 复制客户端请求头（使用标准库处理，过滤认证头）
+	clientHeaders := cloneHeaders(c.Request.Header)
+	for key, values := range clientHeaders {
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
 	}
 
-	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-	authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
-	switch authType {
-	case "x-api-key":
-		req.Header.Set("x-api-key", selectedProvider.APIKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-	case "", "bearer":
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+	// 检测原始请求的认证方式，转发时使用相同方式
+	authMethod := detectAuthMethod(c.Request.Header)
+	switch authMethod {
+	case AuthMethodXAPIKey:
+		// 原始请求使用 x-api-key，转发也使用 x-api-key
+		req.Header.Set("X-Api-Key", selectedProvider.APIKey)
+		// 删除可能存在的 Authorization 头
+		req.Header.Del("Authorization")
 	default:
-		headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
-		if headerName == "" || strings.EqualFold(headerName, "custom") {
-			headerName = "Authorization"
-		}
-		req.Header.Set(headerName, selectedProvider.APIKey)
+		// 原始请求使用 Authorization Bearer，转发也使用 Authorization
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+		// 删除可能存在的 x-api-key 头
+		req.Header.Del("X-Api-Key")
 	}
 
 	// 设置默认 Accept 头
@@ -2141,4 +3074,15 @@ func (prs *ProviderRelayService) customModelsHandler() gin.HandlerFunc {
 
 		_ = prs.forwardModelsRequest(c, kind, "CustomModels")
 	}
+}
+
+// decompressGzip 解压 gzip 压缩的数据
+// 用于请求详情缓存中解压 gzip 响应体，以便正确显示内容
+func decompressGzip(data []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
 }

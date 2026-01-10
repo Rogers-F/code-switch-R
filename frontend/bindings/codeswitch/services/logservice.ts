@@ -21,7 +21,7 @@ export function ListProviders(platform: string): $CancellablePromise<string[]> {
     });
 }
 
-export function ListRequestLogs(platform: string, provider: string, limit: number): $CancellablePromise<$models.ReqeustLog[]> {
+export function ListRequestLogs(platform: string, provider: string, limit: number): $CancellablePromise<$models.RequestLog[]> {
     return $Call.ByID(1199056012, platform, provider, limit).then(($result: any) => {
         return $$createType4($result);
     });
@@ -43,7 +43,7 @@ export function StatsSince(platform: string): $CancellablePromise<$models.LogSta
 const $$createType0 = $models.HeatmapStat.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = $models.ReqeustLog.createFrom;
+const $$createType3 = $models.RequestLog.createFrom;
 const $$createType4 = $Create.Array($$createType3);
 const $$createType5 = $models.ProviderDailyStat.createFrom;
 const $$createType6 = $Create.Array($$createType5);

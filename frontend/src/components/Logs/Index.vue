@@ -49,6 +49,14 @@
             </option>
           </select>
         </label>
+        <label class="filter-field record-mode-field">
+          <span>{{ t('components.logs.recording.label') }}</span>
+          <select v-model="recordMode" class="mac-select" @change="updateRecordMode(recordMode)">
+            <option value="off">{{ t('components.logs.recording.off') }}</option>
+            <option value="fail_only">{{ t('components.logs.recording.failedOnly') }}</option>
+            <option value="all">{{ t('components.logs.recording.all') }}</option>
+          </select>
+        </label>
       </div>
       <div class="filter-actions">
         <BaseButton type="submit" :disabled="loading">
@@ -69,10 +77,11 @@
             <th class="col-stream">{{ t('components.logs.table.stream') }}</th>
             <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
             <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
+            <th class="col-detail">{{ t('components.logs.detail.viewDetail') }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in pagedLogs" :key="item.id">
+          <tr v-for="item in pagedLogs" :key="item.id" :class="{ 'row-clickable': item.request_detail_id }" @click="item.request_detail_id && openDetailDrawer(item.request_detail_id)">
             <td>{{ formatTime(item.created_at) }}</td>
             <td>{{ item.platform || '—' }}</td>
             <td>{{ item.provider || '—' }}</td>
@@ -102,9 +111,26 @@
                 <span class="token-value">{{ formatNumber(item.cache_read_tokens) }}</span>
               </div>
             </td>
+            <td class="detail-cell">
+              <button
+                v-if="item.request_detail_id"
+                class="detail-btn"
+                @click.stop="openDetailDrawer(item.request_detail_id)"
+                :title="t('components.logs.detail.viewDetail')"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+              </button>
+              <span v-else class="no-detail">{{ t('components.logs.detail.noDetail') }}</span>
+            </td>
           </tr>
           <tr v-if="!pagedLogs.length && !loading">
-            <td colspan="8" class="empty">{{ t('components.logs.empty') }}</td>
+            <td colspan="9" class="empty">{{ t('components.logs.empty') }}</td>
           </tr>
         </tbody>
       </table>
@@ -144,6 +170,13 @@
         </ul>
       </div>
     </BaseModal>
+
+    <!-- 请求详情抽屉 -->
+    <RequestDetailDrawer
+      :open="detailDrawer.open"
+      :sequenceId="detailDrawer.sequenceId"
+      @close="closeDetailDrawer"
+    />
   </div>
 </template>
 
@@ -153,6 +186,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
+import RequestDetailDrawer from './RequestDetailDrawer.vue'
 import {
   fetchRequestLogs,
   fetchLogProviders,
@@ -164,6 +198,11 @@ import {
   type LogPlatform,
   type ProviderDailyStat,
 } from '../../services/logs'
+import {
+  setRecordMode,
+  getRecordMode,
+  type RecordMode,
+} from '../../services/requestDetail'
 import {
   Chart,
   CategoryScale,
@@ -201,6 +240,18 @@ const costDetailModal = reactive<{
   data: [],
 })
 
+// 请求详情抽屉状态
+const detailDrawer = reactive<{
+  open: boolean
+  sequenceId: number | null
+}>({
+  open: false,
+  sequenceId: null,
+})
+
+// 详情记录模式
+const recordMode = ref<RecordMode>('fail_only')
+
 // 打开金额明细弹窗
 const openCostDetailModal = async () => {
   costDetailModal.open = true
@@ -223,6 +274,38 @@ const openCostDetailModal = async () => {
 // 关闭金额明细弹窗
 const closeCostDetailModal = () => {
   costDetailModal.open = false
+}
+
+// 打开请求详情抽屉
+const openDetailDrawer = (sequenceId: number | null | undefined) => {
+  if (!sequenceId) return
+  detailDrawer.sequenceId = sequenceId
+  detailDrawer.open = true
+}
+
+// 关闭请求详情抽屉
+const closeDetailDrawer = () => {
+  detailDrawer.open = false
+}
+
+// 更新记录模式
+const updateRecordMode = async (mode: RecordMode) => {
+  try {
+    await setRecordMode(mode)
+    recordMode.value = mode
+  } catch (error) {
+    console.error('Failed to set record mode:', error)
+  }
+}
+
+// 加载记录模式
+const loadRecordMode = async () => {
+  try {
+    const mode = await getRecordMode()
+    recordMode.value = mode
+  } catch (error) {
+    console.error('Failed to get record mode:', error)
+  }
 }
 
 const parseLogDate = (value?: string) => {
@@ -574,7 +657,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadDashboard(), loadProviderOptions()])
+  await Promise.all([loadDashboard(), loadProviderOptions(), loadRecordMode()])
   startCountdown()
 })
 
@@ -718,5 +801,70 @@ html.dark .cost-detail-item__name {
   font-weight: 600;
   color: #f97316;
   font-variant-numeric: tabular-nums;
+}
+
+/* 记录模式选择器 */
+.record-mode-field {
+  min-width: 140px;
+}
+
+/* 详情列 */
+.col-detail {
+  width: 60px;
+  text-align: center;
+}
+
+.detail-cell {
+  text-align: center;
+}
+
+.detail-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: rgba(10, 132, 255, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: #0a84ff;
+}
+
+.detail-btn:hover {
+  background: rgba(10, 132, 255, 0.2);
+  transform: scale(1.05);
+}
+
+.detail-btn:active {
+  transform: scale(0.98);
+}
+
+html.dark .detail-btn {
+  background: rgba(10, 132, 255, 0.15);
+}
+
+html.dark .detail-btn:hover {
+  background: rgba(10, 132, 255, 0.25);
+}
+
+.no-detail {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+/* 可点击行 */
+.row-clickable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.row-clickable:hover {
+  background: rgba(10, 132, 255, 0.06);
+}
+
+html.dark .row-clickable:hover {
+  background: rgba(10, 132, 255, 0.12);
 }
 </style>

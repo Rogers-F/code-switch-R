@@ -26,7 +26,7 @@ func NewLogService() *LogService {
 	return &LogService{pricing: svc}
 }
 
-func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]ReqeustLog, error) {
+func (ls *LogService) ListRequestLogs(platform string, provider string, limit int) ([]RequestLog, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -48,9 +48,13 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 	if err != nil {
 		return nil, err
 	}
-	logs := make([]ReqeustLog, 0, len(records))
+
+	// 获取缓存中的详情ID集合，用于快速匹配
+	detailIndex := ls.buildDetailIndex()
+
+	logs := make([]RequestLog, 0, len(records))
 	for _, record := range records {
-		logEntry := ReqeustLog{
+		logEntry := RequestLog{
 			ID:                record.GetInt64("id"),
 			Platform:          record.GetString("platform"),
 			Model:             record.GetString("model"),
@@ -66,9 +70,90 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 			DurationSec:       record.GetFloat64("duration_sec"),
 		}
 		ls.decorateCost(&logEntry)
+
+		// 尝试匹配请求详情
+		if detailID := ls.matchDetailID(detailIndex, &logEntry); detailID > 0 {
+			logEntry.RequestDetailID = detailID
+		}
+
 		logs = append(logs, logEntry)
 	}
 	return logs, nil
+}
+
+// detailIndexEntry 用于快速匹配日志与详情
+type detailIndexEntry struct {
+	SequenceID int64
+	Platform   string
+	Provider   string
+	Model      string
+	HttpCode   int
+	Timestamp  time.Time
+}
+
+// buildDetailIndex 构建详情索引，用于快速匹配
+func (ls *LogService) buildDetailIndex() []detailIndexEntry {
+	if GlobalRequestDetailCache == nil {
+		return nil
+	}
+
+	// 获取缓存中所有可用的详情（使用缓存的实际容量）
+	stats := GlobalRequestDetailCache.Stats()
+	details := GlobalRequestDetailCache.GetRecent(stats.Count)
+	entries := make([]detailIndexEntry, 0, len(details))
+	for _, d := range details {
+		entries = append(entries, detailIndexEntry{
+			SequenceID: d.SequenceID,
+			Platform:   d.Platform,
+			Provider:   d.Provider,
+			Model:      d.Model,
+			HttpCode:   d.HttpCode,
+			Timestamp:  d.Timestamp,
+		})
+	}
+	return entries
+}
+
+// matchDetailID 根据日志条目匹配详情ID
+func (ls *LogService) matchDetailID(index []detailIndexEntry, logEntry *RequestLog) int64 {
+	if len(index) == 0 || logEntry == nil {
+		return 0
+	}
+
+	// 解析日志时间
+	logTime, hasTime := parseCreatedAt(xdb.Record{"created_at": logEntry.CreatedAt})
+	if !hasTime {
+		return 0
+	}
+
+	// 在索引中查找匹配的详情
+	// 匹配条件：平台、供应商、模型、HTTP状态码相同，且时间差在容许范围内
+	// 注意：数据库使用异步写入队列，写入时间可能晚于请求完成时间，因此需要较大的时间窗口
+	var bestMatch int64
+	var bestTimeDiff time.Duration = 60 * time.Second // 最大允许 60 秒误差
+
+	for _, entry := range index {
+		if entry.Platform != logEntry.Platform ||
+			entry.Provider != logEntry.Provider ||
+			entry.Model != logEntry.Model ||
+			entry.HttpCode != logEntry.HttpCode {
+			continue
+		}
+
+		// 时间差检查
+		timeDiff := logTime.Sub(entry.Timestamp)
+		if timeDiff < 0 {
+			timeDiff = -timeDiff
+		}
+
+		// 选择时间差最小的匹配（更精确）
+		if timeDiff <= bestTimeDiff {
+			bestTimeDiff = timeDiff
+			bestMatch = entry.SequenceID
+		}
+	}
+
+	return bestMatch
 }
 
 func (ls *LogService) ListProviders(platform string) ([]string, error) {
@@ -395,7 +480,7 @@ func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, 
 	return stats, nil
 }
 
-func (ls *LogService) decorateCost(logEntry *ReqeustLog) {
+func (ls *LogService) decorateCost(logEntry *RequestLog) {
 	if ls == nil || ls.pricing == nil || logEntry == nil {
 		return
 	}
@@ -526,17 +611,17 @@ type LogStats struct {
 }
 
 type ProviderDailyStat struct {
-	Provider          string  `json:"provider"`
-	TotalRequests     int64   `json:"total_requests"`
+	Provider           string  `json:"provider"`
+	TotalRequests      int64   `json:"total_requests"`
 	SuccessfulRequests int64   `json:"successful_requests"`
-	FailedRequests    int64   `json:"failed_requests"`
-	SuccessRate       float64 `json:"success_rate"`
-	InputTokens       int64   `json:"input_tokens"`
-	OutputTokens      int64   `json:"output_tokens"`
-	ReasoningTokens   int64   `json:"reasoning_tokens"`
-	CacheCreateTokens int64   `json:"cache_create_tokens"`
-	CacheReadTokens   int64   `json:"cache_read_tokens"`
-	CostTotal         float64 `json:"cost_total"`
+	FailedRequests     int64   `json:"failed_requests"`
+	SuccessRate        float64 `json:"success_rate"`
+	InputTokens        int64   `json:"input_tokens"`
+	OutputTokens       int64   `json:"output_tokens"`
+	ReasoningTokens    int64   `json:"reasoning_tokens"`
+	CacheCreateTokens  int64   `json:"cache_create_tokens"`
+	CacheReadTokens    int64   `json:"cache_read_tokens"`
+	CostTotal          float64 `json:"cost_total"`
 }
 
 type LogStatsSeries struct {

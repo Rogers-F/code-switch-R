@@ -36,6 +36,23 @@ export function GetBlacklistStatus(platform: string): $CancellablePromise<$model
 }
 
 /**
+ * GetRetryConfig 获取重试相关配置
+ * 用于 proxyHandler 实现同 Provider 重试机制
+ */
+export function GetRetryConfig(): $CancellablePromise<$models.RetryConfig | null> {
+    return $Call.ByID(240149871).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
+ * IsBlacklistEnabled 返回拉黑总开关状态（用于固定拉黑模式判断）
+ */
+export function IsBlacklistEnabled(): $CancellablePromise<boolean> {
+    return $Call.ByID(744595243);
+}
+
+/**
  * IsBlacklisted 检查 provider 是否在黑名单中
  */
 export function IsBlacklisted(platform: string, providerName: string): $CancellablePromise<[boolean, time$0.Time | null]> {
@@ -85,6 +102,20 @@ export function RecordSuccess(platform: string, providerName: string): $Cancella
     return $Call.ByID(555083369, platform, providerName);
 }
 
+/**
+ * ShouldUseFixedMode 返回是否应该使用固定拉黑模式（禁用自动降级）
+ * 满足以下所有条件时返回 true：
+ * 1. 黑名单总开关已启用
+ * 2. 且满足以下任一：
+ *    - 等级拉黑开启
+ *    - 等级拉黑关闭但 fallbackMode="fixed"
+ */
+export function ShouldUseFixedMode(): $CancellablePromise<boolean> {
+    return $Call.ByID(4011954676);
+}
+
 // Private type creation functions
 const $$createType0 = $models.BlacklistStatus.createFrom;
 const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = $models.RetryConfig.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);

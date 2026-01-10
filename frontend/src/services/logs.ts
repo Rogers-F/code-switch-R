@@ -24,6 +24,7 @@ export type RequestLog = {
   ephemeral_5m_cost?: number
   ephemeral_1h_cost?: number
   has_pricing?: boolean
+  request_detail_id?: number  // 关联的请求详情 ID
 }
 
 type RequestLogQuery = {

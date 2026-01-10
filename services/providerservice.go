@@ -64,6 +64,22 @@ type Provider struct {
 	// 空值时使用平台默认（claude: x-api-key, codex: bearer）
 	ConnectivityAuthType string `json:"connectivityAuthType,omitempty"`
 
+	// ========== Header 配置（高级设置 v0.6.0） ==========
+	// 支持 Provider 级别的 Header 自定义，用于适配非标准 API 或添加自定义 Header
+
+	// ExtraHeaders - 额外添加的 Headers（仅当原请求中不存在该 key 时才添加）
+	// 用例：添加 Provider 要求的自定义 Header（如 X-Custom-Client）
+	ExtraHeaders map[string]string `json:"extraHeaders,omitempty"`
+
+	// OverrideHeaders - 强制覆盖的 Headers（无论原请求中是否存在都会设置）
+	// 用例：强制设置 Content-Type 或覆盖特定 Header
+	// 注意：认证头（Authorization, X-Api-Key）不应在此配置，会被 APIKey 设置覆盖
+	OverrideHeaders map[string]string `json:"overrideHeaders,omitempty"`
+
+	// StripHeaders - 需要移除的 Headers（在转发前删除这些 Header）
+	// 用例：移除某些 Provider 不支持或会导致问题的 Header（如 X-Forwarded-For）
+	StripHeaders []string `json:"stripHeaders,omitempty"`
+
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段
 

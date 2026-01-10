@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -27,10 +28,26 @@ func setupRelayForTest(t *testing.T) (*ProviderService, *ProviderRelayService) {
 	return providerService, relayService
 }
 
+// cleanupProviderFile 清理测试生成的 provider 配置文件
+// setupRelayForTest 使用临时 HOME 隔离环境，此处清理属于双保险。
+func cleanupProviderFile(t *testing.T, kind string) {
+	t.Helper()
+	p, err := providerFilePath(kind)
+	if err != nil || p == "" {
+		return
+	}
+	_ = os.Remove(p)
+}
+
 // TestModelsHandler 测试 /v1/models 端点处理器
 func TestModelsHandler(t *testing.T) {
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
+
+	// 清理测试数据，确保测试隔离
+	t.Cleanup(func() {
+		cleanupProviderFile(t, "claude")
+	})
 
 	// 创建模拟的上游服务器
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,15 +75,15 @@ func TestModelsHandler(t *testing.T) {
 			"object": "list",
 			"data": []map[string]interface{}{
 				{
-					"id":      "claude-sonnet-4",
-					"object":  "model",
-					"created": 1234567890,
+					"id":       "claude-sonnet-4",
+					"object":   "model",
+					"created":  1234567890,
 					"owned_by": "anthropic",
 				},
 				{
-					"id":      "claude-opus-4",
-					"object":  "model",
-					"created": 1234567890,
+					"id":       "claude-opus-4",
+					"object":   "model",
+					"created":  1234567890,
 					"owned_by": "anthropic",
 				},
 			},
@@ -138,6 +155,11 @@ func TestModelsHandler(t *testing.T) {
 func TestCustomModelsHandler(t *testing.T) {
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
+
+	// 清理测试数据，确保测试隔离
+	t.Cleanup(func() {
+		cleanupProviderFile(t, "custom:mytool")
+	})
 
 	// 创建模拟的上游服务器
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

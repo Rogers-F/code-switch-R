@@ -25,11 +25,25 @@ export function GetConfig(platform: string): $CancellablePromise<$models.CLIConf
 }
 
 /**
+ * GetConfigSnapshots 获取指定平台的配置快照，用于前端展示"当前(磁盘)"与"预览(激活后)"对比。
+ * 这是纯 dry-run 接口：不会对任何文件进行写入。
+ * 
+ * 预览规则：
+ *   - 若传入 apiUrl/apiKey 任一非空：模拟 ApplySingleProvider() 的写入结果（直连模式）
+ *   - 若二者都为空：模拟 EnableProxy() 的写入结果（代理模式）
+ */
+export function GetConfigSnapshots(platform: string, apiUrl: string, apiKey: string): $CancellablePromise<$models.CLIConfigSnapshots | null> {
+    return $Call.ByID(3022973011, platform, apiUrl, apiKey).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
  * GetLockedFields 获取指定平台的锁定字段列表
  */
 export function GetLockedFields(platform: string): $CancellablePromise<string[]> {
     return $Call.ByID(1393452899, platform).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType4($result);
     });
 }
 
@@ -38,7 +52,7 @@ export function GetLockedFields(platform: string): $CancellablePromise<string[]>
  */
 export function GetTemplate(platform: string): $CancellablePromise<$models.CLITemplate | null> {
     return $Call.ByID(2146148202, platform).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType6($result);
     });
 }
 
@@ -57,6 +71,14 @@ export function SaveConfig(platform: string, editable: { [_: string]: any }): $C
 }
 
 /**
+ * SaveConfigFileContent 保存指定配置文件内容（预览区高级编辑）
+ * 为避免越权写文件，只允许写入本服务管理的固定路径文件
+ */
+export function SaveConfigFileContent(platform: string, filePath: string, content: string): $CancellablePromise<void> {
+    return $Call.ByID(4072402714, platform, filePath, content);
+}
+
+/**
  * SetTemplate 设置指定平台的全局模板
  */
 export function SetTemplate(platform: string, template: { [_: string]: any }, isGlobalDefault: boolean): $CancellablePromise<void> {
@@ -66,6 +88,8 @@ export function SetTemplate(platform: string, template: { [_: string]: any }, is
 // Private type creation functions
 const $$createType0 = $models.CLIConfig.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = $models.CLITemplate.createFrom;
-const $$createType4 = $Create.Nullable($$createType3);
+const $$createType2 = $models.CLIConfigSnapshots.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = $models.CLITemplate.createFrom;
+const $$createType6 = $Create.Nullable($$createType5);

@@ -9,12 +9,28 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+/**
+ * ApplySingleProvider 直连应用单一供应商（仅在代理关闭时可用）
+ * 将指定 provider 的配置直接写入 Codex 的 config.toml 和 auth.json
+ */
+export function ApplySingleProvider(providerID: number): $CancellablePromise<void> {
+    return $Call.ByID(2208729147, providerID);
+}
+
 export function DisableProxy(): $CancellablePromise<void> {
     return $Call.ByID(3815925570);
 }
 
 export function EnableProxy(): $CancellablePromise<void> {
     return $Call.ByID(922948163);
+}
+
+/**
+ * GetDirectAppliedProviderID 返回当前直连应用的 Provider ID
+ * 通过读取 CLI 配置文件反推当前使用的 provider
+ */
+export function GetDirectAppliedProviderID(): $CancellablePromise<number | null> {
+    return $Call.ByID(853555268);
 }
 
 export function ProxyStatus(): $CancellablePromise<$models.ClaudeProxyStatus> {

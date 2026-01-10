@@ -209,6 +209,33 @@
           "wildcard": "Wildcard mapping, auto expands claude-sonnet-4 → anthropic/claude-sonnet-4",
           "prefix": "Prefix mapping"
         }
+      },
+      "headerConfig": {
+        "title": "Advanced Header Settings",
+        "add": "Add",
+        "remove": "Remove",
+        "keyPlaceholder": "Header name",
+        "valuePlaceholder": "Header value",
+        "extraHeaders": {
+          "label": "Extra Headers",
+          "tooltip": "Add headers only if they don't already exist in the original request"
+        },
+        "overrideHeaders": {
+          "label": "Override Headers",
+          "tooltip": "Force overwrite headers regardless of original request values",
+          "authWarning": "Authentication headers (Authorization, X-Api-Key, X-Goog-Api-Key) will be overwritten by the provider's API key settings"
+        },
+        "stripHeaders": {
+          "label": "Strip Headers",
+          "tooltip": "Remove these headers before forwarding the request",
+          "placeholder": "Header name to remove"
+        },
+        "help": {
+          "title": "Header Priority:",
+          "extra": "Added only when not present in original request",
+          "override": "Always applied, overwrites any existing value",
+          "strip": "Removed before forwarding to provider"
+        }
       }
     },
     "main": {
@@ -354,8 +381,7 @@
           "availabilityTestEndpoint": "e.g., /v1/messages",
           "connectivityTestModel": "Select or use default",
           "customModel": "Or enter custom model",
-          "customEndpoint": "Or enter custom endpoint",
-          "customAuthHeader": "Custom header name (e.g. Authorization, X-Custom-Key)"
+          "customEndpoint": "Or enter custom endpoint"
         },
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
@@ -369,7 +395,7 @@
           "connectivityCheck": "When enabled, connectivity to this provider will be tested periodically; enabling this may consume a small amount of tokens",
           "connectivityTestModel": "Select a model for connectivity testing, or leave empty to use platform default",
           "connectivityTestEndpoint": "Select or enter API endpoint path",
-          "connectivityAuthType": "Default is Bearer. Use X-API-Key for Anthropic-style APIs. Enter custom header name in the text field if needed."
+          "connectivityAuthType": "Auto (default): Automatically detect and preserve the original request's auth method. Select Bearer or X-API-Key to force a specific method. This applies to both request forwarding and connectivity tests."
         },
         "actions": {
           "cancel": "Cancel",
@@ -511,6 +537,31 @@
       "costDetail": {
         "title": "Today's Cost Breakdown",
         "empty": "No cost records today"
+      },
+      "detail": {
+        "title": "Request Details",
+        "notFound": "Details not found",
+        "notFoundHint": "Details for this request may have expired or were not recorded",
+        "basicInfo": "Basic Info",
+        "headers": "Request Headers",
+        "responseHeaders": "Response Headers",
+        "noHeaders": "No header information",
+        "requestBody": "Request Body",
+        "responseBody": "Response Body",
+        "requestUrl": "Request URL",
+        "copy": "Copy",
+        "format": "Format",
+        "copied": "Copied to clipboard",
+        "copyFailed": "Copy failed",
+        "truncated": "Content truncated (original size: {size})",
+        "viewDetail": "Details",
+        "noDetail": "—"
+      },
+      "recording": {
+        "label": "Detail Recording",
+        "off": "Off",
+        "failedOnly": "Failed Only",
+        "all": "All"
       }
     },
     "general": {

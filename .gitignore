@@ -9,3 +9,8 @@ bin/
 build/
 CLAUDE.md
 .gocache/
+*.exe
+.claude
+.cursor
+.cursor/
+*gitignore_*

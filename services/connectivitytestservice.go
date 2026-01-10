@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -133,21 +134,14 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
 	if provider.APIKey != "" {
-		// authType 已在上方获取
-		authTypeLower := strings.ToLower(authType)
-		switch authTypeLower {
+		// authType 已通过 getEffectiveAuthType 标准化为小写（auto/空→平台默认，未知→bearer+警告）
+		switch authType {
 		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
-			req.Header.Set("anthropic-version", "2023-06-01")
-		case "bearer":
-			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+			req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
 		default:
-			// 自定义 Header 名
-			headerName := strings.TrimSpace(authType)
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
-			}
-			req.Header.Set(headerName, provider.APIKey)
+			// bearer 或其他（getEffectiveAuthType 已处理未知值并记录警告）
+			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		}
 	}
 
@@ -216,16 +210,24 @@ func (cts *ConnectivityTestService) getEffectiveEndpoint(provider *Provider, pla
 }
 
 // getEffectiveAuthType 获取有效认证方式（含平台默认值）
-// 返回值保留原始大小写，用于自定义 Header 名
+// auto 或空值时返回平台默认，与 providerrelay.go 保持一致
+// 始终返回小写字符串以简化调用方逻辑
 func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, platform string) string {
 	authType := strings.TrimSpace(provider.ConnectivityAuthType)
-	if authType != "" {
-		return authType
+	authTypeLower := strings.ToLower(authType)
+	// auto 或空值时使用平台默认
+	if authTypeLower == "auto" || authType == "" {
+		if strings.ToLower(platform) == "claude" {
+			return "x-api-key"
+		}
+		return "bearer"
 	}
-	// 平台默认认证方式
-	if strings.ToLower(platform) == "claude" {
-		return "x-api-key"
+	// 已知值直接返回小写
+	if authTypeLower == "bearer" || authTypeLower == "x-api-key" {
+		return authTypeLower
 	}
+	// 未知值回退到 bearer，记录警告以便排查
+	slog.Warn("Unknown auth type, falling back to Bearer", "authType", authType, "platform", platform)
 	return "bearer"
 }
 

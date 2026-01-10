@@ -31,6 +31,14 @@ export type AutomationCard = {
     timeout?: number        // 超时时间（毫秒）
   }
 
+  // === Header 配置（v0.6.0+） ===
+  // 额外 Headers：仅当原请求中不存在该 key 时才添加
+  extraHeaders?: Record<string, string>
+  // 覆盖 Headers：强制覆盖，无论原请求中是否存在
+  overrideHeaders?: Record<string, string>
+  // 移除 Headers：在转发前删除这些 Header
+  stripHeaders?: string[]
+
   // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===
   /** @deprecated 已迁移到 availabilityMonitorEnabled */
   connectivityCheck?: boolean
