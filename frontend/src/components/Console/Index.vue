@@ -1,13 +1,13 @@
 <template>
   <PageLayout
-    :eyebrow="t('components.logs.eyebrow')"
-    :title="t('components.logs.title')"
+    :eyebrow="t('components.console.eyebrow')"
+    :title="t('components.console.title')"
     :sticky="true"
     :showBackButton="true"
   >
     <template #actions>
       <div class="actions-group">
-        <button class="secondary-btn" @click="clearLogs">清空日志</button>
+        <BaseButton variant="outline" size="sm" type="button" @click="clearLogs">清空日志</BaseButton>
         <label class="auto-scroll-toggle">
           <input type="checkbox" v-model="autoScroll" />
           <span>自动滚动</span>
@@ -42,6 +42,7 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
+import BaseButton from '../common/BaseButton.vue'
 
 const { t } = useI18n()
 

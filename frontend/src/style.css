@@ -8,8 +8,10 @@
     system-ui, sans-serif;
   --mac-surface: #ffffff;
   --mac-surface-strong: #f5f5f7;
+  --mac-surface-hover: rgba(15, 23, 42, 0.06);
   --mac-border: rgba(15, 23, 42, 0.12);
   --mac-divider: rgba(15, 23, 42, 0.12);
+  --mac-bg: var(--mac-surface-strong);
   --mac-sidebar: #f2f3f5;
   --mac-sidebar-border: rgba(15, 23, 42, 0.08);
   --mac-text: #1d1d1f;
@@ -35,12 +37,16 @@
   --contrib-tooltip-heading: #0f172a;
   --contrib-tooltip-text: rgba(15, 23, 42, 0.7);
   --contrib-tooltip-value: #0f172a;
+  --page-max-width: 1280px;
+  --page-padding-x: 48px;
+  --page-padding-y: 24px;
 }
 
 html.dark {
   color-scheme: dark;
   --mac-surface: #1c1e24;
   --mac-surface-strong: #21232c;
+  --mac-surface-hover: rgba(255, 255, 255, 0.12);
   --mac-border: rgba(255, 255, 255, 0.06);
   --mac-divider: rgba(255, 255, 255, 0.08);
   --mac-sidebar: #181a20;
@@ -646,88 +652,163 @@ html.dark .mac-sidebar-item:hover {
 
 /* general-shell inherits padding via .general-page */
 
-.github-icon.github-upgrade {
-  color: #0ea5e9;
-  animation: github-upgrade 1.5s ease-in-out infinite;
-  position: relative;
+/* ===== PageLayout（统一页面 Header/内容容器） ===== */
+.page-layout {
+  min-height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-@keyframes github-upgrade {
-  0% {
-    transform: translateY(0);
-    box-shadow: 0 0 0 rgba(14, 165, 233, 0.4);
-  }
-  50% {
-    transform: translateY(-2px);
-    box-shadow: 0 0 12px rgba(14, 165, 233, 0.65);
-  }
-  100% {
-    transform: translateY(0);
-    box-shadow: 0 0 0 rgba(14, 165, 233, 0.4);
-  }
+.page-header {
+  width: 100%;
+  border-bottom: 1px solid var(--mac-border);
+  background: color-mix(in srgb, var(--mac-surface) 72%, transparent);
+  backdrop-filter: blur(10px);
 }
 
-/* 更新徽章基础样式 */
-.update-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  background: #0ea5e9; /* 蓝色 - "New" */
-  color: white;
-  font-size: 0.65rem;
-  font-weight: 600;
-  padding: 2px 6px;
+.page-header--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.page-header-content {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 18px var(--page-padding-x) 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  box-sizing: border-box;
+}
+
+.page-title-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.page-title-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.back-button {
+  border: none;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--mac-text);
+  width: 32px;
+  height: 32px;
   border-radius: 10px;
-  line-height: 1;
-  pointer-events: none;
-  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.4);
-  z-index: 10;
-}
-
-/* 下载中徽章 - 黄色 */
-.update-badge.downloading {
-  background: #f59e0b; /* 黄色 */
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
-}
-
-/* Ready 徽章 - 绿色脉冲 */
-.update-badge.pulse {
-  background: #10b981; /* 绿色 */
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
-  animation: badge-pulse 2s ease-in-out infinite;
-}
-
-/* 更新就绪时的 GitHub 图标颜色 */
-.github-icon.update-ready svg {
-  color: #10b981;
-}
-
-/* 徽章脉冲动画 */
-@keyframes badge-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
-  }
-  50% {
-    transform: scale(1.1);
-    box-shadow: 0 2px 16px rgba(16, 185, 129, 0.8);
-  }
-}
-
-/* 更新检查按钮样式 - 仅用于设置页面，不影响其他页面的按钮 */
-.general-page .action-btn,
-.general-page .primary-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 16px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.back-button svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+html.dark .back-button {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.back-button:hover {
+  background: rgba(15, 23, 42, 0.15);
+}
+
+html.dark .back-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.page-eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mac-text-secondary);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--mac-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.page-breadcrumbs {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 0 var(--page-padding-x) 12px;
+  box-sizing: border-box;
+}
+
+.page-content {
+  width: 100%;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: var(--page-padding-y) var(--page-padding-x) 48px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.page-lead {
+  margin: 0;
+  max-width: 720px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--mac-text-secondary);
+}
+
+@media (max-width: 960px) {
+  .page-header-content,
+  .page-breadcrumbs,
+  .page-content {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
+/* Button 基础（legacy class，逐步迁移到 BaseButton） */
+.action-btn,
+.primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
   min-height: 36px;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  font-weight: 500;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
   line-height: 1;
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -744,12 +825,13 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .primary-btn {
-  background: #0ea5e9;
+  background: var(--mac-accent);
   color: white;
+  box-shadow: 0 6px 15px rgba(10, 132, 255, 0.35);
 }
 
 .primary-btn:hover:not(:disabled) {
-  background: #0284c7;
+  background: color-mix(in srgb, var(--mac-accent) 85%, #000);
 }
 
 .action-btn:disabled,
@@ -1355,6 +1437,21 @@ html.dark .card-meta {
   display: block;
 }
 
+.ghost-icon.sm {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.ghost-icon.sm svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ghost-icon.danger {
+  color: #ff3b30;
+}
+
 html.dark .ghost-icon {
   background: rgba(255, 255, 255, 0.1);
 }
@@ -1395,11 +1492,14 @@ html.dark .ghost-icon:hover {
   transform: translateX(-50%) translateY(-2px);
 }
 
+.page-header .ghost-icon[data-tooltip]::after,
 .global-actions .ghost-icon[data-tooltip]::after {
   bottom: auto;
   top: calc(100% + 6px);
 }
 
+.page-header .ghost-icon[data-tooltip]:hover::after,
+.page-header .ghost-icon[data-tooltip]:focus-visible::after,
 .global-actions .ghost-icon[data-tooltip]:hover::after,
 .global-actions .ghost-icon[data-tooltip]:focus-visible::after {
   transform: translateX(-50%) translateY(2px);
@@ -1611,7 +1711,7 @@ html.dark .help-icon[data-tooltip]::after {
 
 .btn {
   border: none;
-  border-radius: 999px;
+  border-radius: 12px;
   padding: 10px 22px;
   font-weight: 600;
   font-size: 0.95rem;
@@ -1623,6 +1723,29 @@ html.dark .help-icon[data-tooltip]::after {
   transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
   margin: 0;
   min-width: 88px;
+}
+
+.btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mac-accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn-sm {
+  padding: 7px 14px;
+  font-size: 0.85rem;
+  min-width: 0;
+  border-radius: 10px;
+}
+
+.btn-lg {
+  padding: 12px 26px;
+  font-size: 1rem;
 }
 
 .btn-outline {
@@ -1662,12 +1785,13 @@ html.dark .btn-outline:focus-visible {
 /* 次要按钮样式（用于控制台等页面） */
 .secondary-btn {
   border: 1px solid var(--mac-border);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 8px 16px;
   background: var(--mac-surface-strong);
   color: var(--mac-text);
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-height: 36px;
   cursor: pointer;
   transition: all 0.2s ease;
 }

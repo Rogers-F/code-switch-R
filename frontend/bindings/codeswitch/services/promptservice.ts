@@ -52,6 +52,14 @@ export function ImportFromFile(platform: string): $CancellablePromise<string> {
 }
 
 /**
+ * ReloadFromDisk 重新从磁盘加载 prompts.json
+ * 用于导入配置后刷新内存状态，避免 UI 仍显示旧数据。
+ */
+export function ReloadFromDisk(): $CancellablePromise<void> {
+    return $Call.ByID(354549776);
+}
+
+/**
  * Start Wails生命周期方法
  */
 export function Start(): $CancellablePromise<void> {

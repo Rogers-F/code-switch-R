@@ -53,7 +53,9 @@
     "env": "环境",
     "logs": "日志",
     "console": "控制台",
-    "settings": "设置"
+    "settings": "设置",
+    "updateFound": "发现新版本：{version}",
+    "updateOpenReleases": "打开 GitHub Releases"
   },
   "availability": {
     "title": "可用性监控",
@@ -478,6 +480,10 @@
         "loadHeatmapFailed": "加载使用热力图失败",
         "loadProvidersFailed": "加载 {tab} 标签页的供应商失败"
       }
+    },
+    "console": {
+      "eyebrow": "调试",
+      "title": "控制台"
     },
     "logs": {
       "eyebrow": "请求追踪",

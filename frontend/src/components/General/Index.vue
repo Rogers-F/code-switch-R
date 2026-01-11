@@ -1,6 +1,6 @@
 <template>
   <PageLayout
-    :eyebrow="$t('components.general.title.application')"
+    :title="$t('sidebar.settings')"
   >
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.application') }}</h2>
@@ -234,15 +234,17 @@
             </select>
           </ListItem>
           <ListItem :label="$t('components.general.label.saveBlacklist')">
-            <button
-              @click="saveBlacklistSettings"
+            <BaseButton
+              size="sm"
+              type="button"
               :disabled="blacklistLoading || blacklistSaving"
-              class="primary-btn">
+              @click="saveBlacklistSettings"
+            >
               {{ blacklistSaving ? $t('components.general.label.saving') : $t('components.general.label.save') }}
-            </button>
+            </BaseButton>
           </ListItem>
         </div>
-      </section>
+	      </section>
 
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.configBackup') }}</h2>
@@ -282,12 +284,15 @@
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.backup.exportAction')">
-            <button
-              @click="handleExportBackup"
+            <BaseButton
+              variant="outline"
+              size="sm"
+              type="button"
               :disabled="exportingBackup || !backupExportPath.trim()"
-              class="action-btn">
+              @click="handleExportBackup"
+            >
               {{ exportingBackup ? $t('components.general.backup.exporting') : $t('components.general.backup.exportBtn') }}
-            </button>
+            </BaseButton>
           </ListItem>
         </div>
 
@@ -327,12 +332,15 @@
             </div>
           </ListItem>
           <ListItem :label="$t('components.general.backup.importAction')">
-            <button
-              @click="handleImportBackup"
+            <BaseButton
+              variant="outline"
+              size="sm"
+              type="button"
               :disabled="importingBackup || !backupImportPath.trim()"
-              class="action-btn">
+              @click="handleImportBackup"
+            >
               {{ importingBackup ? $t('components.general.backup.importing') : $t('components.general.backup.importBtn') }}
-            </button>
+            </BaseButton>
           </ListItem>
         </div>
       </section>
@@ -366,12 +374,15 @@
             </span>
           </ListItem>
           <ListItem :label="$t('components.general.import.action')">
-            <button
-              @click="handleImport"
+            <BaseButton
+              variant="outline"
+              size="sm"
+              type="button"
               :disabled="importing || !importPath.trim()"
-              class="action-btn">
+              @click="handleImport"
+            >
               {{ importing ? $t('components.general.import.importing') : $t('components.general.import.importBtn') }}
-            </button>
+            </BaseButton>
           </ListItem>
         </div>
       </section>
@@ -421,22 +432,23 @@
           </ListItem>
 
           <ListItem :label="$t('components.general.label.checkNow')">
-            <button
-              @click="checkUpdateManually"
+            <BaseButton
+              variant="outline"
+              size="sm"
+              type="button"
               :disabled="checking"
-              class="action-btn">
+              @click="checkUpdateManually"
+            >
               {{ checking ? $t('components.general.update.checking') : $t('components.general.update.checkNow') }}
-            </button>
+            </BaseButton>
           </ListItem>
 
           <ListItem
             v-if="updateState?.update_ready"
             :label="$t('components.general.label.manualUpdate')">
-            <button
-              @click="installAndRestart"
-              class="primary-btn">
+            <BaseButton size="sm" type="button" @click="installAndRestart">
               {{ $t('components.general.update.installAndRestart') }}
-            </button>
+            </BaseButton>
           </ListItem>
         </div>
       </section>
@@ -448,6 +460,7 @@
 	import { useRouter } from 'vue-router'
 	import { Call } from '@wailsio/runtime'
 	import PageLayout from '../common/PageLayout.vue'
+	import BaseButton from '../common/BaseButton.vue'
 	import ListItem from '../Setting/ListRow.vue'
 	import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 	import ThemeSetting from '../Setting/ThemeSetting.vue'

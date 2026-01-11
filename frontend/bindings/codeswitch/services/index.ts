@@ -6,6 +6,7 @@ import * as BlacklistService from "./blacklistservice.js";
 import * as ClaudeSettingsService from "./claudesettingsservice.js";
 import * as CliConfigService from "./cliconfigservice.js";
 import * as CodexSettingsService from "./codexsettingsservice.js";
+import * as ConfigBackupService from "./configbackupservice.js";
 import * as ConnectivityTestService from "./connectivitytestservice.js";
 import * as ConsoleService from "./consoleservice.js";
 import * as CustomCliService from "./customcliservice.js";
@@ -32,6 +33,7 @@ export {
     ClaudeSettingsService,
     CliConfigService,
     CodexSettingsService,
+    ConfigBackupService,
     ConnectivityTestService,
     ConsoleService,
     CustomCliService,
@@ -68,6 +70,12 @@ export {
     CLITemplate,
     CacheStats,
     ClaudeProxyStatus,
+    ConfigBackupExportFile,
+    ConfigBackupExportOptions,
+    ConfigBackupExportResult,
+    ConfigBackupImportOptions,
+    ConfigBackupImportResult,
+    ConfigBackupManifest,
     ConfigFile,
     ConfigImportResult,
     ConfigImportStatus,
@@ -78,6 +86,7 @@ export {
     CustomCliTool,
     DeepLinkImportRequest,
     EndpointLatency,
+    EndpointRecord,
     EnvConflict,
     GeminiAuthType,
     GeminiPreset,

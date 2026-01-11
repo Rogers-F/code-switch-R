@@ -15,9 +15,9 @@
               <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
-          <div style="display: inline-flex;">
+          <div class="page-title-text">
             <p v-if="eyebrow" class="page-eyebrow">{{ eyebrow }}</p>
-            <p v-if="title" class="page-title">-&emsp;{{ title }}</p>
+            <h1 v-if="title" class="page-title">{{ title }}</h1>
           </div>
         </div>
 
@@ -42,7 +42,6 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { useI18n } from 'vue-i18n'
 
 // 定义组件名称，使其可以被其他组件正确导入
 defineOptions({
@@ -63,7 +62,6 @@ const props = withDefaults(defineProps<PageLayoutProps>(), {
 })
 
 const router = useRouter()
-const { t } = useI18n()
 
 const goBack = () => {
   router.go(-1)

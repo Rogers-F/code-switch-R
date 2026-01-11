@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Browser } from '@wailsio/runtime'
 import { fetchCurrentVersion } from '../services/version'
+import { getUpdateState, type UpdateState } from '../services/update'
 
 const router = useRouter()
 const route = useRoute()
@@ -10,11 +12,64 @@ const { t } = useI18n()
 
 // 动态版本号（从后端获取）
 const appVersion = ref('...')
+const updateState = ref<UpdateState | null>(null)
+let updateTimer: number | undefined
+const releasePageUrl = 'https://github.com/SimonUTD/code-switch-R/releases'
+
+const normalizeVersion = (value: string) => value.replace(/^v/i, '').trim()
+
+const compareVersions = (current: string, remote: string) => {
+  const curParts = normalizeVersion(current).split('.').map((part) => parseInt(part, 10) || 0)
+  const remoteParts = normalizeVersion(remote).split('.').map((part) => parseInt(part, 10) || 0)
+  const maxLen = Math.max(curParts.length, remoteParts.length)
+  for (let i = 0; i < maxLen; i++) {
+    const cur = curParts[i] ?? 0
+    const rem = remoteParts[i] ?? 0
+    if (cur === rem) continue
+    return cur < rem ? -1 : 1
+  }
+  return 0
+}
+
+const latestKnownVersion = computed(() => updateState.value?.latest_known_version?.trim() ?? '')
+const hasNewVersion = computed(() => {
+  if (!latestKnownVersion.value) return false
+  if (!appVersion.value || appVersion.value === '...') return false
+  if (appVersion.value === 'v?.?.?') return false
+  return compareVersions(appVersion.value, latestKnownVersion.value) < 0
+})
+
+const openReleases = () => {
+  Browser.OpenURL(releasePageUrl).catch(() => {
+    console.error('failed to open release page')
+  })
+}
+
+const refreshUpdateState = async () => {
+  try {
+    updateState.value = await getUpdateState()
+  } catch (error) {
+    console.error('failed to load update state', error)
+  }
+}
+
 onMounted(async () => {
   try {
     appVersion.value = await fetchCurrentVersion()
   } catch {
     appVersion.value = 'v?.?.?'
+  }
+
+  await refreshUpdateState()
+  updateTimer = window.setInterval(() => {
+    void refreshUpdateState()
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (updateTimer) {
+    window.clearInterval(updateTimer)
+    updateTimer = undefined
   }
 })
 
@@ -74,14 +129,14 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: '/', icon: 'home', labelKey: 'sidebar.home' },
+  { path: '/console', icon: 'terminal', labelKey: 'sidebar.console' },
+  { path: '/logs', icon: 'bar-chart', labelKey: 'sidebar.logs' },
   { path: '/prompts', icon: 'file-text', labelKey: 'sidebar.prompts', isNew: true },
   { path: '/mcp', icon: 'plug', labelKey: 'sidebar.mcp' },
   { path: '/skill', icon: 'tool', labelKey: 'sidebar.skill' },
   { path: '/availability', icon: 'activity', labelKey: 'sidebar.availability', isNew: true },
   { path: '/speedtest', icon: 'zap', labelKey: 'sidebar.speedtest', isNew: true },
   { path: '/env', icon: 'search', labelKey: 'sidebar.env', isNew: true },
-  { path: '/logs', icon: 'bar-chart', labelKey: 'sidebar.logs' },
-  { path: '/console', icon: 'terminal', labelKey: 'sidebar.console' },
   { path: '/settings', icon: 'settings', labelKey: 'sidebar.settings' },
 ]
 
@@ -182,7 +237,16 @@ const navigate = (path: string) => {
     </div>
 
     <div class="sidebar-footer" v-if="!isCollapsed">
-      <span class="version">{{ appVersion }}</span>
+      <button
+        v-if="hasNewVersion"
+        type="button"
+        class="version version-link"
+        :title="t('sidebar.updateOpenReleases')"
+        @click="openReleases"
+      >
+        {{ t('sidebar.updateFound', { version: latestKnownVersion }) }}
+      </button>
+      <span v-else class="version">{{ appVersion }}</span>
     </div>
   </nav>
 </template>
@@ -378,5 +442,21 @@ html.dark .nav-item:hover {
   font-size: 0.75rem;
   color: var(--mac-text-secondary);
   opacity: 0.6;
+}
+
+.version-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--mac-accent);
+  opacity: 0.9;
+}
+
+.version-link:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 </style>

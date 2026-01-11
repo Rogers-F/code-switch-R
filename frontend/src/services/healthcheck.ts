@@ -162,15 +162,15 @@ export function formatStatus(status: string): string {
 export function getStatusColor(status: string): string {
   switch (status) {
     case HealthStatus.OPERATIONAL:
-      return 'text-green-500'
+      return 'status-ok'
     case HealthStatus.DEGRADED:
-      return 'text-yellow-500'
+      return 'status-warn'
     case HealthStatus.FAILED:
-      return 'text-red-500'
+      return 'status-bad'
     case HealthStatus.VALIDATION_ERROR:
-      return 'text-red-500'
+      return 'status-bad'
     default:
-      return 'text-gray-500'
+      return 'status-muted'
   }
 }
 

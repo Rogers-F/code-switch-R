@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PageLayout from '../common/PageLayout.vue'
+import BaseInput from '../common/BaseInput.vue'
+import BaseButton from '../common/BaseButton.vue'
 import {
   TestEndpoints
 } from '../../../bindings/codeswitch/services/speedtestservice'
@@ -159,45 +162,52 @@ onActivated(() => {
 </script>
 
 <template>
-  <div class="speedtest-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('speedtest.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('speedtest.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('speedtest.hero.lead') }}</p>
-    </div>
+  <PageLayout
+    :eyebrow="t('speedtest.hero.eyebrow')"
+    :title="t('speedtest.hero.title')"
+    :sticky="true"
+  >
+    <template #actions>
+      <button
+        class="ghost-icon"
+        :class="{ rotating: isLoadingProviders }"
+        :disabled="isLoadingProviders"
+        :data-tooltip="t('speedtest.syncButton')"
+        type="button"
+        @click="syncProviderEndpoints"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+        </svg>
+      </button>
+      <BaseButton
+        size="sm"
+        type="button"
+        :disabled="isTesting || endpointCount === 0"
+        @click="runTest"
+      >
+        {{ isTesting ? t('speedtest.testing') : t('speedtest.start') }}
+      </BaseButton>
+    </template>
 
-    <!-- URL Input -->
+    <p class="page-lead">{{ t('speedtest.hero.lead') }}</p>
+
     <div class="input-section">
-      <input
+      <BaseInput
         v-model="newUrl"
         type="url"
-        class="url-input"
         :placeholder="t('speedtest.placeholder')"
         @keyup.enter="addEndpoint"
       />
-      <button class="add-btn" @click="addEndpoint" :disabled="!newUrl.trim()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        {{ t('speedtest.add') }}
-      </button>
-      <button
-        class="sync-btn"
-        :class="{ syncing: isLoadingProviders }"
-        @click="syncProviderEndpoints"
-        :disabled="isLoadingProviders"
-        :title="t('speedtest.syncButton')"
+      <BaseButton
+        variant="outline"
+        size="sm"
+        type="button"
+        :disabled="!newUrl.trim()"
+        @click="addEndpoint"
       >
-        <svg v-if="!isLoadingProviders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 6v6l4 2"></path>
-        </svg>
-      </button>
+        {{ t('speedtest.add') }}
+      </BaseButton>
     </div>
 
     <!-- 加载状态提示 -->
@@ -215,21 +225,6 @@ onActivated(() => {
       <span class="list-title">
         {{ t('speedtest.endpoints', { count: endpointCount }) }}
       </span>
-      <button
-        class="test-btn"
-        :class="{ testing: isTesting }"
-        @click="runTest"
-        :disabled="isTesting || endpointCount === 0"
-      >
-        <svg v-if="!isTesting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 6v6l4 2"></path>
-        </svg>
-        {{ isTesting ? t('speedtest.testing') : t('speedtest.start') }}
-      </button>
     </div>
 
     <!-- Endpoint List -->
@@ -273,7 +268,7 @@ onActivated(() => {
           <span v-else class="result-pending">-</span>
         </div>
 
-        <button class="remove-btn" @click="removeEndpoint(index)">
+        <button class="ghost-icon sm danger" type="button" @click="removeEndpoint(index)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -301,115 +296,20 @@ onActivated(() => {
         <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
       </div>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.speedtest-page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.page-hero {
-  margin-bottom: 32px;
-}
-
-.hero-eyebrow {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--mac-accent);
-  margin-bottom: 8px;
-}
-
-.hero-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--mac-text);
-  margin-bottom: 8px;
-}
-
-.hero-lead {
-  font-size: 0.95rem;
-  color: var(--mac-text-secondary);
-  line-height: 1.5;
-}
-
 .input-section {
   display: flex;
   gap: 12px;
   margin-bottom: 24px;
+  align-items: center;
 }
 
-.url-input {
+.input-section .base-input {
   flex: 1;
-  padding: 12px 16px;
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  font-size: 0.9rem;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  transition: all 0.15s ease;
-}
-
-.url-input:focus {
-  outline: none;
-  border-color: var(--mac-accent);
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
-}
-
-.input-section .add-btn {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.input-section .sync-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.sync-btn:hover:not(:disabled) {
-  border-color: var(--mac-accent);
-  color: var(--mac-accent);
-}
-
-.sync-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.sync-btn svg {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.sync-btn.syncing svg.spin {
-  animation: spin 1s linear infinite;
+  min-width: 0;
 }
 
 .loading-tip {
@@ -442,72 +342,16 @@ onActivated(() => {
   color: #f87171;
 }
 
-.add-btn:hover:not(:disabled) {
-  border-color: var(--mac-accent);
-}
-
-.add-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.add-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
 .list-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   margin-bottom: 16px;
 }
 
 .list-title {
   font-size: 0.9rem;
   color: var(--mac-text-secondary);
-}
-
-.list-header .test-btn {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 999px;
-  background: var(--mac-accent);
-  color: #fff;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.test-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.test-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.test-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.test-btn.testing svg.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .endpoint-list {
@@ -604,30 +448,6 @@ onActivated(() => {
 
 .result-pending {
   color: var(--mac-text-secondary);
-}
-
-.remove-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  color: var(--mac-text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.remove-btn:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.remove-btn svg {
-  width: 16px;
-  height: 16px;
 }
 
 .empty-state {

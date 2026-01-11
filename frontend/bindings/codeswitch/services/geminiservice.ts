@@ -116,6 +116,14 @@ export function ProxyStatus(): $CancellablePromise<$models.GeminiProxyStatus | n
 }
 
 /**
+ * ReloadProvidersFromDisk 重新从磁盘加载 gemini-providers.json
+ * 用于导入配置后刷新内存状态，避免 UI 仍显示旧数据。
+ */
+export function ReloadProvidersFromDisk(): $CancellablePromise<void> {
+    return $Call.ByID(24310639);
+}
+
+/**
  * ReorderProviders 重新排序供应商（按传入的 ID 顺序）
  */
 export function ReorderProviders(ids: string[]): $CancellablePromise<void> {

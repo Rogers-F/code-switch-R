@@ -18,8 +18,8 @@ const routes = [
   { path: '/availability', component: AvailabilityPage },
   { path: '/speedtest', component: SpeedTestPage },
   { path: '/env', component: EnvCheckPage },
-  { path: '/console', component: LogsPage },
-  { path: '/logs', component: ConsolePage },
+  { path: '/console', component: ConsolePage },
+  { path: '/logs', component: LogsPage },
   { path: '/settings', component: GeneralPage },
 ]
 

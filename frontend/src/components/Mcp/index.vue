@@ -1,11 +1,28 @@
 <template>
-  <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.mcp.hero.eyebrow') }}</p>
-      <button class="ghost-icon" :aria-label="t('components.mcp.controls.back')" @click="goHome">
+  <PageLayout
+    :eyebrow="t('components.mcp.hero.eyebrow')"
+    :title="t('components.mcp.hero.title')"
+    :sticky="true"
+    :showBackButton="true"
+  >
+    <template #actions>
+      <button
+        class="ghost-icon"
+        :aria-label="t('components.mcp.controls.refresh')"
+        :disabled="loading"
+        @click="reload"
+      >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
-            d="M15 18l-6-6 6-6"
+            d="M20.5 8a8.5 8.5 0 10-2.38 7.41"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M20.5 4v4h-4"
             fill="none"
             stroke="currentColor"
             stroke-width="1.5"
@@ -14,18 +31,10 @@
           />
         </svg>
       </button>
-      <button class="ghost-icon" :aria-label="t('components.mcp.controls.settings')" @click="goToSettings">
+      <button class="ghost-icon" :aria-label="t('components.mcp.controls.create')" @click="openCreateModal">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
-            d="M12 15a3 3 0 100-6 3 3 0 000 6z"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
-          <path
-            d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+            d="M12 5v14M5 12h14"
             stroke="currentColor"
             stroke-width="1.5"
             stroke-linecap="round"
@@ -34,68 +43,23 @@
           />
         </svg>
       </button>
-    </div>
+      <button class="ghost-icon" :aria-label="t('components.mcp.import.title')" @click="openBatchImport">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0 0l-4-4m4 4l4-4"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+        </svg>
+      </button>
+    </template>
 
-    <div class="contrib-page">
-      <section class="contrib-hero">
-        <h1>{{ t('components.mcp.hero.title') }}</h1>
-        <p class="lead">{{ t('components.mcp.hero.lead') }}</p>
-      </section>
+    <p class="page-lead">{{ t('components.mcp.hero.lead') }}</p>
 
-      <section class="automation-section">
-        <div class="section-header section-header-solo">
-          <div class="section-controls">
-            <button
-              class="ghost-icon"
-              :aria-label="t('components.mcp.controls.refresh')"
-              :disabled="loading"
-              @click="reload"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M20.5 8a8.5 8.5 0 10-2.38 7.41"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M20.5 4v4h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-            <button class="ghost-icon" :aria-label="t('components.mcp.controls.create')" @click="openCreateModal">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M12 5v14M5 12h14"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  fill="none"
-                />
-              </svg>
-            </button>
-            <button class="ghost-icon" :aria-label="t('components.mcp.import.title')" @click="openBatchImport">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0 0l-4-4m4 4l4-4"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  fill="none"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
+    <section class="automation-section">
 
         <div v-if="errorMessage" class="alert-error">{{ errorMessage }}</div>
 
@@ -187,8 +151,7 @@
             </div>
           </article>
         </div>
-      </section>
-    </div>
+    </section>
 
     <FullScreenPanel
       class="mcp-fullscreen-panel"
@@ -385,14 +348,14 @@
       @close="closeBatchImport"
       @imported="onBatchImported"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
+import PageLayout from '../common/PageLayout.vue'
 import InlineModal from '../common/InlineModal.vue'
 import FullScreenPanel from '../common/FullScreenPanel.vue'
 import BaseInput from '../common/BaseInput.vue'
@@ -427,7 +390,6 @@ type McpForm = {
 }
 
 const { t } = useI18n()
-const router = useRouter()
 
 const servers = ref<McpServer[]>([])
 const loading = ref(false)
@@ -1007,14 +969,6 @@ const parseEnv = (entries: EnvEntry[]) => {
     acc[key] = entry.value
     return acc
   }, {})
-}
-
-const goHome = () => {
-  router.push('/')
-}
-
-const goToSettings = () => {
-  router.push('/settings')
 }
 
 const reload = async () => {

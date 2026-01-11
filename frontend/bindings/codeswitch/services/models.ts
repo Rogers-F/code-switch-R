@@ -26,6 +26,41 @@ export class AppSettings {
      */
     "enable_round_robin": boolean;
 
+    /**
+     * ========== 出站代理（全局配置 + 分渠道开关） ==========
+     * 说明：
+     * - ProxyAddress/ProxyType 定义“代理服务器”本身
+     * - 各渠道开关决定该渠道的所有网络流量（监控 + 转发）是否走代理
+     * - 未填写 ProxyAddress 时，即使开关为 true 也不会启用代理
+     * 代理地址（例：127.0.0.1:7890 或 http://127.0.0.1:7890）
+     */
+    "proxy_address"?: string;
+
+    /**
+     * 代理类型：http|socks5
+     */
+    "proxy_type"?: string;
+
+    /**
+     * Claude 渠道是否走代理
+     */
+    "proxy_claude"?: boolean;
+
+    /**
+     * Codex 渠道是否走代理
+     */
+    "proxy_codex"?: boolean;
+
+    /**
+     * Gemini 渠道是否走代理
+     */
+    "proxy_gemini"?: boolean;
+
+    /**
+     * 自定义 CLI（custom:*）渠道是否走代理
+     */
+    "proxy_custom"?: boolean;
+
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
         if (!("show_heatmap" in $$source)) {
@@ -645,6 +680,197 @@ export class ClaudeProxyStatus {
     }
 }
 
+export class ConfigBackupExportFile {
+    "path": string;
+    "size": number;
+    "sha256": string;
+
+    /** Creates a new ConfigBackupExportFile instance. */
+    constructor($$source: Partial<ConfigBackupExportFile> = {}) {
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("size" in $$source)) {
+            this["size"] = 0;
+        }
+        if (!("sha256" in $$source)) {
+            this["sha256"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigBackupExportFile instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigBackupExportFile {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConfigBackupExportFile($$parsedSource as Partial<ConfigBackupExportFile>);
+    }
+}
+
+export class ConfigBackupExportOptions {
+    "include_secrets": boolean;
+    "include_database": boolean;
+
+    /** Creates a new ConfigBackupExportOptions instance. */
+    constructor($$source: Partial<ConfigBackupExportOptions> = {}) {
+        if (!("include_secrets" in $$source)) {
+            this["include_secrets"] = false;
+        }
+        if (!("include_database" in $$source)) {
+            this["include_database"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigBackupExportOptions instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigBackupExportOptions {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConfigBackupExportOptions($$parsedSource as Partial<ConfigBackupExportOptions>);
+    }
+}
+
+export class ConfigBackupExportResult {
+    "path": string;
+    "file_count": number;
+    "manifest": ConfigBackupManifest;
+
+    /** Creates a new ConfigBackupExportResult instance. */
+    constructor($$source: Partial<ConfigBackupExportResult> = {}) {
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("file_count" in $$source)) {
+            this["file_count"] = 0;
+        }
+        if (!("manifest" in $$source)) {
+            this["manifest"] = (new ConfigBackupManifest());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigBackupExportResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigBackupExportResult {
+        const $$createField2_0 = $$createType6;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("manifest" in $$parsedSource) {
+            $$parsedSource["manifest"] = $$createField2_0($$parsedSource["manifest"]);
+        }
+        return new ConfigBackupExportResult($$parsedSource as Partial<ConfigBackupExportResult>);
+    }
+}
+
+export class ConfigBackupImportOptions {
+    "import_database": boolean;
+    "preserve_existing_secrets": boolean;
+
+    /** Creates a new ConfigBackupImportOptions instance. */
+    constructor($$source: Partial<ConfigBackupImportOptions> = {}) {
+        if (!("import_database" in $$source)) {
+            this["import_database"] = false;
+        }
+        if (!("preserve_existing_secrets" in $$source)) {
+            this["preserve_existing_secrets"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigBackupImportOptions instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigBackupImportOptions {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConfigBackupImportOptions($$parsedSource as Partial<ConfigBackupImportOptions>);
+    }
+}
+
+export class ConfigBackupImportResult {
+    "imported_files": number;
+    "skipped_files": number;
+    "backups_created": number;
+    "warnings"?: string[];
+
+    /** Creates a new ConfigBackupImportResult instance. */
+    constructor($$source: Partial<ConfigBackupImportResult> = {}) {
+        if (!("imported_files" in $$source)) {
+            this["imported_files"] = 0;
+        }
+        if (!("skipped_files" in $$source)) {
+            this["skipped_files"] = 0;
+        }
+        if (!("backups_created" in $$source)) {
+            this["backups_created"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigBackupImportResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigBackupImportResult {
+        const $$createField3_0 = $$createType7;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField3_0($$parsedSource["warnings"]);
+        }
+        return new ConfigBackupImportResult($$parsedSource as Partial<ConfigBackupImportResult>);
+    }
+}
+
+export class ConfigBackupManifest {
+    "schema_version": number;
+    "app": string;
+    "exported_at": string;
+    "include_secrets": boolean;
+    "include_database": boolean;
+    "files": ConfigBackupExportFile[];
+
+    /** Creates a new ConfigBackupManifest instance. */
+    constructor($$source: Partial<ConfigBackupManifest> = {}) {
+        if (!("schema_version" in $$source)) {
+            this["schema_version"] = 0;
+        }
+        if (!("app" in $$source)) {
+            this["app"] = "";
+        }
+        if (!("exported_at" in $$source)) {
+            this["exported_at"] = "";
+        }
+        if (!("include_secrets" in $$source)) {
+            this["include_secrets"] = false;
+        }
+        if (!("include_database" in $$source)) {
+            this["include_database"] = false;
+        }
+        if (!("files" in $$source)) {
+            this["files"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigBackupManifest instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigBackupManifest {
+        const $$createField5_0 = $$createType9;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("files" in $$parsedSource) {
+            $$parsedSource["files"] = $$createField5_0($$parsedSource["files"]);
+        }
+        return new ConfigBackupManifest($$parsedSource as Partial<ConfigBackupManifest>);
+    }
+}
+
 /**
  * ConfigFile 配置文件信息
  */
@@ -710,7 +936,7 @@ export class ConfigImportResult {
      * Creates a new ConfigImportResult instance from a string or object.
      */
     static createFrom($$source: any = {}): ConfigImportResult {
-        const $$createField0_0 = $$createType6;
+        const $$createField0_0 = $$createType10;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("status" in $$parsedSource) {
             $$parsedSource["status"] = $$createField0_0($$parsedSource["status"]);
@@ -924,8 +1150,8 @@ export class CustomCliTool {
      * Creates a new CustomCliTool instance from a string or object.
      */
     static createFrom($$source: any = {}): CustomCliTool {
-        const $$createField2_0 = $$createType8;
-        const $$createField3_0 = $$createType10;
+        const $$createField2_0 = $$createType12;
+        const $$createField3_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("configFiles" in $$parsedSource) {
             $$parsedSource["configFiles"] = $$createField2_0($$parsedSource["configFiles"]);
@@ -1459,8 +1685,8 @@ export class HealthCheckHistory {
      * Creates a new HealthCheckHistory instance from a string or object.
      */
     static createFrom($$source: any = {}): HealthCheckHistory {
-        const $$createField3_0 = $$createType12;
-        const $$createField4_0 = $$createType13;
+        const $$createField3_0 = $$createType16;
+        const $$createField4_0 = $$createType17;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField3_0($$parsedSource["items"]);
@@ -1742,7 +1968,7 @@ export class LogStats {
      * Creates a new LogStats instance from a string or object.
      */
     static createFrom($$source: any = {}): LogStats {
-        const $$createField11_0 = $$createType15;
+        const $$createField11_0 = $$createType19;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("series" in $$parsedSource) {
             $$parsedSource["series"] = $$createField11_0($$parsedSource["series"]);
@@ -1827,8 +2053,8 @@ export class MCPParseResult {
      * Creates a new MCPParseResult instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPParseResult {
-        const $$createField0_0 = $$createType17;
-        const $$createField1_0 = $$createType18;
+        const $$createField0_0 = $$createType21;
+        const $$createField1_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("servers" in $$parsedSource) {
             $$parsedSource["servers"] = $$createField0_0($$parsedSource["servers"]);
@@ -1886,10 +2112,10 @@ export class MCPServer {
      * Creates a new MCPServer instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPServer {
-        const $$createField3_0 = $$createType18;
+        const $$createField3_0 = $$createType7;
         const $$createField4_0 = $$createType4;
-        const $$createField8_0 = $$createType18;
-        const $$createField12_0 = $$createType18;
+        const $$createField8_0 = $$createType7;
+        const $$createField12_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("args" in $$parsedSource) {
             $$parsedSource["args"] = $$createField3_0($$parsedSource["args"]);
@@ -1972,7 +2198,7 @@ export class NetworkSettings {
      * Creates a new NetworkSettings instance from a string or object.
      */
     static createFrom($$source: any = {}): NetworkSettings {
-        const $$createField4_0 = $$createType19;
+        const $$createField4_0 = $$createType22;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("targetCli" in $$parsedSource) {
             $$parsedSource["targetCli"] = $$createField4_0($$parsedSource["targetCli"]);
@@ -2154,12 +2380,12 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField10_0 = $$createType20;
+        const $$createField10_0 = $$createType23;
         const $$createField11_0 = $$createType4;
-        const $$createField15_0 = $$createType22;
+        const $$createField15_0 = $$createType25;
         const $$createField17_0 = $$createType4;
         const $$createField18_0 = $$createType4;
-        const $$createField19_0 = $$createType18;
+        const $$createField19_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("supportedModels" in $$parsedSource) {
             $$parsedSource["supportedModels"] = $$createField10_0($$parsedSource["supportedModels"]);
@@ -2316,9 +2542,9 @@ export class ProviderTimeline {
      * Creates a new ProviderTimeline instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderTimeline {
-        const $$createField5_0 = $$createType22;
-        const $$createField6_0 = $$createType12;
-        const $$createField7_0 = $$createType13;
+        const $$createField5_0 = $$createType25;
+        const $$createField6_0 = $$createType16;
+        const $$createField7_0 = $$createType17;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("availabilityConfig" in $$parsedSource) {
             $$parsedSource["availabilityConfig"] = $$createField5_0($$parsedSource["availabilityConfig"]);
@@ -2918,7 +3144,7 @@ export class WSLDetection {
      * Creates a new WSLDetection instance from a string or object.
      */
     static createFrom($$source: any = {}): WSLDetection {
-        const $$createField1_0 = $$createType18;
+        const $$createField1_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("distros" in $$parsedSource) {
             $$parsedSource["distros"] = $$createField1_0($$parsedSource["distros"]);
@@ -3016,20 +3242,23 @@ const $$createType2 = CLIConfigFile.createFrom;
 const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $Create.Map($Create.Any, $Create.Any);
 const $$createType5 = $Create.Map($Create.Any, $Create.Any);
-const $$createType6 = ConfigImportStatus.createFrom;
-const $$createType7 = ConfigFile.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = ProxyInjection.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = HealthCheckResult.createFrom;
+const $$createType6 = ConfigBackupManifest.createFrom;
+const $$createType7 = $Create.Array($Create.Any);
+const $$createType8 = ConfigBackupExportFile.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = ConfigImportStatus.createFrom;
+const $$createType11 = ConfigFile.createFrom;
 const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = $Create.Nullable($$createType11);
-const $$createType14 = LogStatsSeries.createFrom;
-const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = MCPServer.createFrom;
-const $$createType17 = $Create.Array($$createType16);
-const $$createType18 = $Create.Array($Create.Any);
-const $$createType19 = TargetCli.createFrom;
-const $$createType20 = $Create.Map($Create.Any, $Create.Any);
-const $$createType21 = AvailabilityConfig.createFrom;
-const $$createType22 = $Create.Nullable($$createType21);
+const $$createType13 = ProxyInjection.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = HealthCheckResult.createFrom;
+const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = $Create.Nullable($$createType15);
+const $$createType18 = LogStatsSeries.createFrom;
+const $$createType19 = $Create.Array($$createType18);
+const $$createType20 = MCPServer.createFrom;
+const $$createType21 = $Create.Array($$createType20);
+const $$createType22 = TargetCli.createFrom;
+const $$createType23 = $Create.Map($Create.Any, $Create.Any);
+const $$createType24 = AvailabilityConfig.createFrom;
+const $$createType25 = $Create.Nullable($$createType24);

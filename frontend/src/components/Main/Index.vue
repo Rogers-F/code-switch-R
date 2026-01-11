@@ -1,14 +1,13 @@
 <template>
-  <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.main.hero.eyebrow') }}</p>
+  <PageLayout
+    :eyebrow="t('components.main.hero.eyebrow')"
+    :title="showHomeTitle ? t('components.main.hero.title') : ''"
+    :sticky="true"
+  >
+    <template #actions>
       <button
         class="ghost-icon github-icon"
-        :class="{
-          'github-upgrade': hasUpdateAvailable && !updateReady,
-          'update-ready': updateReady
-        }"
-        :data-tooltip="getGithubTooltip()"
+        :data-tooltip="t('components.main.controls.github')"
         @click="handleGithubClick"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -21,12 +20,6 @@
             stroke-linejoin="round"
           />
         </svg>
-        <!-- 更新徽章 -->
-        <span v-if="updateReady" class="update-badge pulse">Ready</span>
-        <span v-else-if="downloadProgress > 0 && downloadProgress < 100" class="update-badge downloading">
-          {{ Math.round(downloadProgress) }}%
-        </span>
-        <span v-else-if="hasUpdateAvailable" class="update-badge">New</span>
       </button>
       <button
         class="ghost-icon"
@@ -111,29 +104,23 @@
           />
         </svg>
       </button>
-    </div>
-    <div class="contrib-page">
-      <!-- 首次使用提示横幅 -->
-      <div v-if="showFirstRunPrompt" class="first-run-banner">
-        <div class="banner-content">
-          <span class="banner-icon">💡</span>
-          <span class="banner-text">{{ t('components.main.firstRun.message') }}</span>
-        </div>
-        <div class="banner-actions">
-          <button class="banner-btn primary" @click="goToImportSettings">
-            {{ t('components.main.firstRun.goToSettings') }}
-          </button>
-          <button class="banner-btn" @click="dismissFirstRunPrompt">
-            {{ t('components.main.firstRun.dismiss') }}
-          </button>
-        </div>
+    </template>
+
+    <!-- 首次使用提示横幅 -->
+    <div v-if="showFirstRunPrompt" class="first-run-banner">
+      <div class="banner-content">
+        <span class="banner-icon">💡</span>
+        <span class="banner-text">{{ t('components.main.firstRun.message') }}</span>
       </div>
-      <section class="contrib-hero">
-        <h1 v-if="showHomeTitle">{{ t('components.main.hero.title') }}</h1>
-        <!-- <p class="lead">
-          {{ t('components.main.hero.lead') }}
-        </p> -->
-      </section>
+      <div class="banner-actions">
+        <BaseButton size="sm" type="button" @click="goToImportSettings">
+          {{ t('components.main.firstRun.goToSettings') }}
+        </BaseButton>
+        <BaseButton variant="outline" size="sm" type="button" @click="dismissFirstRunPrompt">
+          {{ t('components.main.firstRun.dismiss') }}
+        </BaseButton>
+      </div>
+    </div>
 
       <section
         v-if="showHeatmap"
@@ -980,8 +967,7 @@
           </BaseButton>
         </footer>
       </BaseModal>
-    </div>
-  </div>
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
@@ -1000,6 +986,7 @@ import {
 import { automationCardGroups, createAutomationCards, type AutomationCard } from '../../data/cards'
 import lobeIcons from '../../icons/lobeIconMap'
 import BaseButton from '../common/BaseButton.vue'
+import PageLayout from '../common/PageLayout.vue'
 import BaseModal from '../common/BaseModal.vue'
 import BaseInput from '../common/BaseInput.vue'
 import ModelWhitelistEditor from '../common/ModelWhitelistEditor.vue'
@@ -1009,16 +996,14 @@ import CLIConfigEditor from '../common/CLIConfigEditor.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
-import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
-import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../services/geminiSettings'
-import { fetchHeatmapStats, fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
-import { fetchCurrentVersion } from '../../services/version'
-import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
-import { getUpdateState, restartApp, type UpdateState } from '../../services/update'
-import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeManager'
-import { useRouter } from 'vue-router'
-import { fetchConfigImportStatus, importFromCcSwitch, isFirstRun, markFirstRunDone, type ConfigImportStatus } from '../../services/configImport'
-import { showToast } from '../../utils/toast'
+	import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
+	import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../services/geminiSettings'
+	import { fetchHeatmapStats, fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
+	import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
+	import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeManager'
+	import { useRouter } from 'vue-router'
+	import { fetchConfigImportStatus, importFromCcSwitch, isFirstRun, markFirstRunDone, type ConfigImportStatus } from '../../services/configImport'
+	import { showToast } from '../../utils/toast'
 import { extractErrorMessage } from '../../utils/error'
 import { getBlacklistStatus, manualUnblock, type BlacklistStatus } from '../../services/blacklist'
 import { saveCLIConfig, type CLIPlatform } from '../../services/cliConfig'
@@ -1052,15 +1037,14 @@ import {
 const { t, locale } = useI18n()
 const router = useRouter()
 const themeMode = ref<ThemeMode>(getCurrentTheme())
-const resolvedTheme = computed(() => {
-  if (themeMode.value === 'systemdefault') {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  }
-  return themeMode.value
-})
-const themeIcon = computed(() => (resolvedTheme.value === 'dark' ? 'moon' : 'sun'))
-const releasePageUrl = 'https://github.com/Rogers-F/code-switch-R/releases'
-const releaseApiUrl = 'https://api.github.com/repos/Rogers-F/code-switch-R/releases/latest'
+	const resolvedTheme = computed(() => {
+	  if (themeMode.value === 'systemdefault') {
+	    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+	  }
+	  return themeMode.value
+	})
+	const themeIcon = computed(() => (resolvedTheme.value === 'dark' ? 'moon' : 'sun'))
+	const releasePageUrl = 'https://github.com/SimonUTD/code-switch-R/releases'
 
 const HEATMAP_DAYS = DEFAULT_HEATMAP_DAYS
 const usageHeatmap = ref<UsageHeatmapWeek[]>(generateFallbackUsageHeatmap(HEATMAP_DAYS))
@@ -1145,31 +1129,26 @@ const providerStatsMap = reactive<Record<ProviderTab, Record<string, ProviderDai
   codex: {},
   gemini: {},
   others: {},
-})
-const providerStatsLoading = reactive<Record<ProviderTab, boolean>>({
-  claude: false,
-  codex: false,
-  gemini: false,
-  others: false,
-})
-const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
-  claude: false,
-  codex: false,
-  gemini: false,
-  others: false,
-})
-let providerStatsTimer: number | undefined
-let updateTimer: number | undefined
-const showHeatmap = ref(true)
-const showHomeTitle = ref(true)
-const mcpIcon = lobeIcons['mcp'] ?? ''
-const appVersion = ref('')
-const hasUpdateAvailable = ref(false)
-const updateReady = ref(false)
-const downloadProgress = ref(0)
-const importStatus = ref<ConfigImportStatus | null>(null)
-const importBusy = ref(false)
-const showFirstRunPrompt = ref(false)
+	})
+	const providerStatsLoading = reactive<Record<ProviderTab, boolean>>({
+	  claude: false,
+	  codex: false,
+	  gemini: false,
+	  others: false,
+	})
+	const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
+	  claude: false,
+	  codex: false,
+	  gemini: false,
+	  others: false,
+	})
+	let providerStatsTimer: number | undefined
+	const showHeatmap = ref(true)
+	const showHomeTitle = ref(true)
+	const mcpIcon = lobeIcons['mcp'] ?? ''
+	const importStatus = ref<ConfigImportStatus | null>(null)
+	const importBusy = ref(false)
+	const showFirstRunPrompt = ref(false)
 
 // 自定义 CLI 工具状态
 const customCliTools = ref<CustomCliTool[]>([])
@@ -1409,92 +1388,20 @@ const loadAppSettings = async () => {
     console.error('failed to load app settings', error)
     showHeatmap.value = true
     showHomeTitle.value = true
-    // 加载应用设置失败时提示用户
-    showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
-  }
-}
+	    // 加载应用设置失败时提示用户
+	    showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
+	  }
+	}
 
-const checkForUpdates = async () => {
-  try {
-    const version = await fetchCurrentVersion()
-    appVersion.value = version || ''
-  } catch (error) {
-    console.error('failed to load app version', error)
-  }
+	const handleAppSettingsUpdated = () => {
+	  void loadAppSettings()
+	}
 
-  try {
-    const resp = await fetch(releaseApiUrl, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-      },
-    })
-    if (!resp.ok) {
-      return
-    }
-    const data = await resp.json()
-    const latestTag = data?.tag_name ?? ''
-    if (latestTag && compareVersions(appVersion.value || '0.0.0', latestTag) < 0) {
-      hasUpdateAvailable.value = true
-    }
-  } catch (error) {
-    console.error('failed to fetch release info', error)
-  }
-}
+	const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
 
-// 轮询更新状态
-const pollUpdateState = async () => {
-  try {
-    const state = await getUpdateState()
-    updateReady.value = state.update_ready
-    downloadProgress.value = state.download_progress
-    // 更新 hasUpdateAvailable（如果有新版本且不同于当前版本）
-    if (state.latest_known_version && state.latest_known_version !== appVersion.value) {
-      hasUpdateAvailable.value = true
-    }
-  } catch (error) {
-    console.error('failed to poll update state', error)
-  }
-}
-
-const handleAppSettingsUpdated = () => {
-  void loadAppSettings()
-}
-
-const startUpdateTimer = () => {
-  stopUpdateTimer()
-  updateTimer = window.setInterval(() => {
-    void checkForUpdates()
-    void pollUpdateState()
-  }, 30 * 1000) // 每30秒检查一次更新状态
-}
-
-const stopUpdateTimer = () => {
-  if (updateTimer) {
-    clearInterval(updateTimer)
-    updateTimer = undefined
-  }
-}
-
-const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
-
-const normalizeVersion = (value: string) => value.replace(/^v/i, '').trim()
-
-const compareVersions = (current: string, remote: string) => {
-  const curParts = normalizeVersion(current).split('.').map((part) => parseInt(part, 10) || 0)
-  const remoteParts = normalizeVersion(remote).split('.').map((part) => parseInt(part, 10) || 0)
-  const maxLen = Math.max(curParts.length, remoteParts.length)
-  for (let i = 0; i < maxLen; i++) {
-    const cur = curParts[i] ?? 0
-    const rem = remoteParts[i] ?? 0
-    if (cur === rem) continue
-    return cur < rem ? -1 : 1
-  }
-  return 0
-}
-
-const loadUsageHeatmap = async () => {
-	try {
-		const rangeDays = calculateHeatmapDayRange(HEATMAP_DAYS)
+	const loadUsageHeatmap = async () => {
+		try {
+			const rangeDays = calculateHeatmapDayRange(HEATMAP_DAYS)
 		const stats = await fetchHeatmapStats(rangeDays)
 		usageHeatmap.value = buildUsageHeatmapMatrix(stats, HEATMAP_DAYS)
 	} catch (error) {
@@ -2032,21 +1939,20 @@ const refreshAllData = async () => {
   if (refreshing.value) return
   refreshing.value = true
   try {
-    await Promise.all([
-      loadUsageHeatmap(),
-      loadProvidersFromDisk(),
-      ...providerTabIds.map(refreshProxyState),
-      ...providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)),
-      ...providerTabIds.map((tab) => loadProviderStats(tab)),
-      ...providerTabIds.map((tab) => loadBlacklistStatus(tab)), // 同步刷新黑名单状态
-      loadAvailabilityResults(), // 同步刷新可用性监控状态（改用新服务）
-      refreshImportStatus(),
-      pollUpdateState()
-    ])
-  } catch (error) {
-    console.error('Failed to refresh data', error)
-  } finally {
-    refreshing.value = false
+	    await Promise.all([
+	      loadUsageHeatmap(),
+	      loadProvidersFromDisk(),
+	      ...providerTabIds.map(refreshProxyState),
+	      ...providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)),
+	      ...providerTabIds.map((tab) => loadProviderStats(tab)),
+	      ...providerTabIds.map((tab) => loadBlacklistStatus(tab)), // 同步刷新黑名单状态
+	      loadAvailabilityResults(), // 同步刷新可用性监控状态（改用新服务）
+	      refreshImportStatus()
+	    ])
+	  } catch (error) {
+	    console.error('Failed to refresh data', error)
+	  } finally {
+	    refreshing.value = false
   }
 }
 
@@ -2236,22 +2142,19 @@ const scrollToCard = (el: HTMLElement | null) => {
 let unsubscribeSwitched: (() => void) | undefined
 let unsubscribeBlacklisted: (() => void) | undefined
 
-onMounted(async () => {
-  void loadUsageHeatmap()
-  await loadProvidersFromDisk()
-  await Promise.all(providerTabIds.map(refreshProxyState))
-  await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
-  await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
-  await loadAppSettings()
-  await checkForUpdates()
-  await pollUpdateState() // 首次加载更新状态
-  await refreshImportStatus()
-  await checkFirstRun()  // 检查是否首次使用
-  startProviderStatsTimer()
-  startUpdateTimer()
+	onMounted(async () => {
+	  void loadUsageHeatmap()
+	  await loadProvidersFromDisk()
+	  await Promise.all(providerTabIds.map(refreshProxyState))
+	  await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
+	  await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
+	  await loadAppSettings()
+	  await refreshImportStatus()
+	  await checkFirstRun()  // 检查是否首次使用
+	  startProviderStatsTimer()
 
-  // 加载初始黑名单状态
-  await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
+	  // 加载初始黑名单状态
+	  await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
 
   // 加载初始可用性监控结果（改用新服务）
   await loadAvailabilityResults()
@@ -2302,15 +2205,14 @@ onMounted(async () => {
   unsubscribeBlacklisted = Events.On('provider:blacklisted', handleProviderBlacklisted as Events.Callback)
 })
 
-onUnmounted(() => {
-  stopProviderStatsTimer()
-  window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)
-  stopUpdateTimer()
+	onUnmounted(() => {
+	  stopProviderStatsTimer()
+	  window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)
 
-  // 清理黑名单相关定时器和事件监听
-  if (blacklistTimer) {
-    window.clearInterval(blacklistTimer)
-  }
+	  // 清理黑名单相关定时器和事件监听
+	  if (blacklistTimer) {
+	    window.clearInterval(blacklistTimer)
+	  }
   if ((window as any).__blacklistPollingTimer) {
     window.clearInterval((window as any).__blacklistPollingTimer)
   }
@@ -2450,36 +2352,11 @@ const toggleTheme = () => {
   setTheme(next)
 }
 
-const handleGithubClick = async () => {
-  if (updateReady.value) {
-    // 更新已准备好，提示重启
-    const confirmed = confirm(`新版本已准备好，是否立即重启应用？`)
-    if (confirmed) {
-      try {
-        await restartApp()
-      } catch (error) {
-        console.error('failed to restart app', error)
-        alert('重启失败，请手动重启应用')
-      }
-    }
-  } else {
-    // 打开 GitHub
-    Browser.OpenURL(releasePageUrl).catch(() => {
-      console.error('failed to open github')
-    })
-  }
-}
-
-// 获取 GitHub 图标的 tooltip
-const getGithubTooltip = () => {
-  if (updateReady.value) {
-    return t('components.main.controls.updateReady')
-  } else if (hasUpdateAvailable.value) {
-    return t('components.main.controls.githubUpdate')
-  } else {
-    return t('components.main.controls.github')
-  }
-}
+	const handleGithubClick = () => {
+	  Browser.OpenURL(releasePageUrl).catch(() => {
+	    console.error('failed to open github')
+	  })
+	}
 
 type VendorForm = {
   name: string

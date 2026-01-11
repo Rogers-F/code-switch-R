@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownEditor from '../common/MarkdownEditor.vue'
+import PageLayout from '../common/PageLayout.vue'
+import BaseButton from '../common/BaseButton.vue'
 import {
   GetPrompts,
   UpsertPrompt,
@@ -164,25 +166,43 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="prompts-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('prompts.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('prompts.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('prompts.hero.lead') }}</p>
-    </div>
-
-    <!-- Platform Tabs -->
-    <div class="platform-tabs">
-      <button
-        v-for="platform in platforms"
-        :key="platform.id"
-        class="platform-tab"
-        :class="{ active: activePlatform === platform.id }"
-        @click="activePlatform = platform.id"
+  <PageLayout
+    :eyebrow="t('prompts.hero.eyebrow')"
+    :title="t('prompts.hero.title')"
+    :sticky="true"
+  >
+    <template #actions>
+      <BaseButton
+        variant="outline"
+        size="sm"
+        type="button"
+        :disabled="loading"
+        @click="handleImport"
       >
-        {{ platform.name }}
-      </button>
+        {{ t('prompts.actions.import') }}
+      </BaseButton>
+      <BaseButton size="sm" type="button" @click="openCreateModal">
+        {{ t('prompts.actions.create') }}
+      </BaseButton>
+    </template>
+
+    <p class="page-lead">{{ t('prompts.hero.lead') }}</p>
+
+    <div class="section-header">
+      <div class="tab-group" role="tablist" :aria-label="t('prompts.hero.title')">
+        <button
+          v-for="platform in platforms"
+          :key="platform.id"
+          class="tab-pill"
+          :class="{ active: activePlatform === platform.id }"
+          type="button"
+          role="tab"
+          :aria-selected="activePlatform === platform.id"
+          @click="activePlatform = platform.id"
+        >
+          {{ platform.name }}
+        </button>
+      </div>
     </div>
 
     <!-- Stats Bar -->
@@ -223,13 +243,13 @@ onMounted(() => {
           </div>
         </div>
         <div class="prompt-actions">
-          <button class="action-btn" @click="openEditModal(prompt)">
+          <button class="ghost-icon sm" type="button" @click="openEditModal(prompt)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
           </button>
-          <button class="action-btn danger" @click="deletePrompt(prompt.id)">
+          <button class="ghost-icon sm danger" type="button" @click="deletePrompt(prompt.id)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -241,25 +261,6 @@ onMounted(() => {
 
     <div v-else class="loading-state">
       <span>{{ t('prompts.loading') }}</span>
-    </div>
-
-    <!-- Action Buttons -->
-    <div class="page-actions">
-      <button class="primary-btn" @click="openCreateModal">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        {{ t('prompts.actions.create') }}
-      </button>
-      <button class="secondary-btn" @click="handleImport" :disabled="loading">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="17 8 12 3 7 8"></polyline>
-          <line x1="12" y1="3" x2="12" y2="15"></line>
-        </svg>
-        {{ t('prompts.actions.import') }}
-      </button>
     </div>
 
     <!-- Edit Modal (不使用 Teleport 以修复 macOS WebView 键盘输入问题) -->
@@ -296,91 +297,19 @@ onMounted(() => {
         </div>
 
         <div class="modal-actions">
-          <button class="secondary-btn" @click="showModal = false">
+          <BaseButton variant="outline" size="sm" type="button" @click="showModal = false">
             {{ t('prompts.form.cancel') }}
-          </button>
-          <button class="primary-btn" @click="savePrompt" :disabled="!formData.name">
+          </BaseButton>
+          <BaseButton size="sm" type="button" @click="savePrompt" :disabled="!formData.name">
             {{ t('prompts.form.save') }}
-          </button>
+          </BaseButton>
         </div>
       </div>
     </div>
-  </div>
+  </PageLayout>
 </template>
 
 <style scoped>
-.prompts-page {
-  padding: 24px;
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.page-hero {
-  margin-bottom: 32px;
-}
-
-.hero-eyebrow {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--mac-accent);
-  margin-bottom: 8px;
-}
-
-.hero-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--mac-text);
-  margin-bottom: 8px;
-}
-
-.hero-lead {
-  font-size: 0.95rem;
-  color: var(--mac-text-secondary);
-  line-height: 1.5;
-}
-
-.platform-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  padding: 4px;
-  background: var(--mac-surface);
-  border-radius: 12px;
-  border: 1px solid var(--mac-border);
-}
-
-.platform-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--mac-text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.platform-tab:hover {
-  color: var(--mac-text);
-  background: rgba(15, 23, 42, 0.05);
-}
-
-html.dark .platform-tab:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.platform-tab.active {
-  background: var(--mac-accent);
-  color: #fff;
-}
-
 .stats-bar {
   display: flex;
   align-items: center;
@@ -493,97 +422,11 @@ html.dark .toggle-switch {
   gap: 8px;
 }
 
-.action-btn {
-  width: 34px;
-  height: 34px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  color: var(--mac-text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.action-btn:hover {
-  background: rgba(15, 23, 42, 0.06);
-  color: var(--mac-text);
-}
-
-html.dark .action-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.action-btn.danger:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.action-btn svg {
-  width: 16px;
-  height: 16px;
-}
-
 .empty-state,
 .loading-state {
   text-align: center;
   padding: 48px 24px;
   color: var(--mac-text-secondary);
-}
-
-.page-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.page-actions .primary-btn,
-.page-actions .secondary-btn {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border: none;
-  border-radius: 999px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.page-actions .primary-btn {
-  background: var(--mac-accent);
-  color: #fff;
-}
-
-.page-actions .primary-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.page-actions .primary-btn:disabled,
-.page-actions .secondary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.page-actions .secondary-btn {
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  border: 1px solid var(--mac-border);
-}
-
-.page-actions .secondary-btn:hover:not(:disabled) {
-  border-color: var(--mac-accent);
-}
-
-.page-actions .primary-btn svg,
-.page-actions .secondary-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
 }
 
 /* Modal */

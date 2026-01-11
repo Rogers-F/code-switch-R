@@ -1,16 +1,18 @@
 <template>
-  <div class="logs-page">
-    <div class="logs-header">
-      <BaseButton variant="outline" type="button" @click="backToHome">
-        {{ t('components.logs.back') }}
-      </BaseButton>
-      <div class="refresh-indicator">
-        <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
-        <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
+  <PageLayout
+    :eyebrow="t('components.logs.eyebrow')"
+    :title="t('components.logs.title')"
+    :sticky="true"
+    :showBackButton="true"
+  >
+    <template #actions>
+      <div class="logs-header-actions">
+        <span class="logs-refresh-label">{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
+        <BaseButton variant="outline" size="sm" :disabled="loading" @click="manualRefresh">
           {{ t('components.logs.refresh') }}
         </BaseButton>
       </div>
-    </div>
+    </template>
 
     <section class="logs-summary" v-if="statsCards.length">
       <article
@@ -177,15 +179,15 @@
       :sequenceId="detailDrawer.sequenceId"
       @close="closeDetailDrawer"
     />
-  </div>
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
+import PageLayout from '../common/PageLayout.vue'
 import RequestDetailDrawer from './RequestDetailDrawer.vue'
 import {
   fetchRequestLogs,
@@ -218,7 +220,6 @@ import { Line } from 'vue-chartjs'
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
 const { t } = useI18n()
-const router = useRouter()
 
 const logs = ref<RequestLog[]>([])
 const stats = ref<LogStats | null>(null)
@@ -536,10 +537,6 @@ const prevPage = () => {
   }
 }
 
-const backToHome = () => {
-  router.push('/')
-}
-
 const padHour = (num: number) => num.toString().padStart(2, '0')
 
 const formatTime = (value?: string) => {
@@ -667,6 +664,19 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.logs-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.logs-refresh-label {
+  font-size: 0.85rem;
+  color: var(--mac-text-secondary);
+}
+
 .logs-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

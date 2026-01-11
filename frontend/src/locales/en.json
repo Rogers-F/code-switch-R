@@ -53,7 +53,9 @@
     "env": "Env Check",
     "logs": "Logs",
     "console": "Console",
-    "settings": "Settings"
+    "settings": "Settings",
+    "updateFound": "New version: {version}",
+    "updateOpenReleases": "Open GitHub Releases"
   },
   "availability": {
     "title": "Availability Monitor",
@@ -477,6 +479,10 @@
         "loadHeatmapFailed": "Failed to load usage heatmap",
         "loadProvidersFailed": "Failed to load providers for {tab} tab"
       }
+    },
+    "console": {
+      "eyebrow": "Debug",
+      "title": "Console"
     },
     "logs": {
       "eyebrow": "Request diagnostics",
