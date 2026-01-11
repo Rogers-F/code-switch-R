@@ -121,7 +121,7 @@ jobs:
           $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.tag }}" } else { "${{ github.ref_name }}" }
           if ([string]::IsNullOrWhiteSpace($tag)) {
             $content = Get-Content version_service.go -Raw
-            if ($content -match 'const\\s+AppVersion\\s*=\\s*\"([^\"]+)\"') {
+            if ($content -match 'const\s+AppVersion\s*=\s*"([^"]+)"') {
               $tag = $Matches[1]
             } else {
               throw "Failed to read AppVersion from version_service.go"
