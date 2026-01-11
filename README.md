@@ -1,8 +1,8 @@
-# Code Switch R
+# Simon Switch
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-🚀 **Code Switch R** 是一款桌面应用：集中管理 Claude Code、Codex、Gemini CLI（以及自定义 CLI）的供应商配置，并通过本地代理实现**无感切换、故障降级、可观测与配置统一**。
+🚀 **Simon Switch** 是一款桌面应用：集中管理 Claude Code、Codex、Gemini CLI（以及自定义 CLI）的供应商配置，并通过本地代理实现**无感切换、故障降级、可观测与配置统一**。
 
 ## ✨ 核心特性
 
@@ -48,6 +48,7 @@
 
 本项目基于 [MIT License](LICENSE) 开源。
 
+本项目fork 自 https://github.com/Rogers-F/code-switch-R 项目，在这个项目基础上进行开发。
 ---
 
 <div align="center">

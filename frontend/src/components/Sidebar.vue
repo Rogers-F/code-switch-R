@@ -95,7 +95,7 @@ const navigate = (path: string) => {
 <template>
   <nav class="mac-sidebar" :class="{ collapsed: isCollapsed }">
     <div class="sidebar-header">
-      <span class="sidebar-title" v-if="!isCollapsed">Code Switch R</span>
+      <span class="sidebar-title" v-if="!isCollapsed">Simon Switch</span>
       <button class="collapse-btn" @click="toggleCollapse" :title="isCollapsed ? 'Expand' : 'Collapse'">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline v-if="isCollapsed" points="9 18 15 12 9 6"></polyline>
