@@ -26,7 +26,7 @@ git push origin vX.Y.Z
 ## 手动发布方式：workflow_dispatch
 
 如果你需要对同一个 tag 重新打包/重新发布，可到 Actions → Release → Run workflow：
-- 输入 `tag`（例如 `vX.Y.Z`）
+- `tag` 可选（例如 `vX.Y.Z`），**留空则从 `version_service.go` 读取 `AppVersion`**
 - 可选设置 `draft` / `prerelease`
 
 > 建议优先使用“推送 tag”触发；手动触发主要用于重跑。
@@ -44,4 +44,3 @@ git push origin vX.Y.Z
 如果你更换了仓库名或 owner，需要同步修改更新服务的默认仓库地址：
 - `services/updateservice.go:182`
 - `services/updateservice.go:2018`
-

@@ -7,8 +7,8 @@ on:
   workflow_dispatch: # 手动触发
     inputs:
       tag:
-        description: '要发布的 tag（例如 v3.0.3）'
-        required: true
+        description: '要发布的 tag（例如 v3.0.3）。留空则从 version_service.go 读取 AppVersion'
+        required: false
         type: string
       draft:
         description: '创建为草稿'
@@ -37,7 +37,16 @@ jobs:
       - name: Compute release version
         id: ver
         run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
+          if [ -z "$TAG" ]; then
+            TAG="$(awk -F'\"' '/const AppVersion/ {print $2; exit}' version_service.go)"
+          fi
+
           if [[ ! "$TAG" =~ ^v[0-9] ]]; then
             echo "Invalid tag: $TAG" >&2
             exit 1
@@ -110,6 +119,14 @@ jobs:
         shell: pwsh
         run: |
           $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.tag }}" } else { "${{ github.ref_name }}" }
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $content = Get-Content version_service.go -Raw
+            if ($content -match 'const\\s+AppVersion\\s*=\\s*\"([^\"]+)\"') {
+              $tag = $Matches[1]
+            } else {
+              throw "Failed to read AppVersion from version_service.go"
+            }
+          }
           if (-not $tag.StartsWith("v")) { throw "Invalid tag: $tag" }
           $version = $tag.Substring(1)
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -227,7 +244,16 @@ jobs:
       - name: Compute release version
         id: ver
         run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
+          if [ -z "$TAG" ]; then
+            TAG="$(awk -F'\"' '/const AppVersion/ {print $2; exit}' version_service.go)"
+          fi
+
           if [[ ! "$TAG" =~ ^v[0-9] ]]; then
             echo "Invalid tag: $TAG" >&2
             exit 1
@@ -346,7 +372,16 @@ jobs:
       - name: Compute release version
         id: ver
         run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
+          if [ -z "$TAG" ]; then
+            TAG="$(awk -F'\"' '/const AppVersion/ {print $2; exit}' version_service.go)"
+          fi
+
           if [[ ! "$TAG" =~ ^v[0-9] ]]; then
             echo "Invalid tag: $TAG" >&2
             exit 1
@@ -503,6 +538,7 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: release-assets/*
           body_path: /tmp/release_body.md
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
