@@ -179,7 +179,7 @@ func (us *UpdateService) checkUpdateViaStaticFile() (*UpdateInfo, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	// 直接下载静态文件，不调用 API，无限流风险
-	staticURL := "https://github.com/Rogers-F/code-switch-R/releases/latest/download/latest.json"
+	staticURL := "https://github.com/SimonUTD/code-switch-R/releases/latest/download/latest.json"
 
 	log.Printf("[UpdateService] 请求静态文件: %s", staticURL)
 

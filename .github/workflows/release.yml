@@ -5,6 +5,21 @@ on:
     tags:
       - 'v*'
   workflow_dispatch: # 手动触发
+    inputs:
+      tag:
+        description: '要发布的 tag（例如 v3.0.3）'
+        required: true
+        type: string
+      draft:
+        description: '创建为草稿'
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: '标记为预发布（prerelease）'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -19,9 +34,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute release version
+        id: ver
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            echo "Invalid tag: $TAG" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - name: Update version from tag
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${{ steps.ver.outputs.version }}"
           echo "Updating version to: $VERSION"
           sed -i '' "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
           echo "Updated version_service.go:"
@@ -79,10 +105,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute release version
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.tag }}" } else { "${{ github.ref_name }}" }
+          if (-not $tag.StartsWith("v")) { throw "Invalid tag: $tag" }
+          $version = $tag.Substring(1)
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Update version from tag
         shell: pwsh
         run: |
-          $VERSION = "${{ github.ref_name }}".TrimStart('v')
+          $VERSION = "${{ steps.ver.outputs.version }}"
           Write-Host "Updating version to: $VERSION"
 
           # Update version_service.go
@@ -188,9 +224,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute release version
+        id: ver
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            echo "Invalid tag: $TAG" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - name: Update version from tag
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${{ steps.ver.outputs.version }}"
           echo "Updating version to: $VERSION"
           sed -i "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
           echo "Updated version_service.go:"
@@ -258,7 +305,7 @@ jobs:
 
       - name: Update nfpm version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${{ steps.ver.outputs.version }}"
           sed -i "s/^version:.*/version: \"$VERSION\"/" build/linux/nfpm/nfpm.yaml
           echo "Updated nfpm version to: $VERSION"
 
@@ -296,6 +343,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute release version
+        id: ver
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            echo "Invalid tag: $TAG" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -330,9 +388,9 @@ jobs:
           ls -lh release-assets/
       - name: Generate latest.json
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          TAG="${{ steps.ver.outputs.tag }}"
           REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
 
           # Read SHA256 checksums from existing .sha256 files
           WIN_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch.exe.sha256)
@@ -340,7 +398,7 @@ jobs:
 
           cat > release-assets/latest.json << EOF
           {
-            "version": "${VERSION}",
+            "version": "${TAG}",
             "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "files": {
               "windows": {
@@ -371,7 +429,7 @@ jobs:
 
       - name: Generate release body
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${{ steps.ver.outputs.version }}"
           echo "Generating release body for v$VERSION"
 
           # 提取当前版本的更新内容（从标题到下一个版本标题之前）
@@ -443,9 +501,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
           files: release-assets/*
           body_path: /tmp/release_body.md
-          draft: false
-          prerelease: false
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

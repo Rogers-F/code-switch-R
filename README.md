@@ -37,6 +37,7 @@
 - 项目概览：`docs/PROJECT_OVERVIEW.md`
 - 工程规范：`docs/ENGINEERING_GUIDELINES.md`
 - 开发与构建：`docs/DEVELOPMENT.md`
+- 发布与 GitHub Actions：`docs/RELEASE.md`
 
 ## 🤝 反馈与贡献
 
