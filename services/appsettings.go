@@ -23,8 +23,20 @@ type AppSettings struct {
 	AutoStart            bool `json:"auto_start"`
 	AutoUpdate           bool `json:"auto_update"`
 	AutoConnectivityTest bool `json:"auto_connectivity_test"`
-	EnableSwitchNotify   bool `json:"enable_switch_notify"`   // 供应商切换通知开关
-	EnableRoundRobin     bool `json:"enable_round_robin"`     // 同 Level 轮询负载均衡开关（默认关闭）
+	EnableSwitchNotify   bool `json:"enable_switch_notify"` // 供应商切换通知开关
+	EnableRoundRobin     bool `json:"enable_round_robin"`   // 同 Level 轮询负载均衡开关（默认关闭）
+
+	// ========== 出站代理（全局配置 + 分渠道开关） ==========
+	// 说明：
+	// - ProxyAddress/ProxyType 定义“代理服务器”本身
+	// - 各渠道开关决定该渠道的所有网络流量（监控 + 转发）是否走代理
+	// - 未填写 ProxyAddress 时，即使开关为 true 也不会启用代理
+	ProxyAddress string `json:"proxy_address,omitempty"` // 代理地址（例：127.0.0.1:7890 或 http://127.0.0.1:7890）
+	ProxyType    string `json:"proxy_type,omitempty"`    // 代理类型：http|socks5
+	ProxyClaude  bool   `json:"proxy_claude,omitempty"`  // Claude 渠道是否走代理
+	ProxyCodex   bool   `json:"proxy_codex,omitempty"`   // Codex 渠道是否走代理
+	ProxyGemini  bool   `json:"proxy_gemini,omitempty"`  // Gemini 渠道是否走代理
+	ProxyCustom  bool   `json:"proxy_custom,omitempty"`  // 自定义 CLI（custom:*）渠道是否走代理
 }
 
 type AppSettingsService struct {
@@ -136,22 +148,35 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		}
 	}
 
-		return AppSettings{
-			ShowHeatmap:          true,
-			ShowHomeTitle:        true,
-			AutoStart:            autoStartEnabled,
-			AutoUpdate:           true,  // 默认开启自动更新
-			AutoConnectivityTest: true,  // 默认开启自动可用性监控（开箱即用）
-			EnableSwitchNotify:   true,  // 默认开启切换通知
-			EnableRoundRobin:     false, // 默认关闭轮询（使用顺序降级）
-		}
+	return AppSettings{
+		ShowHeatmap:          true,
+		ShowHomeTitle:        true,
+		AutoStart:            autoStartEnabled,
+		AutoUpdate:           true,  // 默认开启自动更新
+		AutoConnectivityTest: true,  // 默认开启自动可用性监控（开箱即用）
+		EnableSwitchNotify:   true,  // 默认开启切换通知
+		EnableRoundRobin:     false, // 默认关闭轮询（使用顺序降级）
+
+		ProxyAddress: "",
+		ProxyType:    "http",
+		ProxyClaude:  false,
+		ProxyCodex:   false,
+		ProxyGemini:  false,
+		ProxyCustom:  false,
 	}
+}
 
 // GetAppSettings returns the persisted app settings or defaults if the file does not exist.
 func (as *AppSettingsService) GetAppSettings() (AppSettings, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
-	return as.loadLocked()
+	settings, err := as.loadLocked()
+	if err != nil {
+		return settings, err
+	}
+	// 启动阶段也要同步代理配置，确保后台监控/转发拿到最新配置
+	UpdateProxyConfigFromAppSettings(settings)
+	return settings, nil
 }
 
 // SaveAppSettings persists the provided settings to disk.
@@ -175,6 +200,8 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	if err := as.saveLocked(settings); err != nil {
 		return settings, err
 	}
+	// 同步代理配置（保存成功后刷新缓存/连接池）
+	UpdateProxyConfigFromAppSettings(settings)
 	return settings, nil
 }
 

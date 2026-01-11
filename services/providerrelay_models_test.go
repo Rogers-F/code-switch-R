@@ -46,7 +46,7 @@ func TestModelsHandler(t *testing.T) {
 
 	// 清理测试数据，确保测试隔离
 	t.Cleanup(func() {
-		cleanupProviderFile(t, "claude")
+		cleanupProviderFile(t, "codex")
 	})
 
 	// 创建模拟的上游服务器
@@ -109,7 +109,7 @@ func TestModelsHandler(t *testing.T) {
 	}
 
 	// 保存 provider 配置
-	err := providerService.SaveProviders("claude", []Provider{testProvider})
+	err := providerService.SaveProviders("codex", []Provider{testProvider})
 	if err != nil {
 		t.Fatalf("保存 provider 配置失败: %v", err)
 	}

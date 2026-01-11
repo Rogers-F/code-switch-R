@@ -176,16 +176,9 @@ var hopByHopHeaders = map[string]bool{
 	"Upgrade":             true,
 }
 
-// defaultRetryHTTPClient 是共享的带网络级重试的 HTTP 客户端
-// 使用 sync.Once 确保只初始化一次，避免每次请求创建新的 Transport 造成资源泄漏
-var (
-	defaultRetryHTTPClient     *http.Client
-	defaultRetryHTTPClientOnce sync.Once
-)
-
-// RetryTransport 是一个支持网络级错误自动重试的 http.RoundTripper
-// 用于处理瞬时网络抖动（TCP reset、DNS 解析失败等），避免直接计入应用层失败次数
-type RetryTransport struct {
+	// RetryTransport 是一个支持网络级错误自动重试的 http.RoundTripper
+	// 用于处理瞬时网络抖动（TCP reset、DNS 解析失败等），避免直接计入应用层失败次数
+	type RetryTransport struct {
 	Base       http.RoundTripper
 	MaxRetries int           // 最大重试次数
 	RetryDelay time.Duration // 重试间隔
@@ -301,60 +294,28 @@ func isTransientNetworkError(err error) bool {
 	return false
 }
 
-// newRetryHTTPClient 返回带有网络级重试的 HTTP 客户端
-// 使用默认参数（1 次重试，500ms 间隔）时返回共享的单例客户端，避免资源泄漏
-// 自定义参数时创建新客户端（罕见场景）
-//
-// 【资源管理注意事项】
-// - 使用默认参数时返回共享单例，无需关闭
-// - 自定义参数时返回新客户端，其 Transport 包含连接池
-// - 如需关闭自定义客户端，可调用 client.CloseIdleConnections()
-// - 建议：尽量复用客户端实例，避免频繁创建/销毁带来的资源开销
-//
-// 【并发安全】
-// - 不要直接修改返回客户端的 Timeout 字段，这会影响共享单例的所有调用方
-// - 应使用 context.WithTimeout 或 context.WithDeadline 控制单次请求超时
-func newRetryHTTPClient(maxRetries int, retryDelay time.Duration) *http.Client {
-	// 使用默认参数时返回共享的单例客户端
-	// 注意：maxRetries <= 0 被视为"使用默认值"（1次重试），而非"不重试"
-	// 如需完全禁用重试，应使用标准 http.Client 而非此函数
-	if (maxRetries <= 0 || maxRetries == 1) && (retryDelay <= 0 || retryDelay == 500*time.Millisecond) {
-		defaultRetryHTTPClientOnce.Do(func() {
-			defaultRetryHTTPClient = &http.Client{
-				Transport: &RetryTransport{
-					Base: &http.Transport{
-						MaxIdleConns:        100,
-						IdleConnTimeout:     90 * time.Second,
-						MaxIdleConnsPerHost: 10,
-					},
-					MaxRetries: 1,
-					RetryDelay: 500 * time.Millisecond,
-				},
-			}
-		})
-		return defaultRetryHTTPClient
-	}
+	// newRetryHTTPClient 返回带有网络级重试的 HTTP 客户端（按渠道应用代理配置）。
+	// - Base Transport 由 GetHTTPTransportForKind(kind) 提供，确保该渠道所有网络流量遵循“走/不走代理”配置
+	// - 超时应通过 context.WithTimeout 控制，避免修改共享客户端字段
+	func newRetryHTTPClient(kind string, maxRetries int, retryDelay time.Duration) *http.Client {
+		// 注意：maxRetries <= 0 被视为"使用默认值"（1次重试），而非"不重试"
+		// 如需完全禁用重试，应使用标准 http.Client 或直接使用 GetHTTPClientForKind()
+		if maxRetries <= 0 {
+			maxRetries = 1
+		}
+		if retryDelay <= 0 {
+			retryDelay = 500 * time.Millisecond
+		}
 
-	// 自定义参数时创建新客户端
-	if maxRetries <= 0 {
-		maxRetries = 1
-	}
-	if retryDelay <= 0 {
-		retryDelay = 500 * time.Millisecond
-	}
-
-	return &http.Client{
-		Transport: &RetryTransport{
-			Base: &http.Transport{
-				MaxIdleConns:        100,
-				IdleConnTimeout:     90 * time.Second,
-				MaxIdleConnsPerHost: 10,
+		baseTransport := GetHTTPTransportForKind(kind)
+		return &http.Client{
+			Transport: &RetryTransport{
+				Base:       baseTransport,
+				MaxRetries: maxRetries,
+				RetryDelay: retryDelay,
 			},
-			MaxRetries: maxRetries,
-			RetryDelay: retryDelay,
-		},
+		}
 	}
-}
 
 // isHopByHopHeader 检查给定的 header 是否是逐跳头
 func isHopByHopHeader(header string) bool {
@@ -650,8 +611,8 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	router.POST("/responses", prs.proxyHandler("codex", "/responses"))
 
 	// /v1/models 端点（OpenAI-compatible API）
-	// 支持 Claude 和 Codex 平台
-	router.GET("/v1/models", prs.modelsHandler("claude"))
+	// 默认走 codex（OpenAI）平台的 providers
+	router.GET("/v1/models", prs.modelsHandler("codex"))
 
 	// Gemini API 端点（使用专门的路径前缀避免与 Claude 冲突）
 	router.POST("/gemini/v1beta/*any", prs.geminiProxyHandler("/v1beta"))
@@ -1255,7 +1216,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	// 使用带网络级重试的 http.Client（超时由 context 控制）
 	// 网络级重试：1 次，间隔 500ms，仅针对瞬时网络错误（TCP reset、DNS 失败等）
 	// 应用层重试由外层 BlacklistService 控制，处理 API 级别错误
-	httpClient := newRetryHTTPClient(1, 500*time.Millisecond)
+		httpClient := newRetryHTTPClient(kind, 1, 500*time.Millisecond)
 	httpResp, err := httpClient.Do(httpReq)
 
 	// 无论成功失败，先尝试记录 HttpCode
@@ -2390,7 +2351,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 发送请求
 	// 使用带网络级重试的 HTTP 客户端，处理瞬时网络错误
 	// 【修复】使用 context 超时而非直接修改共享客户端的 Timeout 字段，避免影响其他请求
-	client := newRetryHTTPClient(1, 500*time.Millisecond)
+		client := newRetryHTTPClient("gemini", 1, 500*time.Millisecond)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 300*time.Second)
 	defer cancel()
 	req = req.WithContext(ctx)
@@ -3018,9 +2979,14 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		req.Header.Set("Accept", "application/json")
 	}
 
-	// 发送请求
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+		// 发送请求（按渠道应用代理配置）
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		req = req.WithContext(ctx)
+
+		// 网络级重试：1 次，间隔 500ms，仅针对瞬时网络错误
+		client := newRetryHTTPClient(kind, 1, 500*time.Millisecond)
+		resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("[%s] ✗ 请求失败: %s | 错误: %v\n", logPrefix, selectedProvider.Name, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("请求失败: %v", err)})

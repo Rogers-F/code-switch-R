@@ -67,13 +67,99 @@
             </div>
           </ListItem>
         </div>
-      </section>
+	      </section>
 
-      <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.connectivity') }}</h2>
-        <div class="mac-panel">
-          <ListItem :label="$t('components.general.label.autoConnectivityTest')">
-            <div class="toggle-with-hint">
+	      <section>
+	        <h2 class="mac-section-title">{{ $t('components.general.title.proxy') }}</h2>
+	        <div class="mac-panel">
+	          <ListItem
+	            :label="$t('components.general.label.proxyAddress')"
+	            :subLabel="$t('components.general.label.proxyAddressHint')">
+	            <input
+	              type="text"
+	              v-model="proxyAddress"
+	              :placeholder="$t('components.general.label.proxyAddressPlaceholder')"
+	              :disabled="settingsLoading || saveBusy"
+	              class="mac-input import-path-input"
+	              @change="persistAppSettings"
+	            />
+	          </ListItem>
+	          <ListItem
+	            :label="$t('components.general.label.proxyType')"
+	            :subLabel="$t('components.general.label.proxyTypeHint')">
+	            <select
+	              v-model="proxyType"
+	              :disabled="settingsLoading || saveBusy"
+	              class="mac-select"
+	              @change="persistAppSettings">
+	              <option value="http">{{ $t('components.general.label.proxyTypeHttp') }}</option>
+	              <option value="socks5">{{ $t('components.general.label.proxyTypeSocks5') }}</option>
+	            </select>
+	          </ListItem>
+	          <ListItem :label="$t('components.general.label.proxyClaude')">
+	            <div class="toggle-with-hint">
+	              <label class="mac-switch">
+	                <input
+	                  type="checkbox"
+	                  :disabled="settingsLoading || saveBusy"
+	                  v-model="proxyClaude"
+	                  @change="persistAppSettings"
+	                />
+	                <span></span>
+	              </label>
+	              <span class="hint-text">{{ $t('components.general.label.proxyChannelHint') }}</span>
+	            </div>
+	          </ListItem>
+	          <ListItem :label="$t('components.general.label.proxyCodex')">
+	            <div class="toggle-with-hint">
+	              <label class="mac-switch">
+	                <input
+	                  type="checkbox"
+	                  :disabled="settingsLoading || saveBusy"
+	                  v-model="proxyCodex"
+	                  @change="persistAppSettings"
+	                />
+	                <span></span>
+	              </label>
+	              <span class="hint-text">{{ $t('components.general.label.proxyChannelHint') }}</span>
+	            </div>
+	          </ListItem>
+	          <ListItem :label="$t('components.general.label.proxyGemini')">
+	            <div class="toggle-with-hint">
+	              <label class="mac-switch">
+	                <input
+	                  type="checkbox"
+	                  :disabled="settingsLoading || saveBusy"
+	                  v-model="proxyGemini"
+	                  @change="persistAppSettings"
+	                />
+	                <span></span>
+	              </label>
+	              <span class="hint-text">{{ $t('components.general.label.proxyChannelHint') }}</span>
+	            </div>
+	          </ListItem>
+	          <ListItem :label="$t('components.general.label.proxyCustom')">
+	            <div class="toggle-with-hint">
+	              <label class="mac-switch">
+	                <input
+	                  type="checkbox"
+	                  :disabled="settingsLoading || saveBusy"
+	                  v-model="proxyCustom"
+	                  @change="persistAppSettings"
+	                />
+	                <span></span>
+	              </label>
+	              <span class="hint-text">{{ $t('components.general.label.proxyChannelHint') }}</span>
+	            </div>
+	          </ListItem>
+	        </div>
+	      </section>
+
+	      <section>
+	        <h2 class="mac-section-title">{{ $t('components.general.title.connectivity') }}</h2>
+	        <div class="mac-panel">
+	          <ListItem :label="$t('components.general.label.autoConnectivityTest')">
+	            <div class="toggle-with-hint">
               <label class="mac-switch">
                 <input
                   type="checkbox"
@@ -382,15 +468,24 @@ const getCachedValue = (key: string, defaultValue: boolean): boolean => {
   const cached = localStorage.getItem(`app-settings-${key}`)
   return cached !== null ? cached === 'true' : defaultValue
 }
-const heatmapEnabled = ref(getCachedValue('heatmap', true))
-const homeTitleVisible = ref(getCachedValue('homeTitle', true))
-const autoStartEnabled = ref(getCachedValue('autoStart', false))
-	const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
-	const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
-	const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
-	const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
-	const settingsLoading = ref(true)
-	const saveBusy = ref(false)
+	const heatmapEnabled = ref(getCachedValue('heatmap', true))
+	const homeTitleVisible = ref(getCachedValue('homeTitle', true))
+	const autoStartEnabled = ref(getCachedValue('autoStart', false))
+		const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
+		const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
+		const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
+		const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
+
+	// 出站代理配置
+	const proxyAddress = ref('')
+	const proxyType = ref('http')
+	const proxyClaude = ref(getCachedValue('proxyClaude', false))
+	const proxyCodex = ref(getCachedValue('proxyCodex', false))
+	const proxyGemini = ref(getCachedValue('proxyGemini', false))
+	const proxyCustom = ref(getCachedValue('proxyCustom', false))
+
+		const settingsLoading = ref(true)
+		const saveBusy = ref(false)
 
 // 更新相关状态
 const updateState = ref<UpdateState | null>(null)
@@ -433,30 +528,49 @@ const loadAppSettings = async () => {
     const data = await fetchAppSettings()
     heatmapEnabled.value = data?.show_heatmap ?? true
     homeTitleVisible.value = data?.show_home_title ?? true
-    autoStartEnabled.value = data?.auto_start ?? false
-	    autoUpdateEnabled.value = data?.auto_update ?? true
-	    autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
-	    switchNotifyEnabled.value = data?.enable_switch_notify ?? true
-	    roundRobinEnabled.value = data?.enable_round_robin ?? false
+	    autoStartEnabled.value = data?.auto_start ?? false
+		    autoUpdateEnabled.value = data?.auto_update ?? true
+		    autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
+		    switchNotifyEnabled.value = data?.enable_switch_notify ?? true
+		    roundRobinEnabled.value = data?.enable_round_robin ?? false
 
-	    // 缓存到 localStorage，下次打开时直接显示正确状态
-	    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-	    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
-	    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
+		    proxyAddress.value = data?.proxy_address ?? ''
+		    proxyType.value = (data?.proxy_type ?? 'http') || 'http'
+		    proxyClaude.value = Boolean(data?.proxy_claude)
+		    proxyCodex.value = Boolean(data?.proxy_codex)
+		    proxyGemini.value = Boolean(data?.proxy_gemini)
+		    proxyCustom.value = Boolean(data?.proxy_custom)
+
+		    // 缓存到 localStorage，下次打开时直接显示正确状态
+		    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
+		    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+		    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
 	    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-	    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
-	    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
-	    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
-	  } catch (error) {
-	    console.error('failed to load app settings', error)
-	    heatmapEnabled.value = true
-	    homeTitleVisible.value = true
+		    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+		    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+		    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+
+		    localStorage.setItem('app-settings-proxyClaude', String(proxyClaude.value))
+		    localStorage.setItem('app-settings-proxyCodex', String(proxyCodex.value))
+		    localStorage.setItem('app-settings-proxyGemini', String(proxyGemini.value))
+		    localStorage.setItem('app-settings-proxyCustom', String(proxyCustom.value))
+		  } catch (error) {
+		    console.error('failed to load app settings', error)
+		    heatmapEnabled.value = true
+		    homeTitleVisible.value = true
 	    autoStartEnabled.value = false
-	    autoUpdateEnabled.value = true
-	    autoConnectivityTestEnabled.value = false
-	    switchNotifyEnabled.value = true
-	    roundRobinEnabled.value = false
-	  } finally {
+		    autoUpdateEnabled.value = true
+		    autoConnectivityTestEnabled.value = false
+		    switchNotifyEnabled.value = true
+		    roundRobinEnabled.value = false
+
+		    proxyAddress.value = ''
+		    proxyType.value = 'http'
+		    proxyClaude.value = false
+		    proxyCodex.value = false
+		    proxyGemini.value = false
+		    proxyCustom.value = false
+		  } finally {
 	    settingsLoading.value = false
 	  }
 	}
@@ -465,16 +579,23 @@ const persistAppSettings = async () => {
   if (settingsLoading.value || saveBusy.value) return
   saveBusy.value = true
   try {
-    const payload: AppSettings = {
-      show_heatmap: heatmapEnabled.value,
-      show_home_title: homeTitleVisible.value,
-	      auto_start: autoStartEnabled.value,
-	      auto_update: autoUpdateEnabled.value,
-	      auto_connectivity_test: autoConnectivityTestEnabled.value,
-	      enable_switch_notify: switchNotifyEnabled.value,
-	      enable_round_robin: roundRobinEnabled.value,
-	    }
-	    await saveAppSettings(payload)
+		    const payload: AppSettings = {
+		      show_heatmap: heatmapEnabled.value,
+		      show_home_title: homeTitleVisible.value,
+			      auto_start: autoStartEnabled.value,
+			      auto_update: autoUpdateEnabled.value,
+			      auto_connectivity_test: autoConnectivityTestEnabled.value,
+			      enable_switch_notify: switchNotifyEnabled.value,
+			      enable_round_robin: roundRobinEnabled.value,
+
+			      proxy_address: proxyAddress.value.trim(),
+			      proxy_type: proxyType.value,
+			      proxy_claude: proxyClaude.value,
+			      proxy_codex: proxyCodex.value,
+			      proxy_gemini: proxyGemini.value,
+			      proxy_custom: proxyCustom.value,
+			    }
+			    await saveAppSettings(payload)
 
     // 同步自动更新设置到 UpdateService
     await setAutoCheckEnabled(autoUpdateEnabled.value)
@@ -489,13 +610,18 @@ const persistAppSettings = async () => {
 	    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
 	    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
 	    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-	    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
-	    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
-	    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
-	    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+		    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+		    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
+		    localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
+		    localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
 
-	    window.dispatchEvent(new CustomEvent('app-settings-updated'))
-	  } catch (error) {
+		    localStorage.setItem('app-settings-proxyClaude', String(proxyClaude.value))
+		    localStorage.setItem('app-settings-proxyCodex', String(proxyCodex.value))
+		    localStorage.setItem('app-settings-proxyGemini', String(proxyGemini.value))
+		    localStorage.setItem('app-settings-proxyCustom', String(proxyCustom.value))
+
+		    window.dispatchEvent(new CustomEvent('app-settings-updated'))
+		  } catch (error) {
 	    console.error('failed to save app settings', error)
 	  } finally {
     saveBusy.value = false

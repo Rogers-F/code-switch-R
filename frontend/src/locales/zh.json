@@ -574,7 +574,8 @@
         "blacklist": "拉黑配置",
         "configBackup": "配置导入/导出",
         "dataImport": "数据导入",
-        "connectivity": "连通性检测"
+        "connectivity": "连通性检测",
+        "proxy": "出站代理"
       },
       "label": {
         "assistant_access": "辅助功能访问权限",
@@ -599,6 +600,18 @@
         "next_up": "下次启动自动检查更新",
         "autoConnectivityTest": "自动可用性监控",
         "autoConnectivityTestHint": "启用后会每分钟自动检测已启用监控的供应商可用性",
+        "proxyAddress": "代理地址",
+        "proxyAddressHint": "留空则不启用代理（即使下方开关为开启）",
+        "proxyAddressPlaceholder": "例如 127.0.0.1:7890 或 http://127.0.0.1:7890",
+        "proxyType": "代理类型",
+        "proxyTypeHint": "支持 HTTP/HTTPS 或 SOCKS5",
+        "proxyTypeHttp": "HTTP/HTTPS",
+        "proxyTypeSocks5": "SOCKS5",
+        "proxyClaude": "Claude 走代理",
+        "proxyCodex": "Codex /responses 走代理",
+        "proxyGemini": "Gemini 走代理",
+        "proxyCustom": "Custom CLI 走代理",
+        "proxyChannelHint": "该渠道的所有网络流量（转发 + 监控）都遵循此开关",
         "blacklistThreshold": "失败次数阈值",
         "blacklistDuration": "拉黑时长",
         "saveBlacklist": "保存配置",

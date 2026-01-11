@@ -100,9 +100,6 @@ type HealthCheckService struct {
 	running      bool
 	stopChan     chan struct{}
 	pollInterval time.Duration
-
-	// HTTP 客户端（带连接池）
-	client *http.Client
 }
 
 // NewHealthCheckService 创建健康检查服务
@@ -122,16 +119,6 @@ func NewHealthCheckService(
 			"gemini": {},
 		},
 		pollInterval: time.Duration(DefaultPollIntervalSeconds) * time.Second,
-		client: &http.Client{
-			// 由每次请求的 context 控制超时，避免固定值截断自定义配置
-			Timeout: 0,
-			Transport: &http.Transport{
-				MaxIdleConns:        20,
-				IdleConnTimeout:     30 * time.Second,
-				DisableCompression:  true,
-				MaxIdleConnsPerHost: 5,
-			},
-		},
 	}
 }
 
@@ -531,11 +518,18 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	endpoint := hcs.getEffectiveEndpoint(&provider, platform)
 	timeout := hcs.getEffectiveTimeout(&provider)
 
+	// 与 ProviderRelayService 行为对齐：健康检查请求使用映射后的模型名
+	// 但结果记录保留用户配置的原模型名，便于 UI 展示与排查
+	mappedModel := provider.GetEffectiveModel(model)
+	if mappedModel != model {
+		log.Printf("[HealthCheck] [%s/%s] 模型映射: %s -> %s", platform, provider.Name, model, mappedModel)
+	}
+
 	result.Model = model
 	result.Endpoint = endpoint
 
 	// 构建请求体
-	reqBody := hcs.buildTestRequest(platform, model)
+	reqBody := hcs.buildTestRequest(platform, mappedModel)
 	if reqBody == nil {
 		result.ErrorMessage = "无法构建测试请求"
 		return result
@@ -557,26 +551,34 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if strings.EqualFold(platform, "claude") {
+		req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
+	}
 	if provider.APIKey != "" {
-		// 根据认证方式设置请求头
-		authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
-		switch authType {
-		case "auto", "":
-			// 自动检测：使用平台默认（claude: x-api-key, codex: bearer）
-			if strings.ToLower(platform) == "claude" {
-				req.Header.Set("x-api-key", provider.APIKey)
-				req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
+		authTypeRaw := strings.TrimSpace(provider.ConnectivityAuthType)
+		authTypeLower := strings.ToLower(authTypeRaw)
+		if authTypeLower == "" || authTypeLower == "auto" {
+			// 空值/auto 时使用平台默认（claude: x-api-key, codex: bearer）
+			if strings.EqualFold(platform, "claude") {
+				authTypeLower = "x-api-key"
 			} else {
-				req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+				authTypeLower = "bearer"
 			}
+		}
+
+		switch authTypeLower {
 		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
-			req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
 		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 		default:
-			// 未知值回退到 Bearer（与 providerrelay.go 保持一致）
-			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+			// 自定义 Header 名
+			headerName := authTypeRaw
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			req.Header.Set(headerName, provider.APIKey)
 		}
 	}
 
@@ -588,7 +590,8 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	defer cancelReq()
 	req = req.WithContext(reqCtx)
 
-	resp, err := hcs.client.Do(req)
+	client := GetHTTPClientForKind(platform)
+	resp, err := client.Do(req)
 	latencyMs := int(time.Since(start).Milliseconds())
 	result.LatencyMs = latencyMs
 
@@ -687,19 +690,14 @@ func (hcs *HealthCheckService) getEffectiveEndpoint(provider *Provider, platform
 		return provider.AvailabilityConfig.TestEndpoint
 	}
 
-	// 优先级 2：用户配置的生产端点（如果配置了 apiEndpoint）
-	if provider.APIEndpoint != "" {
-		return provider.GetEffectiveEndpoint("")
-	}
-
-	// 优先级 3：平台默认端点
+	// 平台默认端点
 	switch strings.ToLower(platform) {
 	case "claude":
-		return "/v1/messages"
+		return provider.GetEffectiveEndpoint("/v1/messages")
 	case "codex":
-		return "/responses"
+		return provider.GetEffectiveEndpoint("/responses")
 	default:
-		return "/v1/chat/completions"
+		return provider.GetEffectiveEndpoint("/v1/chat/completions")
 	}
 }
 
@@ -727,7 +725,19 @@ func (hcs *HealthCheckService) buildTestRequest(platform, model string) []byte {
 		return data
 	}
 
-	// OpenAI/Codex 格式
+	// Codex 格式：部分实现不支持 max_tokens 字段（对齐 fork 修复）
+	if platform == "codex" {
+		reqBody := map[string]interface{}{
+			"model": model,
+			"messages": []map[string]string{
+				{"role": "user", "content": "hi"},
+			},
+		}
+		data, _ := json.Marshal(reqBody)
+		return data
+	}
+
+	// OpenAI 格式
 	reqBody := map[string]interface{}{
 		"model":      model,
 		"max_tokens": 1,

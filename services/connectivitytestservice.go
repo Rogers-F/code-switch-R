@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -62,8 +61,6 @@ type ConnectivityTestService struct {
 	autoTestEnabled bool
 	stopChan        chan struct{}
 	running         bool
-
-	client *http.Client
 }
 
 // NewConnectivityTestService 创建连通性测试服务
@@ -82,15 +79,6 @@ func NewConnectivityTestService(
 			"gemini": {},
 		},
 		autoTestEnabled: false,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     30 * time.Second,
-				DisableCompression:  true,
-				MaxIdleConnsPerHost: 5,
-			},
-		},
 	}
 }
 
@@ -133,21 +121,36 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 
 	// 设置 Headers
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if strings.EqualFold(platform, "claude") {
+		req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
+	}
 	if provider.APIKey != "" {
-		// authType 已通过 getEffectiveAuthType 标准化为小写（auto/空→平台默认，未知→bearer+警告）
-		switch authType {
+		authTypeLower := strings.ToLower(authType)
+		switch authTypeLower {
 		case "x-api-key":
 			req.Header.Set("x-api-key", provider.APIKey)
-			req.Header.Set("anthropic-version", GetAnthropicAPIVersion())
-		default:
-			// bearer 或其他（getEffectiveAuthType 已处理未知值并记录警告）
+		case "bearer":
 			req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+		default:
+			// 自定义 Header 名
+			headerName := strings.TrimSpace(authType)
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			req.Header.Set(headerName, provider.APIKey)
 		}
 	}
 
 	// 发送请求并计时
 	start := time.Now()
-	resp, err := cts.client.Do(req)
+	timeoutHintMs := 0
+	if deadline, ok := req.Context().Deadline(); ok {
+		timeoutHintMs = int(time.Until(deadline).Milliseconds())
+	}
+
+	client := GetHTTPClientForKind(platform)
+	resp, err := client.Do(req)
 	latencyMs := int(time.Since(start).Milliseconds())
 	result.LatencyMs = latencyMs
 
@@ -157,7 +160,11 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		if isTimeoutError(err) {
 			result.Status = StatusDegraded
 			result.SubStatus = SubStatusSlowLatency
-			result.Message = fmt.Sprintf("响应超时 (>%ds)", int(cts.client.Timeout.Seconds()))
+			if timeoutHintMs > 0 {
+				result.Message = fmt.Sprintf("响应超时 (>%dms)", timeoutHintMs)
+			} else {
+				result.Message = "响应超时"
+			}
 			return result
 		}
 		// 真正的网络错误（连接失败、DNS 解析失败等）
@@ -211,7 +218,7 @@ func (cts *ConnectivityTestService) getEffectiveEndpoint(provider *Provider, pla
 
 // getEffectiveAuthType 获取有效认证方式（含平台默认值）
 // auto 或空值时返回平台默认，与 providerrelay.go 保持一致
-// 始终返回小写字符串以简化调用方逻辑
+// 对于自定义 Header 名，会返回原始值以便调用方透传
 func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, platform string) string {
 	authType := strings.TrimSpace(provider.ConnectivityAuthType)
 	authTypeLower := strings.ToLower(authType)
@@ -226,9 +233,9 @@ func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, pla
 	if authTypeLower == "bearer" || authTypeLower == "x-api-key" {
 		return authTypeLower
 	}
-	// 未知值回退到 bearer，记录警告以便排查
-	slog.Warn("Unknown auth type, falling back to Bearer", "authType", authType, "platform", platform)
-	return "bearer"
+
+	// 其他值按自定义 Header 名处理
+	return authType
 }
 
 // buildTestRequest 根据端点构建测试请求体
@@ -249,6 +256,14 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 		model = "gpt-3.5-turbo"
 	}
 
+	// 与 ProviderRelayService 行为对齐：连通性测试请求使用映射后的模型名
+	mappedModel := provider.GetEffectiveModel(model)
+	if mappedModel != model {
+		fmt.Printf("[ConnectivityTest] 模型映射: %s -> %s (provider=%s, platform=%s)\n",
+			model, mappedModel, provider.Name, platform)
+	}
+	model = mappedModel
+
 	// 获取有效端点（含平台默认值）
 	endpoint := strings.ToLower(cts.getEffectiveEndpoint(provider, platform))
 
@@ -268,8 +283,7 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 	// Codex 格式: /responses
 	if strings.Contains(endpoint, "/responses") {
 		reqBody := map[string]interface{}{
-			"model":      model,
-			"max_tokens": 1,
+			"model": model,
 			"messages": []map[string]string{
 				{"role": "user", "content": "hi"},
 			},
@@ -364,6 +378,7 @@ func (cts *ConnectivityTestService) buildTargetURL(provider *Provider, platform 
 	}
 	return baseURL + endpoint
 }
+
 // isTimeoutError 检测错误是否为超时类型
 // 超时包括：context.DeadlineExceeded、net.Error.Timeout()、以及错误消息中包含 timeout 的情况
 func isTimeoutError(err error) bool {

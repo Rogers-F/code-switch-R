@@ -573,7 +573,8 @@
         "blacklist": "Blacklist Settings",
         "configBackup": "Config Export/Import",
         "dataImport": "Data Import",
-        "connectivity": "Connectivity Test"
+        "connectivity": "Connectivity Test",
+        "proxy": "Outbound Proxy"
       },
       "label": {
         "assistant_access": "Accessibility permissions",
@@ -593,6 +594,18 @@
         "autoUpdate": "Automatic update",
         "autoConnectivityTest": "Auto Availability Monitoring",
         "autoConnectivityTestHint": "Automatically check availability of monitored providers every minute",
+        "proxyAddress": "Proxy address",
+        "proxyAddressHint": "Leave blank to disable proxy (even if channel toggles are on)",
+        "proxyAddressPlaceholder": "e.g. 127.0.0.1:7890 or http://127.0.0.1:7890",
+        "proxyType": "Proxy type",
+        "proxyTypeHint": "Supports HTTP/HTTPS and SOCKS5",
+        "proxyTypeHttp": "HTTP/HTTPS",
+        "proxyTypeSocks5": "SOCKS5",
+        "proxyClaude": "Proxy for Claude",
+        "proxyCodex": "Proxy for Codex (/responses)",
+        "proxyGemini": "Proxy for Gemini",
+        "proxyCustom": "Proxy for Custom CLI",
+        "proxyChannelHint": "Applies to all traffic of this channel (relay + monitoring)",
         "lastCheck": "Last check",
         "currentVersion": "Current version",
         "latestVersion": "Latest version",
