@@ -14,25 +14,41 @@ vars:
 tasks:
   build:
     summary: Builds the application
+    env:
+      # 避免用户环境里手动设置了旧版 GOROOT，导致标准库不匹配（iter / crypto/mlkem 等编译失败）
+      GOROOT: ""
+      GOTOOLCHAIN: auto
     cmds:
       - task: "{{OS}}:build"
 
   package:
     summary: Packages a production build of the application
+    env:
+      GOROOT: ""
+      GOTOOLCHAIN: auto
     cmds:
       - task: "{{OS}}:package"
 
   run:
     summary: Runs the application
+    env:
+      GOROOT: ""
+      GOTOOLCHAIN: auto
     cmds:
       - task: "{{OS}}:run"
 
   dev:
     summary: Runs the application in development mode
+    env:
+      GOROOT: ""
+      GOTOOLCHAIN: auto
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
 
   package:dev:
     summary: Packages a debug build of the application
+    env:
+      GOROOT: ""
+      GOTOOLCHAIN: auto
     cmds:
       - task: "{{OS}}:package:dev"

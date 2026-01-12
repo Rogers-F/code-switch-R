@@ -44,6 +44,7 @@
   },
   "sidebar": {
     "home": "首页",
+    "dashboard": "看板",
     "prompts": "提示词",
     "mcp": "MCP",
     "skill": "技能",
@@ -56,6 +57,14 @@
     "settings": "设置",
     "updateFound": "发现新版本：{version}",
     "updateOpenReleases": "打开 GitHub Releases"
+  },
+  "dashboard": {
+    "lead": "汇总展示使用情况与监控概览，数据会自动刷新。",
+    "sections": {
+      "heatmap": { "title": "热力图（最近 14 天 · 按小时）" },
+      "usage": { "title": "使用统计（今日）" },
+      "monitor": { "title": "监控情况（实时）" }
+    }
   },
   "availability": {
     "title": "可用性监控",
@@ -483,7 +492,11 @@
     },
     "console": {
       "eyebrow": "调试",
-      "title": "控制台"
+      "title": "控制台",
+      "actions": {
+        "clear": "清空日志",
+        "autoScroll": "自动滚动"
+      }
     },
     "logs": {
       "eyebrow": "请求追踪",

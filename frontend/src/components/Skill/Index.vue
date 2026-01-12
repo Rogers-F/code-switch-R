@@ -1,15 +1,12 @@
 <template>
   <PageLayout
-    :eyebrow="t('components.skill.hero.eyebrow')"
-    :title="t('components.skill.hero.title')"
+    :title="t('sidebar.skill')"
     :sticky="true"
-    :showBackButton="true"
   >
     <template #actions>
       <button
         class="ghost-icon"
         :class="{ rotating: refreshing }"
-        :title="t('components.skill.actions.refresh')"
         :data-tooltip="t('components.skill.actions.refresh')"
         :disabled="refreshing"
         @click="refresh"
@@ -23,7 +20,6 @@
       </button>
       <button
         class="ghost-icon"
-        :title="t('components.skill.actions.openFolder')"
         :data-tooltip="t('components.skill.actions.openFolder')"
         @click="handleOpenFolder"
       >
@@ -34,7 +30,6 @@
       </button>
       <button
         class="ghost-icon"
-        :title="t('components.skill.repos.open')"
         :data-tooltip="t('components.skill.repos.open')"
         @click="openRepoModal"
       >
@@ -646,7 +641,7 @@ onMounted(() => {
 <style scoped>
 /* Skill Groups */
 .skill-group {
-  margin-bottom: 32px;
+  margin-bottom: 0;
 }
 
 .skill-group-header {
@@ -679,7 +674,7 @@ onMounted(() => {
   text-align: center;
   color: var(--mac-text-secondary);
   padding: 24px;
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 /* Skill List */
@@ -924,11 +919,14 @@ onMounted(() => {
 
 /* Common */
 .skill-list-section {
-  margin-top: 16px;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-section);
 }
 
 .skill-empty {
-  margin-top: 32px;
+  margin-top: 0;
   color: var(--mac-text-secondary);
   text-align: center;
 }
@@ -939,7 +937,7 @@ onMounted(() => {
 
 .skill-error {
   color: #f87171;
-  margin-top: 16px;
+  margin-top: 0;
 }
 
 .skill-action-spinner {

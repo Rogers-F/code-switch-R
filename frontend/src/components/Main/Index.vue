@@ -1,7 +1,6 @@
 <template>
   <PageLayout
-    :eyebrow="t('components.main.hero.eyebrow')"
-    :title="showHomeTitle ? t('components.main.hero.title') : ''"
+    :title="t('sidebar.home')"
     :sticky="true"
   >
     <template #actions>
@@ -121,52 +120,6 @@
         </BaseButton>
       </div>
     </div>
-
-      <section
-        v-if="showHeatmap"
-        ref="heatmapContainerRef"
-        class="contrib-wall"
-        :aria-label="t('components.main.heatmap.ariaLabel')"
-      >
-        <div class="contrib-legend">
-          <span>{{ t('components.main.heatmap.legendLow') }}</span>
-          <span v-for="level in 5" :key="level" :class="['legend-box', intensityClass(level - 1)]" />
-          <span>{{ t('components.main.heatmap.legendHigh') }}</span>
-        </div>
-
-        <div class="contrib-grid">
-          <div
-            v-for="(week, weekIndex) in usageHeatmap"
-            :key="weekIndex"
-            class="contrib-column"
-          >
-            <div
-              v-for="(day, dayIndex) in week"
-              :key="dayIndex"
-              class="contrib-cell"
-              :class="intensityClass(day.intensity)"
-              @mouseenter="showUsageTooltip(day, $event)"
-              @mousemove="showUsageTooltip(day, $event)"
-              @mouseleave="hideUsageTooltip"
-            />
-          </div>
-        </div>
-        <div
-          v-if="usageTooltip.visible"
-          ref="tooltipRef"
-          class="contrib-tooltip"
-          :class="usageTooltip.placement"
-          :style="{ left: `${usageTooltip.left}px`, top: `${usageTooltip.top}px` }"
-        >
-          <p class="tooltip-heading">{{ formattedTooltipLabel }}</p>
-          <ul class="tooltip-metrics">
-            <li v-for="metric in usageTooltipMetrics" :key="metric.key">
-              <span class="metric-label">{{ metric.label }}</span>
-              <span class="metric-value">{{ metric.value }}</span>
-            </li>
-          </ul>
-        </div>
-      </section>
 
       <section class="automation-section">
       <div class="section-header">
@@ -975,14 +928,6 @@ import { computed, reactive, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/vue'
 import { Browser, Call, Events } from '@wailsio/runtime'
-import {
-	buildUsageHeatmapMatrix,
-	generateFallbackUsageHeatmap,
-	DEFAULT_HEATMAP_DAYS,
-	calculateHeatmapDayRange,
-	type UsageHeatmapWeek,
-	type UsageHeatmapDay,
-} from '../../data/usageHeatmap'
 import { automationCardGroups, createAutomationCards, type AutomationCard } from '../../data/cards'
 import lobeIcons from '../../icons/lobeIconMap'
 import BaseButton from '../common/BaseButton.vue'
@@ -998,8 +943,7 @@ import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindin
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
 	import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
 	import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../services/geminiSettings'
-	import { fetchHeatmapStats, fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
-	import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
+	import { fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
 	import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeManager'
 	import { useRouter } from 'vue-router'
 	import { fetchConfigImportStatus, importFromCcSwitch, isFirstRun, markFirstRunDone, type ConfigImportStatus } from '../../services/configImport'
@@ -1045,11 +989,6 @@ const themeMode = ref<ThemeMode>(getCurrentTheme())
 	})
 	const themeIcon = computed(() => (resolvedTheme.value === 'dark' ? 'moon' : 'sun'))
 	const releasePageUrl = 'https://github.com/SimonUTD/code-switch-R/releases'
-
-const HEATMAP_DAYS = DEFAULT_HEATMAP_DAYS
-const usageHeatmap = ref<UsageHeatmapWeek[]>(generateFallbackUsageHeatmap(HEATMAP_DAYS))
-const heatmapContainerRef = ref<HTMLElement | null>(null)
-const tooltipRef = ref<HTMLElement | null>(null)
 const proxyStates = reactive<Record<ProviderTab, boolean>>({
   claude: false,
   codex: false,
@@ -1143,8 +1082,6 @@ const providerStatsMap = reactive<Record<ProviderTab, Record<string, ProviderDai
 	  others: false,
 	})
 	let providerStatsTimer: number | undefined
-	const showHeatmap = ref(true)
-	const showHomeTitle = ref(true)
 	const mcpIcon = lobeIcons['mcp'] ?? ''
 	const importStatus = ref<ConfigImportStatus | null>(null)
 	const importBusy = ref(false)
@@ -1229,34 +1166,12 @@ const importButtonTooltip = computed(() => {
   })
 })
 
-const intensityClass = (value: number) => `gh-level-${value}`
-
-type TooltipPlacement = 'above' | 'below'
-
-const usageTooltip = reactive({
-  visible: false,
-  label: '',
-  dateKey: '',
-  left: 0,
-  top: 0,
-  placement: 'above' as TooltipPlacement,
-  requests: 0,
-  inputTokens: 0,
-  outputTokens: 0,
-  reasoningTokens: 0,
-  cost: 0,
-})
+const clamp = (value: number, min: number, max: number) => {
+  if (max <= min) return min
+  return Math.min(Math.max(value, min), max)
+}
 
 const formatMetric = (value: number) => value.toLocaleString()
-
-const tooltipDateFormatter = computed(() =>
-  new Intl.DateTimeFormat(locale.value || 'en', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-)
 
 const currencyFormatter = computed(() =>
   new Intl.NumberFormat(locale.value || 'en', {
@@ -1267,149 +1182,7 @@ const currencyFormatter = computed(() =>
   })
 )
 
-const formattedTooltipLabel = computed(() => {
-  if (!usageTooltip.dateKey) return usageTooltip.label
-  const date = new Date(usageTooltip.dateKey)
-  if (Number.isNaN(date.getTime())) {
-    return usageTooltip.label
-  }
-  return tooltipDateFormatter.value.format(date)
-})
-
-const formattedTooltipAmount = computed(() =>
-  currencyFormatter.value.format(Math.max(usageTooltip.cost, 0))
-)
-
-const usageTooltipMetrics = computed(() => [
-  {
-    key: 'cost',
-    label: t('components.main.heatmap.metrics.cost'),
-    value: formattedTooltipAmount.value,
-  },
-  {
-    key: 'requests',
-    label: t('components.main.heatmap.metrics.requests'),
-    value: formatMetric(usageTooltip.requests),
-  },
-  {
-    key: 'inputTokens',
-    label: t('components.main.heatmap.metrics.inputTokens'),
-    value: formatMetric(usageTooltip.inputTokens),
-  },
-  {
-    key: 'outputTokens',
-    label: t('components.main.heatmap.metrics.outputTokens'),
-    value: formatMetric(usageTooltip.outputTokens),
-  },
-  {
-    key: 'reasoningTokens',
-    label: t('components.main.heatmap.metrics.reasoningTokens'),
-    value: formatMetric(usageTooltip.reasoningTokens),
-  },
-])
-
-const clamp = (value: number, min: number, max: number) => {
-  if (max <= min) return min
-  return Math.min(Math.max(value, min), max)
-}
-
-const TOOLTIP_DEFAULT_WIDTH = 220
-const TOOLTIP_DEFAULT_HEIGHT = 120
-const TOOLTIP_VERTICAL_OFFSET = 12
-const TOOLTIP_HORIZONTAL_MARGIN = 20
-const TOOLTIP_VERTICAL_MARGIN = 24
-
-const getTooltipSize = () => {
-  const rect = tooltipRef.value?.getBoundingClientRect()
-  return {
-    width: rect?.width ?? TOOLTIP_DEFAULT_WIDTH,
-    height: rect?.height ?? TOOLTIP_DEFAULT_HEIGHT,
-  }
-}
-
-const viewportSize = () => {
-  if (typeof window !== 'undefined') {
-    return { width: window.innerWidth, height: window.innerHeight }
-  }
-  if (typeof document !== 'undefined' && document.documentElement) {
-    return {
-      width: document.documentElement.clientWidth,
-      height: document.documentElement.clientHeight,
-    }
-  }
-  return {
-    width: heatmapContainerRef.value?.clientWidth ?? 0,
-    height: heatmapContainerRef.value?.clientHeight ?? 0,
-  }
-}
-
-const showUsageTooltip = (day: UsageHeatmapDay, event: MouseEvent) => {
-  const target = event.currentTarget as HTMLElement | null
-  const cellRect = target?.getBoundingClientRect()
-  if (!cellRect) return
-  usageTooltip.label = day.label
-  usageTooltip.dateKey = day.dateKey
-  usageTooltip.requests = day.requests
-  usageTooltip.inputTokens = day.inputTokens
-  usageTooltip.outputTokens = day.outputTokens
-  usageTooltip.reasoningTokens = day.reasoningTokens
-  usageTooltip.cost = day.cost
-  const { width: tooltipWidth, height: tooltipHeight } = getTooltipSize()
-  const { width: viewportWidth, height: viewportHeight } = viewportSize()
-  const centerX = cellRect.left + cellRect.width / 2
-  const halfWidth = tooltipWidth / 2
-  const minLeft = TOOLTIP_HORIZONTAL_MARGIN + halfWidth
-  const maxLeft = viewportWidth > 0 ? viewportWidth - halfWidth - TOOLTIP_HORIZONTAL_MARGIN : centerX
-  usageTooltip.left = clamp(centerX, minLeft, maxLeft)
-
-  const anchorTop = cellRect.top
-  const anchorBottom = cellRect.bottom
-  const canShowAbove = anchorTop - tooltipHeight - TOOLTIP_VERTICAL_OFFSET >= TOOLTIP_VERTICAL_MARGIN
-  const viewportBottomLimit = viewportHeight > 0 ? viewportHeight - tooltipHeight - TOOLTIP_VERTICAL_MARGIN : anchorBottom
-  const shouldPlaceBelow = !canShowAbove
-  usageTooltip.placement = shouldPlaceBelow ? 'below' : 'above'
-  const desiredTop = shouldPlaceBelow
-    ? anchorBottom + TOOLTIP_VERTICAL_OFFSET
-    : anchorTop - tooltipHeight - TOOLTIP_VERTICAL_OFFSET
-  usageTooltip.top = clamp(desiredTop, TOOLTIP_VERTICAL_MARGIN, viewportBottomLimit)
-  usageTooltip.visible = true
-}
-
-const hideUsageTooltip = () => {
-  usageTooltip.visible = false
-}
-
-const loadAppSettings = async () => {
-  try {
-    const data: AppSettings = await fetchAppSettings()
-    showHeatmap.value = data?.show_heatmap ?? true
-    showHomeTitle.value = data?.show_home_title ?? true
-  } catch (error) {
-    console.error('failed to load app settings', error)
-    showHeatmap.value = true
-    showHomeTitle.value = true
-	    // 加载应用设置失败时提示用户
-	    showToast(t('components.main.errors.loadAppSettingsFailed'), 'warning')
-	  }
-	}
-
-	const handleAppSettingsUpdated = () => {
-	  void loadAppSettings()
-	}
-
 	const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
-
-	const loadUsageHeatmap = async () => {
-		try {
-			const rangeDays = calculateHeatmapDayRange(HEATMAP_DAYS)
-		const stats = await fetchHeatmapStats(rangeDays)
-		usageHeatmap.value = buildUsageHeatmapMatrix(stats, HEATMAP_DAYS)
-	} catch (error) {
-		console.error('Failed to load usage heatmap stats', error)
-		// 加载热力图失败时提示用户
-		showToast(t('components.main.errors.loadHeatmapFailed'), 'warning')
-	}
-}
 
 // 本地 GeminiProvider 类型定义（避免依赖 CI 生成的 bindings）
 interface GeminiProvider {
@@ -1940,7 +1713,6 @@ const refreshAllData = async () => {
   refreshing.value = true
   try {
 	    await Promise.all([
-	      loadUsageHeatmap(),
 	      loadProvidersFromDisk(),
 	      ...providerTabIds.map(refreshProxyState),
 	      ...providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)),
@@ -2143,12 +1915,10 @@ let unsubscribeSwitched: (() => void) | undefined
 let unsubscribeBlacklisted: (() => void) | undefined
 
 	onMounted(async () => {
-	  void loadUsageHeatmap()
 	  await loadProvidersFromDisk()
 	  await Promise.all(providerTabIds.map(refreshProxyState))
 	  await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
 	  await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
-	  await loadAppSettings()
 	  await refreshImportStatus()
 	  await checkFirstRun()  // 检查是否首次使用
 	  startProviderStatsTimer()
@@ -2188,8 +1958,6 @@ let unsubscribeBlacklisted: (() => void) | undefined
   ;(window as any).__blacklistPollingTimer = blacklistPollingTimer
   ;(window as any).__handleWindowFocus = handleWindowFocus
 
-  window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
-
   // 监听可用性页面的 Provider 更新事件
   const handleProvidersUpdated = () => {
     void loadProvidersFromDisk()
@@ -2207,7 +1975,6 @@ let unsubscribeBlacklisted: (() => void) | undefined
 
 	onUnmounted(() => {
 	  stopProviderStatsTimer()
-	  window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)
 
 	  // 清理黑名单相关定时器和事件监听
 	  if (blacklistTimer) {

@@ -44,6 +44,7 @@
   },
   "sidebar": {
     "home": "Home",
+    "dashboard": "Dashboard",
     "prompts": "Prompts",
     "mcp": "MCP",
     "skill": "Skills",
@@ -56,6 +57,14 @@
     "settings": "Settings",
     "updateFound": "New version: {version}",
     "updateOpenReleases": "Open GitHub Releases"
+  },
+  "dashboard": {
+    "lead": "A unified overview of usage and monitoring stats. Data refreshes automatically.",
+    "sections": {
+      "heatmap": { "title": "Heatmap (Last 14 days · hourly)" },
+      "usage": { "title": "Usage Stats (Today)" },
+      "monitor": { "title": "Monitoring (Live)" }
+    }
   },
   "availability": {
     "title": "Availability Monitor",
@@ -482,7 +491,11 @@
     },
     "console": {
       "eyebrow": "Debug",
-      "title": "Console"
+      "title": "Console",
+      "actions": {
+        "clear": "Clear logs",
+        "autoScroll": "Auto scroll"
+      }
     },
     "logs": {
       "eyebrow": "Request diagnostics",

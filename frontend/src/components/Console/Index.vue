@@ -1,19 +1,38 @@
 <template>
   <PageLayout
-    :eyebrow="t('components.console.eyebrow')"
-    :title="t('components.console.title')"
+    :title="t('sidebar.console')"
     :sticky="true"
-    :showBackButton="true"
   >
     <template #actions>
-      <div class="actions-group">
-        <BaseButton variant="outline" size="sm" type="button" @click="clearLogs">清空日志</BaseButton>
-        <label class="auto-scroll-toggle">
+      <button
+        type="button"
+        class="ghost-icon"
+        :data-tooltip="t('components.console.actions.clear')"
+        :aria-label="t('components.console.actions.clear')"
+        @click="clearLogs"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+    </template>
+
+    <div class="console-toolbar">
+      <div class="auto-scroll-toggle">
+        <span>{{ t('components.console.actions.autoScroll') }}</span>
+        <label class="mac-switch sm">
           <input type="checkbox" v-model="autoScroll" />
-          <span>自动滚动</span>
+          <span></span>
         </label>
       </div>
-    </template>
+    </div>
 
     <div class="console-container">
       <div v-if="loading" class="loading-state">
@@ -42,7 +61,6 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
-import BaseButton from '../common/BaseButton.vue'
 
 const { t } = useI18n()
 
@@ -125,24 +143,20 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.actions-group {
+.console-toolbar {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
-  gap: 12px;
 }
 
 .auto-scroll-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   font-size: 0.9rem;
   color: var(--mac-text-secondary);
   cursor: pointer;
   user-select: none;
-}
-
-.auto-scroll-toggle input[type="checkbox"] {
-  cursor: pointer;
 }
 
 .console-container {

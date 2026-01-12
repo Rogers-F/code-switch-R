@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import MainPage from '../components/Main/Index.vue'
+import DashboardPage from '../components/Dashboard/Index.vue'
 import LogsPage from '../components/Logs/Index.vue'
 import GeneralPage from '../components/General/Index.vue'
 import McpPage from '../components/Mcp/index.vue'
@@ -12,6 +13,7 @@ import AvailabilityPage from '../components/Availability/Index.vue'
 
 const routes = [
   { path: '/', component: MainPage },
+  { path: '/dashboard', component: DashboardPage },
   { path: '/prompts', component: PromptsPage },
   { path: '/mcp', component: McpPage },
   { path: '/skill', component: SkillPage },

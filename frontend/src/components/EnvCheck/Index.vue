@@ -1,6 +1,5 @@
 <template>
-  <PageLayout :eyebrow="t('envcheck.hero.eyebrow')" :title="t('envcheck.hero.title')">
-    <template #actions></template>
+  <PageLayout :title="t('sidebar.env')">
     <div class="section-header">
       <div class="tab-group-container">
         <div class="tab-group" role="tablist">
@@ -13,7 +12,15 @@
 
       <div class="section-controls">
         <div class="divider-vertical"></div>
-        <button class="ghost-icon" :title="t('components.skill.actions.refresh')" @click="checkConflicts">
+        <button
+          class="ghost-icon"
+          :class="{ rotating: loading }"
+          type="button"
+          :data-tooltip="t('envcheck.refresh')"
+          :aria-label="t('envcheck.refresh')"
+          :disabled="loading"
+          @click="checkConflicts"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
               stroke-linecap="round" stroke-linejoin="round" />

@@ -163,8 +163,7 @@ onActivated(() => {
 
 <template>
   <PageLayout
-    :eyebrow="t('speedtest.hero.eyebrow')"
-    :title="t('speedtest.hero.title')"
+    :title="t('sidebar.speedtest')"
     :sticky="true"
   >
     <template #actions>
@@ -180,14 +179,43 @@ onActivated(() => {
           <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
         </svg>
       </button>
-      <BaseButton
-        size="sm"
-        type="button"
+      <button
+        class="ghost-icon"
+        :class="{ rotating: isTesting }"
         :disabled="isTesting || endpointCount === 0"
+        :data-tooltip="isTesting ? t('speedtest.testing') : t('speedtest.start')"
+        :aria-label="isTesting ? t('speedtest.testing') : t('speedtest.start')"
+        type="button"
         @click="runTest"
       >
-        {{ isTesting ? t('speedtest.testing') : t('speedtest.start') }}
-      </BaseButton>
+        <svg v-if="isTesting" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M20.5 8a8.5 8.5 0 10-2.38 7.41"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M20.5 4v4h-4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M8 5v14l11-7-11-7z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
     </template>
 
     <p class="page-lead">{{ t('speedtest.hero.lead') }}</p>
@@ -303,7 +331,6 @@ onActivated(() => {
 .input-section {
   display: flex;
   gap: 12px;
-  margin-bottom: 24px;
   align-items: center;
 }
 
@@ -346,7 +373,6 @@ onActivated(() => {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  margin-bottom: 16px;
 }
 
 .list-title {
@@ -358,7 +384,6 @@ onActivated(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-bottom: 24px;
 }
 
 .endpoint-card {

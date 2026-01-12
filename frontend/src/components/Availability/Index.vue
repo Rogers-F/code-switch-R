@@ -258,12 +258,36 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <PageLayout :title="t('availability.title')" :sticky="true">
+  <PageLayout :title="t('sidebar.availability')" :sticky="true">
     <template #actions>
-      <span class="availability-header-meta">{{ t('availability.nextRefresh') }}: {{ nextRefreshIn }}s</span>
-      <BaseButton size="sm" type="button" :disabled="refreshing" @click="refreshAll">
-        {{ refreshing ? t('availability.refreshing') : t('availability.refreshAll') }}
-      </BaseButton>
+      <button
+        type="button"
+        class="ghost-icon"
+        :class="{ rotating: refreshing }"
+        :data-tooltip="refreshing ? t('availability.refreshing') : t('availability.refreshAll')"
+        :aria-label="refreshing ? t('availability.refreshing') : t('availability.refreshAll')"
+        :disabled="refreshing"
+        @click="refreshAll"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M20.5 8a8.5 8.5 0 10-2.38 7.41"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M20.5 4v4h-4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
     </template>
 
     <p class="page-lead">{{ t('availability.subtitle') }}</p>

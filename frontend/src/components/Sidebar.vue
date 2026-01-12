@@ -129,6 +129,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: '/', icon: 'home', labelKey: 'sidebar.home' },
+  { path: '/dashboard', icon: 'grid', labelKey: 'sidebar.dashboard' },
   { path: '/console', icon: 'terminal', labelKey: 'sidebar.console' },
   { path: '/logs', icon: 'bar-chart', labelKey: 'sidebar.logs' },
   { path: '/prompts', icon: 'file-text', labelKey: 'sidebar.prompts', isNew: true },
@@ -172,6 +173,14 @@ const navigate = (path: string) => {
         <svg v-if="item.icon === 'home'" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
           <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+
+        <!-- Grid -->
+        <svg v-else-if="item.icon === 'grid'" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+          <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+          <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+          <rect x="14" y="14" width="7" height="7" rx="1"></rect>
         </svg>
 
         <!-- File Text -->

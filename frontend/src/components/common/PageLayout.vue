@@ -5,19 +5,8 @@
       <div class="page-header-content">
         <!-- 左侧：标题区域 -->
         <div class="page-title-section">
-          <button
-            v-if="showBackButton"
-            class="back-button"
-            :aria-label="$t('common.actions.back')"
-            @click="goBack"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
           <div class="page-title-text">
-            <p v-if="eyebrow" class="page-eyebrow">{{ eyebrow }}</p>
-            <h1 v-if="title" class="page-title">{{ title }}</h1>
+            <h1 class="page-title">{{ title }}</h1>
           </div>
         </div>
 
@@ -41,31 +30,20 @@
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
-
 // 定义组件名称，使其可以被其他组件正确导入
 defineOptions({
   name: 'PageLayout'
 })
 
 interface PageLayoutProps {
-  eyebrow?: string      // 页面副标题（如 "PROMPTS"）
-  title?: string        // 页面主标题
+  title: string         // 页面主标题
   sticky?: boolean      // header是否sticky，默认true
-  showBackButton?: boolean  // 是否显示返回按钮，默认false
   className?: string    // 额外CSS类
 }
 
 const props = withDefaults(defineProps<PageLayoutProps>(), {
-  sticky: true,
-  showBackButton: false
+  sticky: true
 })
-
-const router = useRouter()
-
-const goBack = () => {
-  router.go(-1)
-}
 </script>
 
 <style scoped>

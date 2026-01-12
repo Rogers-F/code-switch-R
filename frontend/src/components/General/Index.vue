@@ -5,28 +5,6 @@
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.application') }}</h2>
         <div class="mac-panel">
-          <ListItem :label="$t('components.general.label.heatmap')">
-            <label class="mac-switch">
-              <input
-                type="checkbox"
-                :disabled="settingsLoading || saveBusy"
-                v-model="heatmapEnabled"
-                @change="persistAppSettings"
-              />
-              <span></span>
-            </label>
-          </ListItem>
-          <ListItem :label="$t('components.general.label.homeTitle')">
-            <label class="mac-switch">
-              <input
-                type="checkbox"
-                :disabled="settingsLoading || saveBusy"
-                v-model="homeTitleVisible"
-                @change="persistAppSettings"
-              />
-              <span></span>
-            </label>
-          </ListItem>
           <ListItem :label="$t('components.general.label.autoStart')">
             <label class="mac-switch">
               <input
@@ -481,8 +459,6 @@ const getCachedValue = (key: string, defaultValue: boolean): boolean => {
   const cached = localStorage.getItem(`app-settings-${key}`)
   return cached !== null ? cached === 'true' : defaultValue
 }
-	const heatmapEnabled = ref(getCachedValue('heatmap', true))
-	const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 	const autoStartEnabled = ref(getCachedValue('autoStart', false))
 		const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
 		const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
@@ -539,8 +515,6 @@ const loadAppSettings = async () => {
   settingsLoading.value = true
   try {
     const data = await fetchAppSettings()
-    heatmapEnabled.value = data?.show_heatmap ?? true
-    homeTitleVisible.value = data?.show_home_title ?? true
 	    autoStartEnabled.value = data?.auto_start ?? false
 		    autoUpdateEnabled.value = data?.auto_update ?? true
 		    autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
@@ -555,8 +529,6 @@ const loadAppSettings = async () => {
 		    proxyCustom.value = Boolean(data?.proxy_custom)
 
 		    // 缓存到 localStorage，下次打开时直接显示正确状态
-		    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-		    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
 		    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
 	    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
 		    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
@@ -569,8 +541,6 @@ const loadAppSettings = async () => {
 		    localStorage.setItem('app-settings-proxyCustom', String(proxyCustom.value))
 		  } catch (error) {
 		    console.error('failed to load app settings', error)
-		    heatmapEnabled.value = true
-		    homeTitleVisible.value = true
 	    autoStartEnabled.value = false
 		    autoUpdateEnabled.value = true
 		    autoConnectivityTestEnabled.value = false
@@ -593,8 +563,6 @@ const persistAppSettings = async () => {
   saveBusy.value = true
   try {
 		    const payload: AppSettings = {
-		      show_heatmap: heatmapEnabled.value,
-		      show_home_title: homeTitleVisible.value,
 			      auto_start: autoStartEnabled.value,
 			      auto_update: autoUpdateEnabled.value,
 			      auto_connectivity_test: autoConnectivityTestEnabled.value,
@@ -620,8 +588,6 @@ const persistAppSettings = async () => {
 	    )
 
 	    // 更新缓存
-	    localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
-	    localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
 	    localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
 		    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
 		    localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))

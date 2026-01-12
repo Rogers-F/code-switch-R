@@ -167,23 +167,63 @@ onMounted(() => {
 
 <template>
   <PageLayout
-    :eyebrow="t('prompts.hero.eyebrow')"
-    :title="t('prompts.hero.title')"
+    :title="t('sidebar.prompts')"
     :sticky="true"
   >
     <template #actions>
-      <BaseButton
-        variant="outline"
-        size="sm"
+      <button
         type="button"
+        class="ghost-icon"
+        :data-tooltip="t('prompts.actions.import')"
+        :aria-label="t('prompts.actions.import')"
         :disabled="loading"
         @click="handleImport"
       >
-        {{ t('prompts.actions.import') }}
-      </BaseButton>
-      <BaseButton size="sm" type="button" @click="openCreateModal">
-        {{ t('prompts.actions.create') }}
-      </BaseButton>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 4v9"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+          <path
+            d="M8.5 10.5l3.5 3.5 3.5-3.5"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+          <path
+            d="M5 19h14"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="ghost-icon"
+        :data-tooltip="t('prompts.actions.create')"
+        :aria-label="t('prompts.actions.create')"
+        @click="openCreateModal"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 5v14M5 12h14"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+        </svg>
+      </button>
     </template>
 
     <p class="page-lead">{{ t('prompts.hero.lead') }}</p>
@@ -318,7 +358,6 @@ onMounted(() => {
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);
   border-radius: 12px;
-  margin-bottom: 20px;
 }
 
 .stat-text {
@@ -336,7 +375,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-bottom: 24px;
 }
 
 .prompt-card {

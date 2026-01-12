@@ -100,13 +100,13 @@ jobs:
       - name: Archive macOS app
         run: |
           cd bin
-          ditto -c -k --sequesterRsrc --keepParent "$(basename ${{ steps.find-app.outputs.app_path }})" codeswitch-macos-${{ matrix.arch }}.zip
+          ditto -c -k --sequesterRsrc --keepParent "$(basename ${{ steps.find-app.outputs.app_path }})" simonswitch-macos-${{ matrix.arch }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
-          path: bin/codeswitch-macos-${{ matrix.arch }}.zip
+          path: bin/simonswitch-macos-${{ matrix.arch }}.zip
 
   build-windows:
     name: Build Windows
@@ -402,8 +402,8 @@ jobs:
           mkdir -p release-assets
 
           # macOS
-          cp artifacts/macos-arm64/codeswitch-macos-arm64.zip release-assets/
-          cp artifacts/macos-amd64/codeswitch-macos-amd64.zip release-assets/
+          cp artifacts/macos-arm64/simonswitch-macos-arm64.zip release-assets/
+          cp artifacts/macos-amd64/simonswitch-macos-amd64.zip release-assets/
 
           # Windows
           cp artifacts/windows-amd64/CodeSwitch-amd64-installer.exe release-assets/
@@ -442,12 +442,12 @@ jobs:
                 "sha256": "${WIN_SHA}"
               },
               "darwin-arm64": {
-                "name": "codeswitch-macos-arm64.zip",
-                "url": "${BASE_URL}/codeswitch-macos-arm64.zip"
+                "name": "simonswitch-macos-arm64.zip",
+                "url": "${BASE_URL}/simonswitch-macos-arm64.zip"
               },
               "darwin-amd64": {
-                "name": "codeswitch-macos-amd64.zip",
-                "url": "${BASE_URL}/codeswitch-macos-amd64.zip"
+                "name": "simonswitch-macos-amd64.zip",
+                "url": "${BASE_URL}/simonswitch-macos-amd64.zip"
               },
               "linux": {
                 "name": "CodeSwitch.AppImage",
@@ -491,8 +491,8 @@ jobs:
           | **Windows (首次)** | `CodeSwitch-amd64-installer.exe` | NSIS 安装器 |
           | **Windows (便携)** | `CodeSwitch.exe` | 直接运行 |
           | **Windows (更新)** | `updater.exe` | 静默更新辅助 |
-          | **macOS (ARM)** | `codeswitch-macos-arm64.zip` | Apple Silicon |
-          | **macOS (Intel)** | `codeswitch-macos-amd64.zip` | Intel 芯片 |
+          | **macOS (ARM)** | `simonswitch-macos-arm64.zip` | Apple Silicon |
+          | **macOS (Intel)** | `simonswitch-macos-amd64.zip` | Intel 芯片 |
           | **Linux (通用)** | `CodeSwitch.AppImage` | 跨发行版便携 |
           | **Linux (Debian/Ubuntu)** | `codeswitch_*.deb` | apt 安装 |
           | **Linux (RHEL/Fedora)** | `codeswitch-*.rpm` | dnf/yum 安装 |

@@ -40,6 +40,7 @@
   --page-max-width: 1280px;
   --page-padding-x: 48px;
   --page-padding-y: 24px;
+  --spacing-section: 18px;
 }
 
 html.dark {
@@ -700,50 +701,6 @@ html.dark .mac-sidebar-item:hover {
   row-gap: 4px;
 }
 
-.back-button {
-  border: none;
-  background: rgba(15, 23, 42, 0.08);
-  color: var(--mac-text);
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  flex-shrink: 0;
-}
-
-.back-button svg {
-  width: 18px;
-  height: 18px;
-  display: block;
-}
-
-html.dark .back-button {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.back-button:hover {
-  background: rgba(15, 23, 42, 0.15);
-}
-
-html.dark .back-button:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.page-eyebrow {
-  margin: 0;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--mac-text-secondary);
-  opacity: 0.85;
-  white-space: nowrap;
-}
-
 .page-title {
   margin: 0;
   font-size: 1.05rem;
@@ -776,7 +733,7 @@ html.dark .back-button:hover {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--spacing-section);
 }
 
 .page-lead {

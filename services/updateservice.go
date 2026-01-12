@@ -362,38 +362,40 @@ func (us *UpdateService) findPlatformAsset(assets []struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Size               int64  `json:"size"`
 }) string {
-	var targetName string
+	var candidates []string
 	switch runtime.GOOS {
 	case "windows":
 		// 统一下载核心 exe（无论便携版还是安装版）
 		// 安装版通过 updater.exe 提权替换
-		targetName = "CodeSwitch.exe"
+		candidates = []string{"CodeSwitch.exe"}
 	case "darwin":
 		if runtime.GOARCH == "arm64" {
-			targetName = "codeswitch-macos-arm64.zip"
+			candidates = []string{"simonswitch-macos-arm64.zip", "codeswitch-macos-arm64.zip"}
 		} else {
-			targetName = "codeswitch-macos-amd64.zip"
+			candidates = []string{"simonswitch-macos-amd64.zip", "codeswitch-macos-amd64.zip"}
 		}
 	case "linux":
-		targetName = "CodeSwitch.AppImage"
+		candidates = []string{"CodeSwitch.AppImage"}
 	default:
 		return ""
 	}
 
 	// 精确匹配文件名
-	for _, asset := range assets {
-		if asset.Name == targetName {
-			log.Printf("[UpdateService] 找到更新文件: %s (模式: %s)", targetName, func() string {
-				if us.isPortable {
-					return "便携版"
-				}
-				return "安装版"
-			}())
-			return asset.BrowserDownloadURL
+	for _, targetName := range candidates {
+		for _, asset := range assets {
+			if asset.Name == targetName {
+				log.Printf("[UpdateService] 找到更新文件: %s (模式: %s)", targetName, func() string {
+					if us.isPortable {
+						return "便携版"
+					}
+					return "安装版"
+				}())
+				return asset.BrowserDownloadURL
+			}
 		}
 	}
 
-	log.Printf("[UpdateService] 未找到适配文件 %s", targetName)
+	log.Printf("[UpdateService] 未找到适配文件: %s", strings.Join(candidates, ", "))
 	return ""
 }
 

@@ -1,13 +1,14 @@
 <template>
   <PageLayout
-    :eyebrow="t('components.mcp.hero.eyebrow')"
-    :title="t('components.mcp.hero.title')"
+    :title="t('sidebar.mcp')"
     :sticky="true"
-    :showBackButton="true"
   >
     <template #actions>
       <button
         class="ghost-icon"
+        :class="{ rotating: loading }"
+        type="button"
+        :data-tooltip="t('components.mcp.controls.refresh')"
         :aria-label="t('components.mcp.controls.refresh')"
         :disabled="loading"
         @click="reload"
@@ -31,7 +32,13 @@
           />
         </svg>
       </button>
-      <button class="ghost-icon" :aria-label="t('components.mcp.controls.create')" @click="openCreateModal">
+      <button
+        class="ghost-icon"
+        type="button"
+        :data-tooltip="t('components.mcp.controls.create')"
+        :aria-label="t('components.mcp.controls.create')"
+        @click="openCreateModal"
+      >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M12 5v14M5 12h14"
@@ -43,7 +50,13 @@
           />
         </svg>
       </button>
-      <button class="ghost-icon" :aria-label="t('components.mcp.import.title')" @click="openBatchImport">
+      <button
+        class="ghost-icon"
+        type="button"
+        :data-tooltip="t('components.mcp.import.title')"
+        :aria-label="t('components.mcp.import.title')"
+        @click="openBatchImport"
+      >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0 0l-4-4m4 4l4-4"

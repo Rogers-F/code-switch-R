@@ -1,35 +1,38 @@
 <template>
   <PageLayout
-    :eyebrow="t('components.logs.eyebrow')"
-    :title="t('components.logs.title')"
+    :title="t('sidebar.logs')"
     :sticky="true"
-    :showBackButton="true"
   >
     <template #actions>
-      <div class="logs-header-actions">
-        <span class="logs-refresh-label">{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
-        <BaseButton variant="outline" size="sm" :disabled="loading" @click="manualRefresh">
-          {{ t('components.logs.refresh') }}
-        </BaseButton>
-      </div>
-    </template>
-
-    <section class="logs-summary" v-if="statsCards.length">
-      <article
-        v-for="card in statsCards"
-        :key="card.key"
-        :class="['summary-card', { 'summary-card--clickable': card.key === 'cost' }]"
-        @click="card.key === 'cost' && openCostDetailModal()"
+      <button
+        type="button"
+        class="ghost-icon"
+        :class="{ rotating: loading }"
+        :data-tooltip="t('components.logs.refresh')"
+        :aria-label="t('components.logs.refresh')"
+        :disabled="loading"
+        @click="manualRefresh"
       >
-        <div class="summary-card__label">{{ card.label }}</div>
-        <div class="summary-card__value">{{ card.value }}</div>
-        <div class="summary-card__hint">{{ card.hint }}</div>
-      </article>
-    </section>
-
-    <section class="logs-chart">
-      <Line :data="chartData" :options="chartOptions" />
-    </section>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M20.5 8a8.5 8.5 0 10-2.38 7.41"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M20.5 4v4h-4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+    </template>
 
     <form class="logs-filter-row" @submit.prevent="applyFilters">
       <div class="filter-fields">
@@ -151,28 +154,6 @@
       </div>
     </div>
 
-    <!-- 金额明细弹窗 -->
-    <BaseModal
-      :open="costDetailModal.open"
-      :title="t('components.logs.costDetail.title')"
-      @close="closeCostDetailModal"
-    >
-      <div class="cost-detail-modal">
-        <p v-if="costDetailModal.loading" class="cost-detail-loading">
-          {{ t('components.logs.loading') }}
-        </p>
-        <div v-else-if="costDetailModal.data.length === 0" class="cost-detail-empty">
-          {{ t('components.logs.costDetail.empty') }}
-        </div>
-        <ul v-else class="cost-detail-list">
-          <li v-for="item in costDetailModal.data" :key="item.provider" class="cost-detail-item">
-            <span class="cost-detail-item__name">{{ item.provider }}</span>
-            <span class="cost-detail-item__value">{{ formatCurrency(item.cost_total) }}</span>
-          </li>
-        </ul>
-      </div>
-    </BaseModal>
-
     <!-- 请求详情抽屉 -->
     <RequestDetailDrawer
       :open="detailDrawer.open"
@@ -186,60 +167,28 @@
 import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
-import BaseModal from '../common/BaseModal.vue'
 import PageLayout from '../common/PageLayout.vue'
 import RequestDetailDrawer from './RequestDetailDrawer.vue'
 import {
   fetchRequestLogs,
   fetchLogProviders,
-  fetchLogStats,
-  fetchProviderDailyStats,
   type RequestLog,
-  type LogStats,
-  type LogStatsSeries,
   type LogPlatform,
-  type ProviderDailyStat,
 } from '../../services/logs'
 import {
   setRecordMode,
   getRecordMode,
   type RecordMode,
 } from '../../services/requestDetail'
-import {
-  Chart,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend,
-} from 'chart.js'
-import type { ChartOptions } from 'chart.js'
-import { Line } from 'vue-chartjs'
-
-Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
 const { t } = useI18n()
 
 const logs = ref<RequestLog[]>([])
-const stats = ref<LogStats | null>(null)
 const loading = ref(false)
 const filters = reactive<{ platform: LogPlatform | ''; provider: string }>({ platform: '', provider: '' })
 const page = ref(1)
 const PAGE_SIZE = 15
 const providerOptions = ref<string[]>([])
-const statsSeries = computed<LogStatsSeries[]>(() => stats.value?.series ?? [])
-
-// 金额明细弹窗状态
-const costDetailModal = reactive<{
-  open: boolean
-  loading: boolean
-  data: ProviderDailyStat[]
-}>({
-  open: false,
-  loading: false,
-  data: [],
-})
 
 // 请求详情抽屉状态
 const detailDrawer = reactive<{
@@ -252,30 +201,6 @@ const detailDrawer = reactive<{
 
 // 详情记录模式
 const recordMode = ref<RecordMode>('fail_only')
-
-// 打开金额明细弹窗
-const openCostDetailModal = async () => {
-  costDetailModal.open = true
-  costDetailModal.loading = true
-  costDetailModal.data = []
-
-  try {
-    const stats = await fetchProviderDailyStats(filters.platform)
-    // 按金额降序排序，过滤掉金额为 0 的
-    costDetailModal.data = (stats ?? [])
-      .filter(item => item.cost_total > 0)
-      .sort((a, b) => b.cost_total - a.cost_total)
-  } catch (error) {
-    console.error('failed to load provider daily stats', error)
-  } finally {
-    costDetailModal.loading = false
-  }
-}
-
-// 关闭金额明细弹窗
-const closeCostDetailModal = () => {
-  costDetailModal.open = false
-}
 
 // 打开请求详情抽屉
 const openDetailDrawer = (sequenceId: number | null | undefined) => {
@@ -331,121 +256,6 @@ const parseLogDate = (value?: string) => {
   return null
 }
 
-const chartData = computed(() => {
-  const series = statsSeries.value
-  return {
-    labels: series.map((item) => formatSeriesLabel(item.day)),
-    datasets: [
-      {
-        label: t('components.logs.tokenLabels.cost'),
-        data: series.map((item) => Number(((item.total_cost ?? 0)).toFixed(4))),
-        borderColor: '#f97316',
-        backgroundColor: 'rgba(249, 115, 22, 0.2)',
-        tension: 0.3,
-        fill: false,
-        yAxisID: 'yCost',
-      },
-      {
-        label: t('components.logs.tokenLabels.input'),
-        data: series.map((item) => item.input_tokens ?? 0),
-        borderColor: '#34d399',
-        backgroundColor: 'rgba(52, 211, 153, 0.25)',
-        tension: 0.35,
-        fill: true,
-      },
-      {
-        label: t('components.logs.tokenLabels.output'),
-        data: series.map((item) => item.output_tokens ?? 0),
-        borderColor: '#60a5fa',
-        backgroundColor: 'rgba(96, 165, 250, 0.2)',
-        tension: 0.35,
-        fill: true,
-      },
-      {
-        label: t('components.logs.tokenLabels.reasoning'),
-        data: series.map((item) => item.reasoning_tokens ?? 0),
-        borderColor: '#f472b6',
-        backgroundColor: 'rgba(244, 114, 182, 0.2)',
-        tension: 0.35,
-        fill: true,
-      },
-      {
-        label: t('components.logs.tokenLabels.cacheWrite'),
-        data: series.map((item) => item.cache_create_tokens ?? 0),
-        borderColor: '#fbbf24',
-        backgroundColor: 'rgba(251, 191, 36, 0.2)',
-        tension: 0.35,
-        fill: false,
-      },
-      {
-        label: t('components.logs.tokenLabels.cacheRead'),
-        data: series.map((item) => item.cache_read_tokens ?? 0),
-        borderColor: '#38bdf8',
-        backgroundColor: 'rgba(56, 189, 248, 0.15)',
-        tension: 0.35,
-        fill: false,
-      },
-    ],
-  }
-})
-
-const chartOptions: ChartOptions<'line'> = {
-  responsive: true,
-  maintainAspectRatio: false,
-  interaction: {
-    mode: 'index',
-    intersect: false,
-  },
-  plugins: {
-    legend: {
-      labels: {
-        color: '#0f172a',
-        font: {
-          size: 12,
-          weight: 500,
-        },
-      },
-    },
-  },
-  scales: {
-    x: {
-      grid: { display: false },
-      ticks: { color: '#94a3b8' },
-    },
-    y: {
-      beginAtZero: true,
-      ticks: { color: '#94a3b8' },
-      grid: { color: 'rgba(148, 163, 184, 0.2)' },
-    },
-    yCost: {
-      position: 'right',
-      beginAtZero: true,
-      grid: { drawOnChartArea: false },
-      ticks: {
-        color: '#475569',
-        callback: (value: string | number) => {
-          const numeric = typeof value === 'number' ? value : Number(value)
-          if (Number.isNaN(numeric)) return '$0'
-          if (numeric >= 1) return `$${numeric.toFixed(2)}`
-          return `$${numeric.toFixed(4)}`
-        },
-      },
-    },
-  },
-}
-const formatSeriesLabel = (value?: string) => {
-  if (!value) return ''
-  const parsed = parseLogDate(value)
-  if (parsed) {
-    return `${padHour(parsed.getHours())}:00`
-  }
-  const match = value.match(/(\d{2}):(\d{2})/)
-  if (match) {
-    return `${match[1]}:${match[2]}`
-  }
-  return value
-}
-
 const REFRESH_INTERVAL = 30
 const countdown = ref(REFRESH_INTERVAL)
 let timer: number | undefined
@@ -490,17 +300,8 @@ const loadLogs = async () => {
   }
 }
 
-const loadStats = async () => {
-  try {
-    const data = await fetchLogStats(filters.platform)
-    stats.value = data ?? null
-  } catch (error) {
-    console.error('failed to load log stats', error)
-  }
-}
-
 const loadDashboard = async () => {
-  await Promise.all([loadLogs(), loadStats()])
+  await loadLogs()
 }
 
 const pagedLogs = computed(() => {
@@ -574,65 +375,6 @@ const formatNumber = (value?: number) => {
   if (value === undefined || value === null) return '—'
   return value.toLocaleString()
 }
-
-const formatCurrency = (value?: number) => {
-  if (value === undefined || value === null || Number.isNaN(value)) {
-    return '$0.0000'
-  }
-  if (value >= 1) {
-    return `$${value.toFixed(2)}`
-  }
-  if (value >= 0.01) {
-    return `$${value.toFixed(3)}`
-  }
-  return `$${value.toFixed(4)}`
-}
-
-const startOfTodayLocal = () => {
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  return now
-}
-
-const statsCards = computed(() => {
-  const data = stats.value
-  const summaryDate = summaryDateLabel.value
-  const totalTokens =
-    (data?.input_tokens ?? 0) + (data?.output_tokens ?? 0) + (data?.reasoning_tokens ?? 0)
-  return [
-    {
-      key: 'requests',
-      label: t('components.logs.summary.total'),
-      hint: t('components.logs.summary.requests'),
-      value: data ? formatNumber(data.total_requests) : '—',
-    },
-    {
-      key: 'tokens',
-      label: t('components.logs.summary.tokens'),
-      hint: t('components.logs.summary.tokenHint'),
-      value: data ? formatNumber(totalTokens) : '—',
-    },
-    {
-      key: 'cacheReads',
-      label: t('components.logs.summary.cache'),
-      hint: t('components.logs.summary.cacheHint'),
-      value: data ? formatNumber(data.cache_read_tokens) : '—',
-    },
-    {
-      key: 'cost',
-      label: t('components.logs.tokenLabels.cost'),
-      hint: summaryDate ? t('components.logs.summary.todayScope', { date: summaryDate }) : '',
-      value: formatCurrency(data?.cost_total ?? 0),
-    },
-  ]
-})
-
-const summaryDateLabel = computed(() => {
-  const firstBucket = statsSeries.value.find((item) => item.day)
-  const parsed = parseLogDate(firstBucket?.day ?? '')
-  const date = parsed ?? startOfTodayLocal()
-  return `${date.getFullYear()}-${padHour(date.getMonth() + 1)}-${padHour(date.getDate())}`
-})
 
 const loadProviderOptions = async () => {
   try {
