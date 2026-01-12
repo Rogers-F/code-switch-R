@@ -10,8 +10,6 @@ import { Create as $Create } from "@wailsio/runtime";
 import * as time$0 from "../../time/models.js";
 
 export class AppSettings {
-    "show_heatmap": boolean;
-    "show_home_title": boolean;
     "auto_start": boolean;
     "auto_update": boolean;
     "auto_connectivity_test": boolean;
@@ -63,12 +61,6 @@ export class AppSettings {
 
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
-        if (!("show_heatmap" in $$source)) {
-            this["show_heatmap"] = false;
-        }
-        if (!("show_home_title" in $$source)) {
-            this["show_home_title"] = false;
-        }
         if (!("auto_start" in $$source)) {
             this["auto_start"] = false;
         }

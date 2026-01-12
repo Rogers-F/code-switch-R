@@ -38,8 +38,9 @@
   --contrib-tooltip-text: rgba(15, 23, 42, 0.7);
   --contrib-tooltip-value: #0f172a;
   --page-max-width: 1280px;
-  --page-padding-x: 48px;
-  --page-padding-y: 24px;
+  --page-padding-x: 12px;
+  --page-padding-y: 12px;
+  --page-section-title-margin: 12px;
   --spacing-section: 18px;
 }
 
@@ -729,7 +730,7 @@ html.dark .mac-sidebar-item:hover {
   width: 100%;
   max-width: var(--page-max-width);
   margin: 0 auto;
-  padding: var(--page-padding-y) var(--page-padding-x) 48px;
+  padding: var(--page-padding-y) var(--page-padding-x) 12px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -748,8 +749,8 @@ html.dark .mac-sidebar-item:hover {
   .page-header-content,
   .page-breadcrumbs,
   .page-content {
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-left: 12px;
+    padding-right: 12px;
   }
 }
 
@@ -1976,4 +1977,13 @@ button svg {
   height: 16px !important;
   flex-shrink: 0 !important;
   display: inline-block !important;
+}
+
+/* 页面内容的小标题样式 */
+.section__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--mac-text);
+  margin-bottom: var(--page-section-title-margin);
 }

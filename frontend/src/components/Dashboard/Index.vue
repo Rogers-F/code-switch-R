@@ -1,11 +1,9 @@
 <template>
   <PageLayout :title="t('sidebar.dashboard')" :sticky="true">
-    <p class="page-lead">{{ t('dashboard.lead') }}</p>
-
     <!-- 1) 热力图（从首页迁移） -->
     <section class="dashboard-section">
       <div class="dashboard-section__header">
-        <h2 class="dashboard-section__title">{{ t('dashboard.sections.heatmap.title') }}</h2>
+        <h2 class="section__title">{{ t('dashboard.sections.heatmap.title') }}</h2>
       </div>
 
       <div
@@ -54,7 +52,7 @@
     <!-- 2) 使用统计（从日志迁移：4 统计 + 折线图） -->
     <section class="dashboard-section">
       <div class="dashboard-section__header">
-        <h2 class="dashboard-section__title">{{ t('dashboard.sections.usage.title') }}</h2>
+        <h2 class="section__title">{{ t('dashboard.sections.usage.title') }}</h2>
       </div>
 
       <div class="dashboard-stats">
@@ -95,7 +93,7 @@
     <!-- 3) 监控情况（从可用性迁移：上方 4 统计） -->
     <section class="dashboard-section">
       <div class="dashboard-section__header">
-        <h2 class="dashboard-section__title">{{ t('dashboard.sections.monitor.title') }}</h2>
+        <h2 class="section__title">{{ t('dashboard.sections.monitor.title') }}</h2>
       </div>
 
       <div class="dashboard-monitor-stats">
@@ -646,13 +644,6 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-.dashboard-section__title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--mac-text);
-}
-
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -701,6 +692,7 @@ onUnmounted(() => {
 .dashboard-chart {
   height: 280px;
   padding: 16px 18px;
+  margin-top: var(--page-padding-y);
 }
 
 .cost-detail-list {

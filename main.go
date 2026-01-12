@@ -50,7 +50,7 @@ func (a *AppService) OpenSecondWindow() {
 		Name:      name,
 		Width:     1280,
 		Height:    800,
-		MinWidth:  800,
+		MinWidth:  1280,
 		MinHeight: 800,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
