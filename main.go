@@ -293,10 +293,10 @@ func main() {
 	// 'URL' is the URL that will be loaded into the webview.
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "Simon Switch",
-		Width:     1024,
+		Width:     1280,
 		Height:    800,
-		MinWidth:  600,
-		MinHeight: 300,
+		MinWidth:  1280,
+		MinHeight: 800,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,
