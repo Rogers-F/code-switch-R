@@ -1,71 +1,28 @@
 <template>
-  <PageLayout
-    :title="t('sidebar.mcp')"
-    :sticky="true"
-  >
+  <PageLayout :title="t('sidebar.mcp')" :sticky="true">
     <template #actions>
-      <button
-        class="ghost-icon"
-        :class="{ rotating: loading }"
-        type="button"
-        :data-tooltip="t('components.mcp.controls.refresh')"
-        :aria-label="t('components.mcp.controls.refresh')"
-        :disabled="loading"
-        @click="reload"
-      >
+      <button class="ghost-icon" :class="{ rotating: loading }" type="button"
+        :data-tooltip="t('components.mcp.controls.refresh')" :aria-label="t('components.mcp.controls.refresh')"
+        :disabled="loading" @click="reload">
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M20.5 8a8.5 8.5 0 10-2.38 7.41"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <path
-            d="M20.5 4v4h-4"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
+          <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M20.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+            stroke-linejoin="round" />
         </svg>
       </button>
-      <button
-        class="ghost-icon"
-        type="button"
-        :data-tooltip="t('components.mcp.controls.create')"
-        :aria-label="t('components.mcp.controls.create')"
-        @click="openCreateModal"
-      >
+      <button class="ghost-icon" type="button" :data-tooltip="t('components.mcp.controls.create')"
+        :aria-label="t('components.mcp.controls.create')" @click="openCreateModal">
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M12 5v14M5 12h14"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
+          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+            stroke-linejoin="round" fill="none" />
         </svg>
       </button>
-      <button
-        class="ghost-icon"
-        type="button"
-        :data-tooltip="t('components.mcp.import.title')"
-        :aria-label="t('components.mcp.import.title')"
-        @click="openBatchImport"
-      >
+      <button class="ghost-icon" type="button" :data-tooltip="t('components.mcp.import.title')"
+        :aria-label="t('components.mcp.import.title')" @click="openBatchImport">
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0 0l-4-4m4 4l4-4"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
+          <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0 0l-4-4m4 4l4-4" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
         </svg>
       </button>
     </template>
@@ -74,22 +31,24 @@
 
     <section class="automation-section">
 
-        <div v-if="errorMessage" class="alert-error">{{ errorMessage }}</div>
+      <div v-if="errorMessage" class="alert-error">{{ errorMessage }}</div>
 
-        <div v-if="loading" class="empty-state">{{ t('components.mcp.list.loading') }}</div>
+      <div v-if="loading" class="empty-state">{{ t('components.mcp.list.loading') }}</div>
 
-        <div v-else-if="!servers.length" class="empty-state">
-          <p>{{ t('components.mcp.list.empty') }}</p>
-          <BaseButton type="button" @click="openCreateModal">
-            {{ t('components.mcp.controls.create') }}
-          </BaseButton>
-        </div>
+      <div v-else-if="!servers.length" class="empty-state">
+        <p>{{ t('components.mcp.list.empty') }}</p>
+        <BaseButton type="button" @click="openCreateModal">
+          {{ t('components.mcp.controls.create') }}
+        </BaseButton>
+      </div>
 
-        <div v-else class="automation-list">
-          <article v-for="server in servers" :key="server.name" class="automation-card">
+      <div v-else class="automation-list">
+        <article v-for="server in servers" :key="server.name" class="automation-card">
+          <div class="card-header">
             <div class="card-leading">
               <div class="card-icon" :style="iconStyle(server.name)">
-                <span v-if="iconSvg(server.name)" class="icon-svg" v-html="iconSvg(server.name)" aria-hidden="true"></span>
+                <span v-if="iconSvg(server.name)" class="icon-svg" v-html="iconSvg(server.name)"
+                  aria-hidden="true"></span>
                 <span v-else class="icon-fallback">{{ serverInitials(server.name) }}</span>
               </div>
               <div class="card-text">
@@ -104,74 +63,52 @@
                 <p v-if="server.tips" class="card-tip">{{ server.tips }}</p>
               </div>
             </div>
-            <div class="card-platforms">
-              <div v-for="option in platformOptions" :key="option.id" class="platform-row">
-                <div class="platform-info">
-                  <span class="platform-label">{{ option.label }}</span>
-                  <div class="platform-controls">
-                    <span
-                      class="platform-status"
-                      :class="{ active: platformActive(server, option.id) }"
-                    >
-                      {{ platformActive(server, option.id) ? t('components.mcp.status.active') : t('components.mcp.status.inactive') }}
-                    </span>
-                    <label class="mac-switch sm">
-                      <input
-                        type="checkbox"
-                        :checked="platformEnabled(server, option.id)"
-                        :disabled="saveBusy"
-                        @change="onPlatformToggle(server, option.id, $event)"
-                      />
-                      <span></span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
             <div class="card-actions">
               <button class="ghost-icon" :aria-label="t('components.mcp.list.edit')" @click="openEditModal(server)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path
                     d="M16.474 5.408l2.118 2.117m-.756-3.982L12.109 9.27a2.118 2.118 0 00-.58 1.082L11 13l2.648-.53c.41-.082.786-.283 1.082-.579l5.727-5.727a1.853 1.853 0 10-2.621-2.621z"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="M19 15v3a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h3"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
+                    fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                    stroke-linejoin="round" />
+                  <path d="M19 15v3a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h3" fill="none" stroke="currentColor"
+                    stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </button>
               <button class="ghost-icon" :aria-label="t('components.mcp.list.delete')" @click="requestDelete(server)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path
                     d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
+                    fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                    stroke-linejoin="round" />
                 </svg>
               </button>
             </div>
-          </article>
-        </div>
+          </div>
+          <div class="card-platforms">
+            <div v-for="option in platformOptions" :key="option.id" class="platform-row">
+              <div class="platform-info">
+                <span class="platform-label">{{ option.label }}</span>
+                <div class="platform-controls">
+                  <span class="platform-status" :class="{ active: platformActive(server, option.id) }">
+                    {{ platformActive(server, option.id) ? t('components.mcp.status.active') :
+                      t('components.mcp.status.inactive') }}
+                  </span>
+                  <label class="mac-switch sm">
+                    <input type="checkbox" :checked="platformEnabled(server, option.id)" :disabled="saveBusy"
+                      @change="onPlatformToggle(server, option.id, $event)" />
+                    <span></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
     </section>
 
-    <FullScreenPanel
-      class="mcp-fullscreen-panel"
-      :open="modalState.open"
+    <FullScreenPanel class="mcp-fullscreen-panel" :open="modalState.open"
       :title="modalState.editingName ? t('components.mcp.form.editTitle') : t('components.mcp.form.createTitle')"
-      @close="closeModal"
-    >
+      @close="closeModal">
       <form class="vendor-form" @submit.prevent="submitModal">
         <div class="form-row">
           <label class="form-field">
@@ -180,7 +117,8 @@
           </label>
           <label class="form-field">
             <span>{{ t('components.mcp.form.website') }}</span>
-            <BaseInput v-model="modalState.form.website" type="text" :disabled="saveBusy" placeholder="https://example.com" />
+            <BaseInput v-model="modalState.form.website" type="text" :disabled="saveBusy"
+              placeholder="https://example.com" />
           </label>
         </div>
         <label class="form-field">
@@ -196,12 +134,8 @@
         </label>
         <label v-if="modalState.form.type === 'stdio'" class="form-field">
           <span>{{ t('components.mcp.form.args') }}</span>
-          <BaseTextarea
-            v-model="modalState.form.argsText"
-            :placeholder="t('components.mcp.form.argsHint')"
-            :disabled="saveBusy"
-            rows="5"
-          />
+          <BaseTextarea v-model="modalState.form.argsText" :placeholder="t('components.mcp.form.argsHint')"
+            :disabled="saveBusy" rows="5" />
         </label>
         <label v-if="modalState.form.type === 'http'" class="form-field">
           <span>{{ t('components.mcp.form.url') }}</span>
@@ -209,12 +143,8 @@
         </label>
         <label class="form-field">
           <span>{{ t('components.mcp.form.tips') }}</span>
-          <BaseTextarea
-            v-model="modalState.form.tips"
-            :placeholder="t('components.mcp.form.tipsHint')"
-            :disabled="saveBusy"
-            rows="4"
-          />
+          <BaseTextarea v-model="modalState.form.tips" :placeholder="t('components.mcp.form.tipsHint')"
+            :disabled="saveBusy" rows="4" />
         </label>
         <div class="form-field">
           <span>{{ t('components.mcp.form.env') }}</span>
@@ -222,13 +152,8 @@
             <div v-for="entry in modalState.form.envEntries" :key="entry.id" class="env-row">
               <BaseInput v-model="entry.key" :placeholder="t('components.mcp.form.envKey')" :disabled="saveBusy" />
               <BaseInput v-model="entry.value" :placeholder="t('components.mcp.form.envValue')" :disabled="saveBusy" />
-              <button
-                class="ghost-icon"
-                type="button"
-                :aria-label="t('components.mcp.form.envRemove')"
-                :disabled="modalState.form.envEntries.length === 1 || saveBusy"
-                @click="removeEnvEntry(entry.id)"
-              >
+              <button class="ghost-icon" type="button" :aria-label="t('components.mcp.form.envRemove')"
+                :disabled="modalState.form.envEntries.length === 1 || saveBusy" @click="removeEnvEntry(entry.id)">
                 ✕
               </button>
             </div>
@@ -241,12 +166,8 @@
           <span>{{ t('components.mcp.form.platforms.title') }}</span>
           <div class="platform-checkboxes">
             <label v-for="option in platformOptions" :key="option.id" class="platform-checkbox">
-              <input
-                type="checkbox"
-                :checked="modalState.form.enablePlatform.includes(option.id)"
-                :disabled="saveBusy"
-                @change="onModalPlatformToggle(option.id, $event)"
-              />
+              <input type="checkbox" :checked="modalState.form.enablePlatform.includes(option.id)" :disabled="saveBusy"
+                @change="onModalPlatformToggle(option.id, $event)" />
               <span>{{ option.label }}</span>
             </label>
           </div>
@@ -255,65 +176,34 @@
         <!-- 表单模式：JSON 配置编辑器 -->
         <div class="form-field mcp-json-field">
           <div class="mcp-json-header" @click="toggleFormJsonExpanded">
-            <svg
-              class="mcp-json-expand-icon"
-              :class="{ expanded: formJsonExpanded }"
-              viewBox="0 0 20 20"
-              aria-hidden="true"
-            >
-              <path
-                d="M6 8l4 4 4-4"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                fill="none"
-              />
+            <svg class="mcp-json-expand-icon" :class="{ expanded: formJsonExpanded }" viewBox="0 0 20 20"
+              aria-hidden="true">
+              <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                stroke-linejoin="round" fill="none" />
             </svg>
             <span class="mcp-json-title">{{ t('components.mcp.form.jsonEditor.title') }}</span>
             <span v-if="formJsonDirty" class="mcp-json-dirty">{{ t('components.mcp.form.jsonEditor.dirty') }}</span>
 
             <div class="mcp-json-actions" @click.stop>
-              <button
-                type="button"
-                class="mcp-json-action-btn"
-                :disabled="saveBusy"
-                @click="toggleJsonLock"
-              >
+              <button type="button" class="mcp-json-action-btn" :disabled="saveBusy" @click="toggleJsonLock">
                 <span v-if="formJsonLocked">{{ t('components.mcp.form.jsonEditor.unlock') }}</span>
                 <span v-else>{{ t('components.mcp.form.jsonEditor.lock') }}</span>
               </button>
 
-              <button
-                v-if="!formJsonLocked"
-                type="button"
-                class="mcp-json-action-btn primary"
-                :disabled="saveBusy || !formJsonDirty"
-                @click="applyJsonToForm"
-              >
+              <button v-if="!formJsonLocked" type="button" class="mcp-json-action-btn primary"
+                :disabled="saveBusy || !formJsonDirty" @click="applyJsonToForm">
                 {{ t('components.mcp.form.jsonEditor.apply') }}
               </button>
-              <button
-                v-if="!formJsonLocked"
-                type="button"
-                class="mcp-json-action-btn"
-                :disabled="saveBusy || !formJsonDirty"
-                @click="resetJsonFromForm"
-              >
+              <button v-if="!formJsonLocked" type="button" class="mcp-json-action-btn"
+                :disabled="saveBusy || !formJsonDirty" @click="resetJsonFromForm">
                 {{ t('components.mcp.form.jsonEditor.reset') }}
               </button>
             </div>
           </div>
 
           <div v-if="formJsonExpanded" class="mcp-json-body">
-            <BaseTextarea
-              v-if="!formJsonLocked"
-              ref="formJsonTextareaRef"
-              v-model="formJsonEditingText"
-              rows="10"
-              class="mcp-json-textarea"
-              :disabled="saveBusy"
-            />
+            <BaseTextarea v-if="!formJsonLocked" ref="formJsonTextareaRef" v-model="formJsonEditingText" rows="10"
+              class="mcp-json-textarea" :disabled="saveBusy" />
             <pre v-else class="mcp-json-preview">{{ formJsonSyncedText }}</pre>
 
             <p v-if="formJsonError" class="alert-error">{{ formJsonError }}</p>
@@ -334,13 +224,8 @@
       </form>
     </FullScreenPanel>
 
-    <InlineModal
-      :open="confirmState.open"
-      :title="t('components.mcp.form.deleteTitle')"
-      variant="confirm"
-      :close-on-backdrop="false"
-      @close="closeConfirm"
-    >
+    <InlineModal :open="confirmState.open" :title="t('components.mcp.form.deleteTitle')" variant="confirm"
+      :close-on-backdrop="false" @close="closeConfirm">
       <div class="confirm-body">
         <p>
           {{ t('components.mcp.form.deleteMessage', { name: confirmState.target?.name ?? '' }) }}
@@ -356,11 +241,7 @@
       </footer>
     </InlineModal>
 
-    <BatchImportModal
-      :open="showBatchImport"
-      @close="closeBatchImport"
-      @imported="onBatchImported"
-    />
+    <BatchImportModal :open="showBatchImport" @close="closeBatchImport" @imported="onBatchImported" />
   </PageLayout>
 </template>
 
@@ -1029,11 +910,24 @@ onMounted(() => {
   text-transform: uppercase;
 }
 
-.card-platforms {
-  display: flex;
+.automation-card {
   flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.card-platforms {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
-  flex: 1;
+  width: 100%;
 }
 
 .platform-row {
@@ -1041,6 +935,10 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .platform-info {
@@ -1071,10 +969,12 @@ onMounted(() => {
 }
 
 .card-actions {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
   gap: 0.5rem;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .empty-state {
@@ -1156,6 +1056,7 @@ onMounted(() => {
 .card-leading {
   display: flex;
   gap: 1rem;
+  min-width: 0;
 }
 
 .card-icon {
@@ -1173,6 +1074,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .card-link {
@@ -1201,6 +1103,26 @@ onMounted(() => {
 
 .confirm-body {
   margin-bottom: 1rem;
+}
+
+@media (max-width: 900px) {
+  .card-platforms {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .card-header {
+    flex-direction: column;
+  }
+
+  .card-actions {
+    align-self: flex-end;
+  }
+
+  .card-platforms {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 表单模式 JSON 配置编辑器 */

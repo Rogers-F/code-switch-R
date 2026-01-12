@@ -1,17 +1,22 @@
 <template>
   <PageLayout :title="t('sidebar.env')">
     <div class="section-header">
-      <div class="tab-group-container">
-        <div class="tab-group" role="tablist">
-          <button v-for="platform in platforms" :key="platform.id" class="tab-pill"
-            :class="{ active: activePlatform === platform.id }" @click="activePlatform = platform.id">
-            {{ platform.name }}
-          </button>
-        </div>
+      <div class="tab-group" role="tablist" :aria-label="t('sidebar.env')">
+        <button
+          v-for="platform in platforms"
+          :key="platform.id"
+          class="tab-pill"
+          :class="{ active: activePlatform === platform.id }"
+          type="button"
+          role="tab"
+          :aria-selected="activePlatform === platform.id"
+          @click="activePlatform = platform.id"
+        >
+          {{ platform.name }}
+        </button>
       </div>
 
       <div class="section-controls">
-        <div class="divider-vertical"></div>
         <button
           class="ghost-icon"
           :class="{ rotating: loading }"
@@ -435,16 +440,5 @@ html.dark code.detail-value {
 
 .refresh-btn svg.spin {
   animation: spin 1s linear infinite;
-}
-
-.section-header {
-  background: var(--mac-surface);
-  padding: 8px 12px;
-  border-radius: 12px;
-  /* 把整个 Header 做成一个条状容器 */
-  border: 1px solid var(--mac-border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 </style>
