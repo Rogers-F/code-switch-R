@@ -15,3 +15,8 @@ CLAUDE.md
 .cursor/
 *gitignore_*
 .cache/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
