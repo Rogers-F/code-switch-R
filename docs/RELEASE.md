@@ -33,7 +33,7 @@ git push origin vX.Y.Z
 
 ## 发布产物（默认）
 
-- macOS：`codeswitch-macos-arm64.zip` / `codeswitch-macos-amd64.zip`
+- macOS：`simonswitch-macos-arm64.zip` / `simonswitch-macos-amd64.zip`（旧命名 `codeswitch-macos-*.zip` 仍兼容）
 - Windows：`CodeSwitch-amd64-installer.exe` / `CodeSwitch.exe` / `updater.exe`（含 `.sha256`）
 - Linux：`CodeSwitch.AppImage` / `codeswitch_*.deb` / `codeswitch-*.rpm`（含 `.sha256`）
 - 自动更新元数据：`latest.json`

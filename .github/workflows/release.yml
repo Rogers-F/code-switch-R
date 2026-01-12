@@ -469,7 +469,12 @@ jobs:
 
           # 提取当前版本的更新内容（从标题到下一个版本标题之前）
           # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败
-          tr -d '\r' < RELEASE_NOTES.md | awk "/^# Code Switch v$VERSION/,/^# Code Switch v[0-9]/" | head -n -1 > /tmp/version_notes.md
+          HEADING="# Code Switch v$VERSION"
+          tr -d '\r' < RELEASE_NOTES.md | awk -v h="$HEADING" '
+            $0 == h { p=1; print; next }
+            p && $0 ~ /^# Code Switch v[0-9]/ { exit }
+            p { print }
+          ' > /tmp/version_notes.md
 
           # 如果没找到版本说明，使用默认内容
           if [ ! -s /tmp/version_notes.md ]; then

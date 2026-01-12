@@ -73,7 +73,7 @@ func NewAppSettingsService(autoStartService *AutoStartService) *AppSettingsServi
 }
 
 // migrateSettings 完整的配置迁移
-// 迁移顺序：写新文件 → 校验 → 标记 → 删旧
+// 迁移顺序：写新文件 → 校验 → 标记（不自动删旧目录，避免误删 app.db 等历史数据）
 func migrateSettings(oldPath, newPath, oldDir, markerPath string) error {
 	// 1. 确保新目录存在
 	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
@@ -126,13 +126,11 @@ func migrateSettings(oldPath, newPath, oldDir, markerPath string) error {
 		return fmt.Errorf("创建迁移标记失败: %w", err)
 	}
 
-	// 7. 只有在新文件校验通过后才删除旧目录
-	if err := os.RemoveAll(oldDir); err != nil {
-		// 删除失败不是致命错误，只记录警告
-		fmt.Printf("[AppSettings] ⚠️  删除旧目录失败: %v（可手动删除 %s）\n", err, oldDir)
-	} else {
-		fmt.Printf("[AppSettings] ✅ 已删除旧目录: %s\n", oldDir)
-	}
+	// 7. 不自动删除旧目录：
+	// - 旧目录可能包含 app.db 等重要数据
+	// - 用户可能仍在运行旧版本（并发访问同一目录/数据库）
+	// 如确认已迁移且不再需要，可手动清理 oldDir。
+	fmt.Printf("[AppSettings] ℹ️  已完成迁移标记，保留旧目录: %s（如不再需要可手动删除）\n", oldDir)
 
 	return nil
 }
