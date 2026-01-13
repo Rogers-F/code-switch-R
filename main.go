@@ -135,12 +135,30 @@ func main() {
 	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
 	requestDetailService := services.NewRequestDetailService()
 
-	// 【P0 PoC】初始化 MITM 服务（不自动启动）
+	// 【P2/P3】初始化 MITM 相关服务
 	mitmService, err := services.NewMITMService()
 	if err != nil {
 		log.Fatalf("MITM 服务初始化失败: %v", err)
 	}
 	log.Println("✅ MITM 服务已初始化（未启动）")
+
+	ruleService, err := services.NewRuleService()
+	if err != nil {
+		log.Fatalf("规则服务初始化失败: %v", err)
+	}
+	log.Println("✅ MITM 规则服务已初始化")
+
+	hostsService, err := services.NewHostsService()
+	if err != nil {
+		log.Fatalf("Hosts 服务初始化失败: %v", err)
+	}
+	log.Println("✅ Hosts 服务已初始化")
+
+	systemTrustService, err := services.NewSystemTrustService()
+	if err != nil {
+		log.Fatalf("系统信任服务初始化失败: %v", err)
+	}
+	log.Println("✅ 系统信任服务已初始化")
 
 	// 应用待处理的更新
 	go func() {
@@ -246,7 +264,10 @@ func main() {
 			application.NewService(networkService),
 			application.NewService(providerRelay),
 			application.NewService(requestDetailService),
-			application.NewService(mitmService), // P0 PoC: MITM Service
+			application.NewService(mitmService), // P2: MITM Service
+			application.NewService(ruleService), // P2: Rule Service
+			application.NewService(hostsService), // P3: Hosts Service
+			application.NewService(systemTrustService), // P3: System Trust Service
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

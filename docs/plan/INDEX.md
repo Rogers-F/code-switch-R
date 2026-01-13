@@ -34,12 +34,12 @@
 
 | 阶段 | 名称 | 当前状态 | 负责人 | 范围冻结 | 回滚就绪 |
 |------|------|---------|--------|---------|---------|
-| P0 | 设计与 PoC（ADR + 可行性验证） | Completed | Codex | 是 | 否 |
-| P1 | 前端 UI 2.0（对齐 ghosxy 设计） | Not Started | Codex | 否 | 否 |
-| P2 | HTTPS MITM 解密拦截与分流转发（核心） | Not Started | Codex | 否 | 否 |
-| P3 | 系统集成（Hosts + Root CA + 提权/端口策略） | Not Started | Codex | 否 | 否 |
-| P4 | 日志系统优化（后端 + 前端效果） | Not Started | Codex | 否 | 否 |
-| P5 | 验证、打包与回滚演练（跨平台） | Not Started | Codex | 否 | 否 |
+| P0 | 设计与 PoC（ADR + 可行性验证） | Completed | Claude | 是 | 否 |
+| P1 | 前端 UI 2.0（对齐 ghosxy 设计） | Completed | Claude | 是 | 否 |
+| P2 | HTTPS MITM 解密拦截与分流转发（核心） | Not Started | Claude | 否 | 否 |
+| P3 | 系统集成（Hosts + Root CA + 提权/端口策略） | Not Started | Claude | 否 | 否 |
+| P4 | 日志系统优化（后端 + 前端效果） | Not Started | Claude | 否 | 否 |
+| P5 | 验证、打包与回滚演练（跨平台） | Not Started | Claude | 否 | 否 |
 
 **状态图例**：
 

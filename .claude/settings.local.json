@@ -6,7 +6,9 @@
       "mcp__codex-cli__ask-codex",
       "Bash(go build:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(sqlite3:*)",
+      "Bash(wails3 task:*)"
     ],
     "deny": [],
     "ask": []
