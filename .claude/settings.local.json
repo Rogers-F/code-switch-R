@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "mcp__codex-cli__ask-codex",
+      "Bash(go build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

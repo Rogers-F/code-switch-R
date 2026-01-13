@@ -135,6 +135,13 @@ func main() {
 	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
 	requestDetailService := services.NewRequestDetailService()
 
+	// 【P0 PoC】初始化 MITM 服务（不自动启动）
+	mitmService, err := services.NewMITMService()
+	if err != nil {
+		log.Fatalf("MITM 服务初始化失败: %v", err)
+	}
+	log.Println("✅ MITM 服务已初始化（未启动）")
+
 	// 应用待处理的更新
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -239,6 +246,7 @@ func main() {
 			application.NewService(networkService),
 			application.NewService(providerRelay),
 			application.NewService(requestDetailService),
+			application.NewService(mitmService), // P0 PoC: MITM Service
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -267,6 +275,10 @@ func main() {
 
 		// 4. 停止代理服务器
 		_ = providerRelay.Stop()
+
+		// 【P0 PoC】停止 MITM 服务
+		_ = mitmService.Stop()
+		log.Println("✅ MITM 服务已停止")
 
 		// 5. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {
@@ -395,7 +407,7 @@ func main() {
 	}()
 
 	// Run the application. This blocks until the application has been exited.
-	err := app.Run()
+	err = app.Run()
 
 	// If an error occurred while running the application, log it and exit.
 	if err != nil {

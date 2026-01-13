@@ -10,6 +10,7 @@ import SpeedTestPage from '../components/SpeedTest/Index.vue'
 import EnvCheckPage from '../components/EnvCheck/Index.vue'
 import ConsolePage from '../components/Console/Index.vue'
 import AvailabilityPage from '../components/Availability/Index.vue'
+import MitmPocPage from '../components/MitmPoc/Index.vue'
 
 const routes = [
   { path: '/', component: MainPage },
@@ -22,6 +23,7 @@ const routes = [
   { path: '/env', component: EnvCheckPage },
   { path: '/console', component: ConsolePage },
   { path: '/logs', component: LogsPage },
+  { path: '/mitm-poc', component: MitmPocPage },
   { path: '/settings', component: GeneralPage },
 ]
 
