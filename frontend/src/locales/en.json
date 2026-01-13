@@ -45,6 +45,8 @@
   "sidebar": {
     "home": "Home",
     "dashboard": "Dashboard",
+    "providers": "Providers",
+    "rules": "Rules",
     "prompts": "Prompts",
     "mcp": "MCP",
     "skill": "Skills",
@@ -53,6 +55,7 @@
     "speedtest": "Speed Test",
     "env": "Env Check",
     "logs": "Logs",
+    "terminal_logs": "Terminal Logs",
     "console": "Console",
     "settings": "Settings",
     "updateFound": "New version: {version}",
@@ -1043,5 +1046,15 @@
       "tabPreview": "Preview",
       "tabCurrent": "Current"
     }
+  },
+  "providers": {
+    "subtitle": "Manage upstream AI providers (Claude, Codex, Gemini)",
+    "coming_soon": "Providers Management",
+    "placeholder": "Unified provider management interface coming soon"
+  },
+  "rules": {
+    "subtitle": "Configure MITM domain routing rules and traffic policies",
+    "coming_soon": "Routing Rules",
+    "placeholder": "Domain routing and traffic policy management linked with P2/P3 MITM capabilities"
   }
 }

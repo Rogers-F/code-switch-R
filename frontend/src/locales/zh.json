@@ -45,6 +45,8 @@
   "sidebar": {
     "home": "首页",
     "dashboard": "看板",
+    "providers": "供应商",
+    "rules": "规则",
     "prompts": "提示词",
     "mcp": "MCP",
     "skill": "技能",
@@ -53,6 +55,7 @@
     "speedtest": "测速",
     "env": "环境",
     "logs": "日志",
+    "terminal_logs": "终端日志",
     "console": "控制台",
     "settings": "设置",
     "updateFound": "发现新版本：{version}",
@@ -1044,5 +1047,15 @@
       "tabPreview": "预览效果",
       "tabCurrent": "当前磁盘"
     }
+  },
+  "providers": {
+    "subtitle": "管理上游 AI 供应商（Claude、Codex、Gemini）",
+    "coming_soon": "供应商管理",
+    "placeholder": "统一供应商管理界面即将推出"
+  },
+  "rules": {
+    "subtitle": "配置 MITM 域名分流规则和流量策略",
+    "coming_soon": "路由规则",
+    "placeholder": "域名路由和流量策略管理，与 P2/P3 MITM 功能联动"
   }
 }

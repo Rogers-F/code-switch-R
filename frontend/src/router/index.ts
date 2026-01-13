@@ -1,6 +1,8 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import MainPage from '../components/Main/Index.vue'
 import DashboardPage from '../components/Dashboard/Index.vue'
+import ProvidersPage from '../components/Providers/Index.vue'
+import RulesPage from '../components/Rules/Index.vue'
 import LogsPage from '../components/Logs/Index.vue'
 import TerminalLogsPage from '../components/Logs/TerminalView.vue'
 import GeneralPage from '../components/General/Index.vue'
@@ -16,15 +18,17 @@ import MitmPocPage from '../components/MitmPoc/Index.vue'
 const routes = [
   { path: '/', component: MainPage },
   { path: '/dashboard', component: DashboardPage },
+  { path: '/providers', component: ProvidersPage },
+  { path: '/rules', component: RulesPage },
+  { path: '/logs', component: LogsPage },
+  { path: '/logs/terminal', component: TerminalLogsPage },
+  { path: '/console', component: ConsolePage },
   { path: '/prompts', component: PromptsPage },
   { path: '/mcp', component: McpPage },
   { path: '/skill', component: SkillPage },
   { path: '/availability', component: AvailabilityPage },
   { path: '/speedtest', component: SpeedTestPage },
   { path: '/env', component: EnvCheckPage },
-  { path: '/console', component: ConsolePage },
-  { path: '/logs', component: LogsPage },
-  { path: '/logs/terminal', component: TerminalLogsPage },
   { path: '/mitm-poc', component: MitmPocPage },
   { path: '/settings', component: GeneralPage },
 ]
