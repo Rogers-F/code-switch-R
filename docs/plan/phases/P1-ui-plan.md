@@ -1,7 +1,7 @@
 # Phase P1 Plan: 前端 UI 2.0（对齐 ghosxy 设计）
 
-**创建日期**：2026-01-13  
-**状态**：Not Started  
+**创建日期**：2026-01-13
+**状态**：In Progress (Stage 1 Complete, Stage 2 Complete, Stage 3 Partial)
 **范围**：`frontend/`（Vue3 + Tailwind），不改后端代理核心逻辑  
 
 ---
@@ -83,4 +83,90 @@
 - ghosxy Logs UI：`/Users/zhuoxiongliang/Documents/coding/ghosxy/src/renderer/src/pages/Logs.tsx`
 - 当前 Sidebar：`frontend/src/components/Sidebar.vue`
 - 当前 Logs：`frontend/src/components/Logs/Index.vue`
+
+---
+
+## 实施进度
+
+### Stage 1: 信息架构与路由重组 ✅ (已完成 2026-01-13)
+
+**完成内容：**
+- 实现 5 组导航结构：Dashboard / Providers / Rules / Logs / Settings
+- 新增可折叠分组功能，状态持久化到 localStorage
+- 新增 `/providers` 和 `/rules` 路由与占位页面
+- Settings 组整合：Console、MCP、Skills、Prompts、Env Check、Speed Test、Availability、MITM PoC
+- 新增 layers 图标（Providers）和 star 图标（Rules）
+- 完整国际化支持（en.json / zh.json）
+
+**关键文件：**
+- `frontend/src/components/Sidebar.vue`（新增 NavGroup 接口、分组逻辑）
+- `frontend/src/components/Providers/Index.vue`（占位页面）
+- `frontend/src/components/Rules/Index.vue`（占位页面）
+- `frontend/src/router/index.ts`（新增路由）
+- `frontend/src/locales/`（新增翻译键）
+
+**技术亮点：**
+- 分组状态通过 `collapsedGroups` ref 和 localStorage 管理
+- Dashboard 组不可折叠（单项直达）
+- Logs 组包含表格视图和终端视图两个子项
+
+---
+
+### Stage 2: 组件体系对齐 ghosxy ✅ (已完成 2026-01-13)
+
+**完成内容：**
+- 创建 5 个基础 UI 组件（Vue3 实现）
+  - `Button.vue`: 支持 6 种 variant（default/destructive/outline/secondary/ghost/link）和 4 种 size
+  - `Card.vue`: default/outline 两种变体
+  - `Badge.vue`: default/success/warning/error/info 状态样式
+  - `ScrollArea.vue`: 自定义滚动条，暴露 scrollToTop/scrollToBottom 方法
+  - `Separator.vue`: horizontal/vertical 分隔线
+
+**关键文件：**
+- `frontend/src/components/ui/Button.vue`
+- `frontend/src/components/ui/Card.vue`
+- `frontend/src/components/ui/Badge.vue`
+- `frontend/src/components/ui/ScrollArea.vue`
+- `frontend/src/components/ui/Separator.vue`
+
+**技术亮点：**
+- 采用 Tailwind CSS 底座，computed 属性动态计算 class
+- 组件 props 设计参考 shadcn/ui React 版本，适配 Vue3 Composition API
+- 暗黑模式适配（通过 CSS 变量 `--color-*`）
+
+---
+
+### Stage 3: 核心页面重构 🚧 (进行中)
+
+**已完成：**
+- ✅ Logs 终端风格视图
+  - 创建 `frontend/src/components/Logs/TerminalView.vue`
+  - Zinc 色板深色终端（#09090b 背景、#18181b 头部）
+  - 红/黄/绿终端按钮、自动滚动切换、彩色日志等级
+  - 新增路由 `/logs/terminal` 和侧边栏入口
+
+**待完成：**
+- ⏳ Dashboard 页面重构（系统状态卡片）
+- ⏳ Providers 页面实现（统一列表与详情编辑）
+- ⏳ Settings 页面重构（网络监听与系统集成入口收敛）
+
+**关键文件：**
+- `frontend/src/components/Logs/TerminalView.vue` ✅
+- `frontend/src/components/Dashboard/Index.vue` ⏳
+- `frontend/src/components/Providers/Index.vue` ⏳（当前为占位）
+- `frontend/src/components/General/Index.vue` (Settings) ⏳
+
+---
+
+## 下一步
+
+1. 完成 Dashboard 页面重构
+   - 添加运行状态卡片（Relay、MITM、Hosts、Root CA）
+   - 快捷操作按钮（启动/停止、安装/卸载证书）
+2. 实现 Providers 页面
+   - 列表视图（所有供应商）
+   - 详情编辑表单（统一布局与验证）
+3. 重构 Settings 页面
+   - 整合网络监听配置
+   - 整合系统集成入口
 
