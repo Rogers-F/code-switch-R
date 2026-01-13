@@ -446,6 +446,11 @@ func shouldSkipBackupRelPath(rel string, includeDatabase bool) bool {
 		return true
 	}
 
+	// 排除：certs 目录（密钥文件应换设备重新生成，无需备份）
+	if strings.HasPrefix(rel, "certs/") || rel == "certs" {
+		return true
+	}
+
 	return false
 }
 
