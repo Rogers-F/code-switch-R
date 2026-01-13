@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import MainPage from '../components/Main/Index.vue'
 import DashboardPage from '../components/Dashboard/Index.vue'
 import LogsPage from '../components/Logs/Index.vue'
+import TerminalLogsPage from '../components/Logs/TerminalView.vue'
 import GeneralPage from '../components/General/Index.vue'
 import McpPage from '../components/Mcp/index.vue'
 import SkillPage from '../components/Skill/Index.vue'
@@ -23,6 +24,7 @@ const routes = [
   { path: '/env', component: EnvCheckPage },
   { path: '/console', component: ConsolePage },
   { path: '/logs', component: LogsPage },
+  { path: '/logs/terminal', component: TerminalLogsPage },
   { path: '/mitm-poc', component: MitmPocPage },
   { path: '/settings', component: GeneralPage },
 ]

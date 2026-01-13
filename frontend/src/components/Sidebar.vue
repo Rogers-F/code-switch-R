@@ -132,12 +132,14 @@ const navItems: NavItem[] = [
   { path: '/dashboard', icon: 'grid', labelKey: 'sidebar.dashboard' },
   { path: '/console', icon: 'terminal', labelKey: 'sidebar.console' },
   { path: '/logs', icon: 'bar-chart', labelKey: 'sidebar.logs' },
+  { path: '/logs/terminal', icon: 'terminal', labelKey: 'sidebar.terminal_logs', isNew: true },
   { path: '/prompts', icon: 'file-text', labelKey: 'sidebar.prompts', isNew: true },
   { path: '/mcp', icon: 'plug', labelKey: 'sidebar.mcp' },
   { path: '/skill', icon: 'tool', labelKey: 'sidebar.skill' },
   { path: '/availability', icon: 'activity', labelKey: 'sidebar.availability', isNew: true },
   { path: '/speedtest', icon: 'zap', labelKey: 'sidebar.speedtest', isNew: true },
   { path: '/env', icon: 'search', labelKey: 'sidebar.env', isNew: true },
+  { path: '/mitm-poc', icon: 'shield', labelKey: 'MITM PoC', isNew: true },
   { path: '/settings', icon: 'settings', labelKey: 'sidebar.settings' },
 ]
 
@@ -232,6 +234,11 @@ const navigate = (path: string) => {
         <svg v-else-if="item.icon === 'terminal'" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="4 17 10 11 4 5"></polyline>
           <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+
+        <!-- Shield -->
+        <svg v-else-if="item.icon === 'shield'" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
         </svg>
 
         <!-- Settings -->
