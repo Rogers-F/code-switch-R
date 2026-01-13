@@ -64,9 +64,28 @@
   "dashboard": {
     "lead": "A unified overview of usage and monitoring stats. Data refreshes automatically.",
     "sections": {
+      "system": { "title": "System Status" },
       "heatmap": { "title": "Heatmap (Last 14 days · hourly)" },
       "usage": { "title": "Usage Stats (Today)" },
       "monitor": { "title": "Monitoring (Live)" }
+    },
+    "system": {
+      "relay": "Proxy Relay",
+      "relayDesc": "Port :18100",
+      "mitm": "MITM Proxy",
+      "mitmDesc": "Port :8443",
+      "rootCA": "Root CA",
+      "rootCADesc": "HTTPS Interception",
+      "hosts": "Hosts File",
+      "hostsDesc": "DNS Overrides"
+    },
+    "status": {
+      "running": "Running",
+      "stopped": "Stopped",
+      "installed": "Installed",
+      "notInstalled": "Not Installed",
+      "configured": "Configured",
+      "notConfigured": "Not Configured"
     }
   },
   "availability": {
@@ -1050,7 +1069,25 @@
   "providers": {
     "subtitle": "Manage upstream AI providers (Claude, Codex, Gemini)",
     "coming_soon": "Providers Management",
-    "placeholder": "Unified provider management interface coming soon"
+    "placeholder": "Unified provider management interface coming soon",
+    "status": {
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "field": {
+      "endpoint": "Endpoint",
+      "model": "Model",
+      "priority": "Priority"
+    },
+    "actions": {
+      "edit": "Edit",
+      "test": "Test"
+    },
+    "default": "Default",
+    "empty": {
+      "title": "No Providers",
+      "desc": "Add your first AI provider to get started"
+    }
   },
   "rules": {
     "subtitle": "Configure MITM domain routing rules and traffic policies",

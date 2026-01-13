@@ -1,5 +1,66 @@
 <template>
   <PageLayout :title="t('sidebar.dashboard')" :sticky="true">
+    <!-- 0) 系统状态卡片 -->
+    <section class="dashboard-section">
+      <div class="dashboard-section__header">
+        <h2 class="section__title">{{ t('dashboard.sections.system.title', 'System Status') }}</h2>
+      </div>
+
+      <div class="system-status-grid">
+        <Card class="status-card" variant="outline">
+          <div class="status-card__header">
+            <div class="status-indicator" :class="{ active: systemStatus.relay }"></div>
+            <h3 class="status-card__title">{{ t('dashboard.system.relay', 'Proxy Relay') }}</h3>
+          </div>
+          <div class="status-card__content">
+            <Badge :variant="systemStatus.relay ? 'success' : 'default'">
+              {{ systemStatus.relay ? t('dashboard.status.running', 'Running') : t('dashboard.status.stopped', 'Stopped') }}
+            </Badge>
+            <p class="status-card__desc">{{ t('dashboard.system.relayDesc', 'Port :18100') }}</p>
+          </div>
+        </Card>
+
+        <Card class="status-card" variant="outline">
+          <div class="status-card__header">
+            <div class="status-indicator" :class="{ active: systemStatus.mitm }"></div>
+            <h3 class="status-card__title">{{ t('dashboard.system.mitm', 'MITM Proxy') }}</h3>
+          </div>
+          <div class="status-card__content">
+            <Badge :variant="systemStatus.mitm ? 'success' : 'default'">
+              {{ systemStatus.mitm ? t('dashboard.status.running', 'Running') : t('dashboard.status.stopped', 'Stopped') }}
+            </Badge>
+            <p class="status-card__desc">{{ t('dashboard.system.mitmDesc', 'Port :8443') }}</p>
+          </div>
+        </Card>
+
+        <Card class="status-card" variant="outline">
+          <div class="status-card__header">
+            <div class="status-indicator" :class="{ active: systemStatus.rootCA }"></div>
+            <h3 class="status-card__title">{{ t('dashboard.system.rootCA', 'Root CA') }}</h3>
+          </div>
+          <div class="status-card__content">
+            <Badge :variant="systemStatus.rootCA ? 'success' : 'warning'">
+              {{ systemStatus.rootCA ? t('dashboard.status.installed', 'Installed') : t('dashboard.status.notInstalled', 'Not Installed') }}
+            </Badge>
+            <p class="status-card__desc">{{ t('dashboard.system.rootCADesc', 'HTTPS Interception') }}</p>
+          </div>
+        </Card>
+
+        <Card class="status-card" variant="outline">
+          <div class="status-card__header">
+            <div class="status-indicator" :class="{ active: systemStatus.hosts }"></div>
+            <h3 class="status-card__title">{{ t('dashboard.system.hosts', 'Hosts File') }}</h3>
+          </div>
+          <div class="status-card__content">
+            <Badge :variant="systemStatus.hosts ? 'success' : 'default'">
+              {{ systemStatus.hosts ? t('dashboard.status.configured', 'Configured') : t('dashboard.status.notConfigured', 'Not Configured') }}
+            </Badge>
+            <p class="status-card__desc">{{ t('dashboard.system.hostsDesc', 'DNS Overrides') }}</p>
+          </div>
+        </Card>
+      </div>
+    </section>
+
     <!-- 1) 热力图（从首页迁移） -->
     <section class="dashboard-section">
       <div class="dashboard-section__header">
@@ -123,6 +184,8 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PageLayout from '../common/PageLayout.vue'
 import BaseModal from '../common/BaseModal.vue'
+import Card from '../ui/Card.vue'
+import Badge from '../ui/Badge.vue'
 import {
   buildUsageHeatmapMatrix,
   generateFallbackUsageHeatmap,
@@ -162,6 +225,14 @@ const { t, locale } = useI18n()
 const REFRESH_INTERVAL_MS = 30_000
 let refreshTimer: number | undefined
 const refreshing = ref(false)
+
+// ===== 0) 系统状态 =====
+const systemStatus = reactive({
+  relay: true,  // 代理中继服务 (假定运行)
+  mitm: false,  // MITM服务状态
+  rootCA: false, // Root CA安装状态
+  hosts: false,  // Hosts配置状态
+})
 
 // ===== 1) 热力图 =====
 const HEATMAP_DAYS = DEFAULT_HEATMAP_DAYS
@@ -637,6 +708,56 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.system-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.status-card {
+  padding: 1.25rem;
+}
+
+.status-card__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-gray-400);
+  transition: background 0.3s ease;
+}
+
+.status-indicator.active {
+  background: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
+}
+
+.status-card__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.status-card__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.status-card__desc {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
 .dashboard-section__header {
   display: flex;
   align-items: baseline;
