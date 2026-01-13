@@ -86,6 +86,28 @@
       "notInstalled": "未安装",
       "configured": "已配置",
       "notConfigured": "未配置"
+    },
+    "mitm": {
+      "controls": "MITM 控制",
+      "start": "启动 MITM",
+      "stop": "停止 MITM",
+      "installCA": "安装根证书",
+      "uninstallCA": "卸载根证书",
+      "applyHosts": "应用 Hosts",
+      "cleanupHosts": "清理 Hosts",
+      "exportCA": "导出CA证书",
+      "error": {
+        "toggle": "切换 MITM 代理失败，请查看控制台获取详细信息。",
+        "ca": "安装/卸载根证书失败，可能需要管理员权限。",
+        "hosts": "应用/清理 Hosts 条目失败，可能需要管理员权限。",
+        "noRules": "未找到已启用的规则，请先创建并启用规则。",
+        "noDomains": "已启用规则中未找到有效的域名。",
+        "noCert": "未找到 CA 证书，请先启动 MITM 代理。",
+        "openCert": "打开 CA 证书失败。"
+      },
+      "info": {
+        "certPath": "证书路径：{path}"
+      }
     }
   },
   "availability": {
@@ -1093,6 +1115,47 @@
   "rules": {
     "subtitle": "配置 MITM 域名分流规则和流量策略",
     "coming_soon": "路由规则",
-    "placeholder": "域名路由和流量策略管理，与 P2/P3 MITM 功能联动"
+    "placeholder": "域名路由和流量策略管理，与 P2/P3 MITM 功能联动",
+    "status": {
+      "enabled": "已启用",
+      "disabled": "已禁用"
+    },
+    "fields": {
+      "name": "规则名称",
+      "sourceHost": "源域名",
+      "targetProvider": "目标供应商",
+      "priority": "优先级",
+      "pathRewrite": "路径重写",
+      "enabled": "启用规则",
+      "modelMappings": "模型映射",
+      "mappings": "个映射"
+    },
+    "placeholders": {
+      "name": "例如：OpenAI 转 Claude",
+      "sourceHost": "例如：api.openai.com",
+      "targetProvider": "例如：claude:1 或 claude",
+      "pathRewrite": "例如：/v1beta/openai/ → /v1/"
+    },
+    "optional": "可选",
+    "actions": {
+      "create": "创建规则",
+      "edit": "编辑",
+      "delete": "删除",
+      "save": "保存",
+      "cancel": "取消",
+      "enable": "启用",
+      "disable": "禁用"
+    },
+    "dialog": {
+      "create": "创建 MITM 规则",
+      "edit": "编辑 MITM 规则"
+    },
+    "empty": {
+      "title": "暂无规则",
+      "desc": "创建您的第一条 MITM 路由规则以开始拦截和转发流量。"
+    },
+    "confirm": {
+      "delete": "确定要删除规则\"{name}\"吗？此操作无法撤销。"
+    }
   }
 }

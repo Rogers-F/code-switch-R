@@ -14,18 +14,22 @@ import * as DeepLinkService from "./deeplinkservice.js";
 import * as EnvCheckService from "./envcheckservice.js";
 import * as GeminiService from "./geminiservice.js";
 import * as HealthCheckService from "./healthcheckservice.js";
+import * as HostsService from "./hostsservice.js";
 import * as ImportService from "./importservice.js";
 import * as LogService from "./logservice.js";
 import * as MCPService from "./mcpservice.js";
+import * as MITMService from "./mitmservice.js";
 import * as NetworkService from "./networkservice.js";
 import * as PromptService from "./promptservice.js";
 import * as ProviderRelayService from "./providerrelayservice.js";
 import * as ProviderService from "./providerservice.js";
 import * as RequestDetailService from "./requestdetailservice.js";
+import * as RuleService from "./ruleservice.js";
 import * as SettingsService from "./settingsservice.js";
 import * as SkillService from "./skillservice.js";
 import * as SpeedTestService from "./speedtestservice.js";
 import * as SuiStore from "./suistore.js";
+import * as SystemTrustService from "./systemtrustservice.js";
 import * as UpdateService from "./updateservice.js";
 export {
     AppSettingsService,
@@ -41,18 +45,22 @@ export {
     EnvCheckService,
     GeminiService,
     HealthCheckService,
+    HostsService,
     ImportService,
     LogService,
     MCPService,
+    MITMService,
     NetworkService,
     PromptService,
     ProviderRelayService,
     ProviderService,
     RequestDetailService,
+    RuleService,
     SettingsService,
     SkillService,
     SpeedTestService,
     SuiStore,
+    SystemTrustService,
     UpdateService
 };
 
@@ -96,6 +104,7 @@ export {
     HealthCheckHistory,
     HealthCheckResult,
     HeatmapStat,
+    HostsEntry,
     Hotkey,
     LastUsedProvider,
     ListenMode,
@@ -103,7 +112,10 @@ export {
     LogStatsSeries,
     MCPParseResult,
     MCPServer,
+    MITMLogEntry,
+    MITMRule,
     ManualTestResult,
+    ModelMapping,
     NetworkSettings,
     Prompt,
     Provider,

@@ -59,30 +59,39 @@
       <!-- Logs Section -->
       <div class="logs-section">
         <div class="logs-header">
-          <h3>Recent Logs</h3>
-          <div class="auto-scroll-toggle">
-            <span>Auto Refresh</span>
-            <label class="mac-switch">
-              <input type="checkbox" v-model="autoRefresh" />
-              <span></span>
-            </label>
+          <h3>Recent Logs ({{ filteredLogs.length }})</h3>
+          <div class="header-controls">
+            <input
+              v-model="searchFilter"
+              type="text"
+              placeholder="Filter logs..."
+              class="search-input"
+            />
+            <button @click="clearLogs" class="btn btn-secondary btn-sm">Clear Logs</button>
+            <div class="auto-scroll-toggle">
+              <span>Auto Refresh</span>
+              <label class="mac-switch">
+                <input type="checkbox" v-model="autoRefresh" />
+                <span></span>
+              </label>
+            </div>
           </div>
         </div>
 
-        <div class="logs-container">
-          <div v-if="logs.length === 0" class="empty-state">
-            <p>No MITM logs yet. Start the server and make some requests.</p>
+        <div class="logs-container" ref="logsContainer">
+          <div v-if="filteredLogs.length === 0" class="empty-state">
+            <p>{{ logs.length === 0 ? 'No MITM logs yet. Start the server and make some requests.' : 'No logs match your filter.' }}</p>
           </div>
 
           <div v-else>
-            <div v-for="(log, index) in logs" :key="index" class="log-entry">
+            <div v-for="(log, index) in filteredLogs" :key="index" class="log-entry">
               <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
               <span class="log-method">{{ log.method }}</span>
               <span class="log-domain">{{ log.domain }}</span>
               <span class="log-path">{{ log.path }}</span>
               <span class="log-status" :class="getStatusClass(log.statusCode)">{{ log.statusCode }}</span>
               <span class="log-latency">{{ log.latency }}ms</span>
-              <span v-if="log.error" class="log-error">{{ log.error }}</span>
+              <span v-if="log.error" class="log-error">⚠️ {{ log.error }}</span>
             </div>
           </div>
         </div>
@@ -92,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
 
@@ -118,7 +127,23 @@ const logs = ref<MITMLogEntry[]>([])
 const loading = ref(false)
 const caCertPath = ref('')
 const autoRefresh = ref(true)
+const searchFilter = ref('')
+const logsContainer = ref<HTMLElement | null>(null)
 let refreshInterval: number | null = null
+let lastLogCount = 0
+
+// Computed filtered logs
+const filteredLogs = computed(() => {
+  if (!searchFilter.value) return logs.value
+
+  const filter = searchFilter.value.toLowerCase()
+  return logs.value.filter(log =>
+    log.domain?.toLowerCase().includes(filter) ||
+    log.path?.toLowerCase().includes(filter) ||
+    log.method?.toLowerCase().includes(filter) ||
+    log.error?.toLowerCase().includes(filter)
+  )
+})
 
 const loadStatus = async () => {
   try {
@@ -177,15 +202,27 @@ const loadLogs = async () => {
     const result = await Call.ByName('codeswitch/services.MITMService.GetMITMLogs')
     const newLogs = result as MITMLogEntry[]
     if (newLogs && newLogs.length > 0) {
-      logs.value.push(...newLogs)
-      // Keep only last 100 logs
-      if (logs.value.length > 100) {
-        logs.value = logs.value.slice(-100)
+      // Replace instead of append to avoid duplicates
+      logs.value = newLogs.slice(-100) // Keep only last 100 logs
+
+      // Auto scroll to bottom if new logs added
+      if (logs.value.length > lastLogCount) {
+        lastLogCount = logs.value.length
+        await nextTick()
+        if (logsContainer.value) {
+          logsContainer.value.scrollTop = logsContainer.value.scrollHeight
+        }
       }
     }
   } catch (error) {
     console.error('Failed to load logs:', error)
   }
+}
+
+const clearLogs = () => {
+  logs.value = []
+  lastLogCount = 0
+  searchFilter.value = ''
 }
 
 const formatTimestamp = (timestamp: string) => {
@@ -343,6 +380,33 @@ h3 {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.search-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-background);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  min-width: 200px;
+  transition: all 0.2s;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+}
+
+.btn-sm {
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
 }
 
 .auto-scroll-toggle {

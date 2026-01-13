@@ -1801,6 +1801,34 @@ export class HeatmapStat {
     }
 }
 
+/**
+ * HostsEntry represents a single hosts entry
+ */
+export class HostsEntry {
+    "ip": string;
+    "domain": string;
+
+    /** Creates a new HostsEntry instance. */
+    constructor($$source: Partial<HostsEntry> = {}) {
+        if (!("ip" in $$source)) {
+            this["ip"] = "";
+        }
+        if (!("domain" in $$source)) {
+            this["domain"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HostsEntry instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HostsEntry {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HostsEntry($$parsedSource as Partial<HostsEntry>);
+    }
+}
+
 export class Hotkey {
     /**
      * 热键ID
@@ -2126,6 +2154,154 @@ export class MCPServer {
 }
 
 /**
+ * MITMLogEntry represents a single MITM request log
+ */
+export class MITMLogEntry {
+    "timestamp": time$0.Time;
+    "domain": string;
+    "method": string;
+    "path": string;
+    "target": string;
+    "statusCode": number;
+
+    /**
+     * milliseconds
+     */
+    "latency": number;
+    "error"?: string;
+
+    /** Creates a new MITMLogEntry instance. */
+    constructor($$source: Partial<MITMLogEntry> = {}) {
+        if (!("timestamp" in $$source)) {
+            this["timestamp"] = null;
+        }
+        if (!("domain" in $$source)) {
+            this["domain"] = "";
+        }
+        if (!("method" in $$source)) {
+            this["method"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("target" in $$source)) {
+            this["target"] = "";
+        }
+        if (!("statusCode" in $$source)) {
+            this["statusCode"] = 0;
+        }
+        if (!("latency" in $$source)) {
+            this["latency"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new MITMLogEntry instance from a string or object.
+     */
+    static createFrom($$source: any = {}): MITMLogEntry {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new MITMLogEntry($$parsedSource as Partial<MITMLogEntry>);
+    }
+}
+
+/**
+ * MITMRule represents a routing rule for MITM proxy
+ */
+export class MITMRule {
+    /**
+     * UUID
+     */
+    "id": string;
+
+    /**
+     * Display name
+     */
+    "name": string;
+
+    /**
+     * Rule status
+     */
+    "enabled": boolean;
+
+    /**
+     * Domain to intercept (e.g., api.openai.com)
+     */
+    "sourceHost": string;
+
+    /**
+     * Target provider ID
+     */
+    "targetProvider": string;
+
+    /**
+     * Model transformation rules
+     */
+    "modelMappings": ModelMapping[];
+
+    /**
+     * Path rewrite pattern (optional)
+     */
+    "pathRewrite": string;
+
+    /**
+     * Execution priority (higher = first)
+     */
+    "priority": number;
+    "createdAt": time$0.Time;
+    "updatedAt": time$0.Time;
+
+    /** Creates a new MITMRule instance. */
+    constructor($$source: Partial<MITMRule> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+        if (!("sourceHost" in $$source)) {
+            this["sourceHost"] = "";
+        }
+        if (!("targetProvider" in $$source)) {
+            this["targetProvider"] = "";
+        }
+        if (!("modelMappings" in $$source)) {
+            this["modelMappings"] = [];
+        }
+        if (!("pathRewrite" in $$source)) {
+            this["pathRewrite"] = "";
+        }
+        if (!("priority" in $$source)) {
+            this["priority"] = 0;
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null;
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new MITMRule instance from a string or object.
+     */
+    static createFrom($$source: any = {}): MITMRule {
+        const $$createField5_0 = $$createType23;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("modelMappings" in $$parsedSource) {
+            $$parsedSource["modelMappings"] = $$createField5_0($$parsedSource["modelMappings"]);
+        }
+        return new MITMRule($$parsedSource as Partial<MITMRule>);
+    }
+}
+
+/**
  * ManualTestResult 手动测试结果
  */
 export class ManualTestResult {
@@ -2162,6 +2338,41 @@ export class ManualTestResult {
 }
 
 /**
+ * ModelMapping represents a model transformation rule
+ */
+export class ModelMapping {
+    /**
+     * Original model name pattern (supports *)
+     */
+    "sourceModel": string;
+
+    /**
+     * Mapped model name
+     */
+    "targetModel": string;
+
+    /** Creates a new ModelMapping instance. */
+    constructor($$source: Partial<ModelMapping> = {}) {
+        if (!("sourceModel" in $$source)) {
+            this["sourceModel"] = "";
+        }
+        if (!("targetModel" in $$source)) {
+            this["targetModel"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelMapping instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelMapping {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ModelMapping($$parsedSource as Partial<ModelMapping>);
+    }
+}
+
+/**
  * NetworkSettings 网络设置
  */
 export class NetworkSettings {
@@ -2190,7 +2401,7 @@ export class NetworkSettings {
      * Creates a new NetworkSettings instance from a string or object.
      */
     static createFrom($$source: any = {}): NetworkSettings {
-        const $$createField4_0 = $$createType22;
+        const $$createField4_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("targetCli" in $$parsedSource) {
             $$parsedSource["targetCli"] = $$createField4_0($$parsedSource["targetCli"]);
@@ -2372,9 +2583,9 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField10_0 = $$createType23;
+        const $$createField10_0 = $$createType25;
         const $$createField11_0 = $$createType4;
-        const $$createField15_0 = $$createType25;
+        const $$createField15_0 = $$createType27;
         const $$createField17_0 = $$createType4;
         const $$createField18_0 = $$createType4;
         const $$createField19_0 = $$createType7;
@@ -2534,7 +2745,7 @@ export class ProviderTimeline {
      * Creates a new ProviderTimeline instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderTimeline {
-        const $$createField5_0 = $$createType25;
+        const $$createField5_0 = $$createType27;
         const $$createField6_0 = $$createType16;
         const $$createField7_0 = $$createType17;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
@@ -3250,7 +3461,9 @@ const $$createType18 = LogStatsSeries.createFrom;
 const $$createType19 = $Create.Array($$createType18);
 const $$createType20 = MCPServer.createFrom;
 const $$createType21 = $Create.Array($$createType20);
-const $$createType22 = TargetCli.createFrom;
-const $$createType23 = $Create.Map($Create.Any, $Create.Any);
-const $$createType24 = AvailabilityConfig.createFrom;
-const $$createType25 = $Create.Nullable($$createType24);
+const $$createType22 = ModelMapping.createFrom;
+const $$createType23 = $Create.Array($$createType22);
+const $$createType24 = TargetCli.createFrom;
+const $$createType25 = $Create.Map($Create.Any, $Create.Any);
+const $$createType26 = AvailabilityConfig.createFrom;
+const $$createType27 = $Create.Nullable($$createType26);

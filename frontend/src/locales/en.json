@@ -86,6 +86,28 @@
       "notInstalled": "Not Installed",
       "configured": "Configured",
       "notConfigured": "Not Configured"
+    },
+    "mitm": {
+      "controls": "MITM Controls",
+      "start": "Start MITM",
+      "stop": "Stop MITM",
+      "installCA": "Install Root CA",
+      "uninstallCA": "Uninstall Root CA",
+      "applyHosts": "Apply Hosts",
+      "cleanupHosts": "Cleanup Hosts",
+      "exportCA": "Export CA Certificate",
+      "error": {
+        "toggle": "Failed to toggle MITM proxy. Check console for details.",
+        "ca": "Failed to install/uninstall Root CA. Administrator privileges may be required.",
+        "hosts": "Failed to apply/cleanup hosts entries. Administrator privileges may be required.",
+        "noRules": "No enabled rules found. Please create and enable rules first.",
+        "noDomains": "No valid domains found in enabled rules.",
+        "noCert": "CA certificate not found. Please start MITM proxy first.",
+        "openCert": "Failed to open CA certificate."
+      },
+      "info": {
+        "certPath": "Certificate path: {path}"
+      }
     }
   },
   "availability": {
@@ -1092,6 +1114,47 @@
   "rules": {
     "subtitle": "Configure MITM domain routing rules and traffic policies",
     "coming_soon": "Routing Rules",
-    "placeholder": "Domain routing and traffic policy management linked with P2/P3 MITM capabilities"
+    "placeholder": "Domain routing and traffic policy management linked with P2/P3 MITM capabilities",
+    "status": {
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "fields": {
+      "name": "Rule Name",
+      "sourceHost": "Source Domain",
+      "targetProvider": "Target Provider",
+      "priority": "Priority",
+      "pathRewrite": "Path Rewrite",
+      "enabled": "Enable Rule",
+      "modelMappings": "Model Mappings",
+      "mappings": "mapping(s)"
+    },
+    "placeholders": {
+      "name": "e.g., OpenAI to Claude",
+      "sourceHost": "e.g., api.openai.com",
+      "targetProvider": "e.g., claude:1 or claude",
+      "pathRewrite": "e.g., /v1beta/openai/ → /v1/"
+    },
+    "optional": "Optional",
+    "actions": {
+      "create": "Create Rule",
+      "edit": "Edit",
+      "delete": "Delete",
+      "save": "Save",
+      "cancel": "Cancel",
+      "enable": "Enable",
+      "disable": "Disable"
+    },
+    "dialog": {
+      "create": "Create MITM Rule",
+      "edit": "Edit MITM Rule"
+    },
+    "empty": {
+      "title": "No Rules Yet",
+      "desc": "Create your first MITM routing rule to start intercepting and forwarding traffic."
+    },
+    "confirm": {
+      "delete": "Are you sure you want to delete rule \"{name}\"? This action cannot be undone."
+    }
   }
 }

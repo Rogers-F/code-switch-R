@@ -24,15 +24,22 @@ type HostsEntry struct {
 
 // HostsService manages system hosts file modifications
 type HostsService struct {
-	hostsPath string
-	mu        sync.Mutex
+	hostsPath        string
+	mu               sync.Mutex
+	privilegeService *PrivilegeService
 }
 
 // NewHostsService creates a new hosts service instance
 func NewHostsService() (*HostsService, error) {
 	hostsPath := getHostsPath()
+	privSvc, err := NewPrivilegeService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create privilege service: %w", err)
+	}
+
 	return &HostsService{
-		hostsPath: hostsPath,
+		hostsPath:        hostsPath,
+		privilegeService: privSvc,
 	}, nil
 }
 
@@ -218,13 +225,39 @@ func (h *HostsService) readHosts() (string, error) {
 
 // writeHosts writes content to hosts file (requires privilege)
 func (h *HostsService) writeHosts(content string) error {
-	// Use atomic write if available
-	if canAtomicWrite() {
-		return AtomicWriteBytes(h.hostsPath, []byte(content))
+	// Create temporary file with new content
+	tmpDir := os.TempDir()
+	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("hosts-temp-%d", time.Now().UnixNano()))
+
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	// Use elevated privileges to copy temp file to hosts location
+	var cmd string
+	var args []string
+
+	switch runtime.GOOS {
+	case "windows":
+		// Use copy command on Windows
+		cmd = "cmd.exe"
+		args = []string{"/c", "copy", "/Y", tmpFile, h.hostsPath}
+	case "darwin", "linux":
+		// Use cp command on Unix-like systems
+		cmd = "cp"
+		args = []string{"-f", tmpFile, h.hostsPath}
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	// Fallback: direct write
-	return os.WriteFile(h.hostsPath, []byte(content), 0644)
+	// Execute with elevated privileges
+	_, err := h.privilegeService.RunElevated(cmd, args)
+	if err != nil {
+		return fmt.Errorf("failed to write hosts file with elevated privileges: %w", err)
+	}
+
+	return nil
 }
 
 // removeManagedBlock removes the managed block from content
@@ -317,12 +350,6 @@ func (h *HostsService) cleanupOldBackups(backupDir string, keep int) {
 	for i := 0; i < len(backups)-keep; i++ {
 		os.Remove(filepath.Join(backupDir, backups[i].Name()))
 	}
-}
-
-// canAtomicWrite checks if atomic write is available
-func canAtomicWrite() bool {
-	// AtomicWriteBytes is available on all platforms
-	return true
 }
 
 // Wails exported methods

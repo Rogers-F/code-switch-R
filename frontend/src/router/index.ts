@@ -13,7 +13,7 @@ import SpeedTestPage from '../components/SpeedTest/Index.vue'
 import EnvCheckPage from '../components/EnvCheck/Index.vue'
 import ConsolePage from '../components/Console/Index.vue'
 import AvailabilityPage from '../components/Availability/Index.vue'
-import MitmPocPage from '../components/MitmPoc/Index.vue'
+import MitmPocPage from '../components/MitmPoC/Index.vue'
 
 const routes = [
   { path: '/', component: MainPage },
