@@ -131,7 +131,7 @@ func (ns *NotificationService) sendSwitchNotification(info SwitchNotification) {
 	ns.mu.Unlock()
 
 	// 简化通知内容：仅显示已切换到哪个供应商
-	title := "Code Switch"
+	title := "Simon Switch"
 	body := fmt.Sprintf("已切换到 %s", info.ToProvider)
 
 	// 发送 Wails 事件到前端（用于点击通知后定位）
@@ -168,7 +168,7 @@ func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerName 
 
 	go func() {
 		// 简化通知内容
-		title := "Code Switch"
+		title := "Simon Switch"
 		body := fmt.Sprintf("%s 已拉黑 %d 分钟", providerName, durationMinutes)
 
 		// 发送 Wails 事件到前端

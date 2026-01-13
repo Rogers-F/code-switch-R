@@ -20,12 +20,12 @@ import (
 
 // UpdateTask 更新任务配置
 type UpdateTask struct {
-	MainPID      int      `json:"main_pid"`       // 主程序 PID
-	TargetExe    string   `json:"target_exe"`     // 目标可执行文件路径
-	NewExePath   string   `json:"new_exe_path"`   // 新版本文件路径
-	BackupPath   string   `json:"backup_path"`    // 备份路径
-	CleanupPaths []string `json:"cleanup_paths"`  // 需要清理的临时文件
-	TimeoutSec   int      `json:"timeout_sec"`    // 必填：等待超时（秒），由主程序动态计算
+	MainPID      int      `json:"main_pid"`      // 主程序 PID
+	TargetExe    string   `json:"target_exe"`    // 目标可执行文件路径
+	NewExePath   string   `json:"new_exe_path"`  // 新版本文件路径
+	BackupPath   string   `json:"backup_path"`   // 备份路径
+	CleanupPaths []string `json:"cleanup_paths"` // 需要清理的临时文件
+	TimeoutSec   int      `json:"timeout_sec"`   // 必填：等待超时（秒），由主程序动态计算
 }
 
 // isElevated 检查当前进程是否具有管理员权限
@@ -100,7 +100,7 @@ func main() {
 	}
 
 	log.Println("========================================")
-	log.Printf("CodeSwitch Updater 启动")
+	log.Printf("SimonSwitch Updater 启动")
 	log.Printf("任务文件: %s", taskFile)
 
 	// UAC 自检：确保以管理员权限运行

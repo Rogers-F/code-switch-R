@@ -3,7 +3,7 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "CodeSwitch"
+name: "simonswitch"
 arch: ${GOARCH}
 platform: "linux"
 version: "2.7.2"
@@ -11,18 +11,18 @@ section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
 description: "Manage Claude & Codex relays, providers, and request logs."
-vendor: "Code Switch"
+vendor: "Simon Switch"
 homepage: "https://wails.io"
 license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/CodeSwitch"
-    dst: "/usr/local/bin/CodeSwitch"
+  - src: "./bin/SimonSwitch"
+    dst: "/usr/local/bin/SimonSwitch"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/CodeSwitch.png"
-  - src: "./build/linux/CodeSwitch.desktop"
-    dst: "/usr/share/applications/CodeSwitch.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/SimonSwitch.png"
+  - src: "./build/linux/SimonSwitch.desktop"
+    dst: "/usr/share/applications/SimonSwitch.desktop"
 
 # Default dependencies for Debian 12/Ubuntu 22.04+ with WebKit 4.1
 depends:

@@ -76,9 +76,10 @@ func (as *AutoStartService) Disable() error {
 
 // Windows 实现
 const (
-	windowsRunKey             = `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-	windowsStartupApprovedKey = `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`
-	windowsAutoStartValue     = "CodeSwitch"
+	windowsRunKey               = `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+	windowsStartupApprovedKey   = `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`
+	windowsAutoStartValue       = "SimonSwitch"
+	windowsAutoStartValueLegacy = "CodeSwitch"
 )
 
 func windowsRegExe() string {
@@ -94,8 +95,21 @@ func windowsRegExe() string {
 func (as *AutoStartService) isEnabledWindows() (bool, error) {
 	regExe := windowsRegExe()
 
+	enabled, err := as.isEnabledWindowsForValue(regExe, windowsAutoStartValue)
+	if err != nil {
+		return false, err
+	}
+	if enabled {
+		return true, nil
+	}
+
+	// 向后兼容：旧版本使用 CodeSwitch 作为注册表 value name
+	return as.isEnabledWindowsForValue(regExe, windowsAutoStartValueLegacy)
+}
+
+func (as *AutoStartService) isEnabledWindowsForValue(regExe, valueName string) (bool, error) {
 	// 1. 检查 Run 键是否存在
-	cmd := hideWindowCmd(regExe, "query", windowsRunKey, "/v", windowsAutoStartValue)
+	cmd := hideWindowCmd(regExe, "query", windowsRunKey, "/v", valueName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		lowerOut := strings.ToLower(string(out))
@@ -104,8 +118,8 @@ func (as *AutoStartService) isEnabledWindows() (bool, error) {
 			strings.Contains(lowerOut, "找不到") {
 			return false, nil
 		}
-		return false, fmt.Errorf("查询 Windows 自启动注册表失败: %w, 输出: %s",
-			err, strings.TrimSpace(string(out)))
+		return false, fmt.Errorf("查询 Windows 自启动注册表失败: %w (value=%s), 输出: %s",
+			err, valueName, strings.TrimSpace(string(out)))
 	}
 
 	// 2. 验证路径是否匹配当前可执行文件
@@ -121,10 +135,10 @@ func (as *AutoStartService) isEnabledWindows() (bool, error) {
 
 	// 3. 检查 StartupApproved 是否禁用了该项
 	// Windows 10/11 在任务管理器禁用启动项时会在此处写入禁用标记
-	approvedCmd := hideWindowCmd(regExe, "query", windowsStartupApprovedKey, "/v", windowsAutoStartValue)
+	approvedCmd := hideWindowCmd(regExe, "query", windowsStartupApprovedKey, "/v", valueName)
 	approvedOut, err := approvedCmd.CombinedOutput()
 	if err == nil {
-		// 解析 REG_BINARY 输出，格式类似: "CodeSwitch    REG_BINARY    030000..."
+		// 解析 REG_BINARY 输出，格式类似: "<name>    REG_BINARY    030000..."
 		// 第一个字节: 02/06=启用, 03=禁用
 		outStr := string(approvedOut)
 		if idx := strings.Index(strings.ToUpper(outStr), "REG_BINARY"); idx != -1 {
@@ -157,6 +171,11 @@ func (as *AutoStartService) enableWindows() error {
 
 	quotedPath := fmt.Sprintf(`"%s"`, exePath)
 	regExe := windowsRegExe()
+
+	// 避免双启动：清理旧版 value name（CodeSwitch）
+	_ = hideWindowCmd(regExe, "delete", windowsRunKey, "/v", windowsAutoStartValueLegacy, "/f").Run()
+	_ = hideWindowCmd(regExe, "delete", windowsStartupApprovedKey, "/v", windowsAutoStartValueLegacy, "/f").Run()
+
 	cmd := hideWindowCmd(regExe, "add", windowsRunKey, "/v", windowsAutoStartValue,
 		"/t", "REG_SZ", "/d", quotedPath, "/f")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -171,8 +190,8 @@ func (as *AutoStartService) enableWindows() error {
 
 func (as *AutoStartService) disableWindows() error {
 	regExe := windowsRegExe()
-	cmd := hideWindowCmd(regExe, "delete", windowsRunKey, "/v", windowsAutoStartValue, "/f")
-	_ = cmd.Run()
+	_ = hideWindowCmd(regExe, "delete", windowsRunKey, "/v", windowsAutoStartValue, "/f").Run()
+	_ = hideWindowCmd(regExe, "delete", windowsRunKey, "/v", windowsAutoStartValueLegacy, "/f").Run()
 	return nil
 }
 
@@ -182,12 +201,13 @@ func (as *AutoStartService) isEnabledDarwin() (bool, error) {
 		return false, err
 	}
 
-	plistPath := as.getDarwinPlistPath()
-	_, err := os.Stat(plistPath)
-	if os.IsNotExist(err) {
-		return false, nil
+	for _, plistPath := range as.getDarwinPlistPaths() {
+		_, err := os.Stat(plistPath)
+		if err == nil {
+			return true, nil
+		}
 	}
-	return err == nil, err
+	return false, nil
 }
 
 func (as *AutoStartService) enableDarwin() error {
@@ -200,28 +220,31 @@ func (as *AutoStartService) enableDarwin() error {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 
-	plistPath := as.getDarwinPlistPath()
+	plistPath := as.getDarwinPlistPath(darwinLaunchAgentLabel)
 	plistDir := filepath.Dir(plistPath)
 	if err := os.MkdirAll(plistDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create launch agents directory: %w", err)
 	}
 
+	// 避免双启动：清理旧版 label（com.codeswitch.app）
+	_ = os.Remove(as.getDarwinPlistPath(darwinLaunchAgentLabelLegacy))
+
 	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>com.codeswitch.app</string>
-	<key>ProgramArguments</key>
-	<array>
+	<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+	<plist version="1.0">
+	<dict>
+		<key>Label</key>
 		<string>%s</string>
-	</array>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>KeepAlive</key>
-	<false/>
-</dict>
-</plist>`, exePath)
+		<key>ProgramArguments</key>
+		<array>
+			<string>%s</string>
+		</array>
+		<key>RunAtLoad</key>
+		<true/>
+		<key>KeepAlive</key>
+		<false/>
+	</dict>
+	</plist>`, darwinLaunchAgentLabel, exePath)
 
 	if err := os.WriteFile(plistPath, []byte(plistContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write plist file: %w", err)
@@ -235,28 +258,43 @@ func (as *AutoStartService) disableDarwin() error {
 		return err
 	}
 
-	plistPath := as.getDarwinPlistPath()
 	// 忽略不存在的错误
-	_ = os.Remove(plistPath)
+	for _, plistPath := range as.getDarwinPlistPaths() {
+		_ = os.Remove(plistPath)
+	}
 	return nil
 }
 
-func (as *AutoStartService) getDarwinPlistPath() string {
-	return filepath.Join(as.homeDir, "Library", "LaunchAgents", "com.codeswitch.app.plist")
+const (
+	darwinLaunchAgentLabel       = "com.simonswitch.app"
+	darwinLaunchAgentLabelLegacy = "com.codeswitch.app"
+)
+
+func (as *AutoStartService) getDarwinPlistPath(label string) string {
+	return filepath.Join(as.homeDir, "Library", "LaunchAgents", label+".plist")
+}
+
+func (as *AutoStartService) getDarwinPlistPaths() []string {
+	return []string{
+		as.getDarwinPlistPath(darwinLaunchAgentLabel),
+		as.getDarwinPlistPath(darwinLaunchAgentLabelLegacy),
+	}
 }
 
 // Linux 实现 (使用 .desktop 文件)
 func (as *AutoStartService) isEnabledLinux() (bool, error) {
-	desktopPath, err := as.getLinuxDesktopPath()
+	desktopPath, legacyPath, err := as.getLinuxDesktopPaths()
 	if err != nil {
 		return false, err
 	}
 
-	_, err = os.Stat(desktopPath)
-	if os.IsNotExist(err) {
-		return false, nil
+	if _, err := os.Stat(desktopPath); err == nil {
+		return true, nil
 	}
-	return err == nil, err
+	if _, err := os.Stat(legacyPath); err == nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (as *AutoStartService) enableLinux() error {
@@ -265,7 +303,7 @@ func (as *AutoStartService) enableLinux() error {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 
-	desktopPath, err := as.getLinuxDesktopPath()
+	desktopPath, legacyPath, err := as.getLinuxDesktopPaths()
 	if err != nil {
 		return err
 	}
@@ -275,13 +313,16 @@ func (as *AutoStartService) enableLinux() error {
 		return fmt.Errorf("failed to create autostart directory: %w", err)
 	}
 
+	// 避免双启动：清理旧版文件名（codeswitch.desktop）
+	_ = os.Remove(legacyPath)
+
 	desktopContent := fmt.Sprintf(`[Desktop Entry]
-Type=Application
-Name=CodeSwitch
-Exec=%s
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true`, exePath)
+	Type=Application
+	Name=Simon Switch
+	Exec=%s
+	Hidden=false
+	NoDisplay=false
+	X-GNOME-Autostart-enabled=true`, exePath)
 
 	if err := os.WriteFile(desktopPath, []byte(desktopContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write desktop file: %w", err)
@@ -291,17 +332,18 @@ X-GNOME-Autostart-enabled=true`, exePath)
 }
 
 func (as *AutoStartService) disableLinux() error {
-	desktopPath, err := as.getLinuxDesktopPath()
+	desktopPath, legacyPath, err := as.getLinuxDesktopPaths()
 	if err != nil {
 		return err
 	}
 
 	// 忽略不存在的错误
 	_ = os.Remove(desktopPath)
+	_ = os.Remove(legacyPath)
 	return nil
 }
 
-func (as *AutoStartService) getLinuxDesktopPath() (string, error) {
+func (as *AutoStartService) getLinuxDesktopPaths() (string, string, error) {
 	// 优先使用 XDG_CONFIG_HOME，如果已设置且为绝对路径则直接使用
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome != "" && !filepath.IsAbs(configHome) {
@@ -311,10 +353,12 @@ func (as *AutoStartService) getLinuxDesktopPath() (string, error) {
 	// XDG 未设置或无效，回退到 ~/.config
 	if configHome == "" {
 		if err := as.requireHome(); err != nil {
-			return "", err
+			return "", "", err
 		}
 		configHome = filepath.Join(as.homeDir, ".config")
 	}
 
-	return filepath.Join(configHome, "autostart", "codeswitch.desktop"), nil
+	return filepath.Join(configHome, "autostart", "simonswitch.desktop"),
+		filepath.Join(configHome, "autostart", "codeswitch.desktop"),
+		nil
 }

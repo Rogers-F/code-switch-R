@@ -7,7 +7,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "=== Wails v3 强力清道夫 (适配 Code Switch) ==="
+echo "=== Wails v3 强力清道夫 (适配 Simon Switch) ==="
 echo "正在扫描 Wails3 及其衍生的 Node 和 Binary 进程..."
 echo ""
 
@@ -40,7 +40,7 @@ kill_project_tree() {
         # 核心修改：同时查找 node 和 bin 目录下的可执行文件
         # egrep "node|/bin/" 会匹配：
         # 1. 所有的 node 进程
-        # 2. 位于 .../code-switch-R/bin/ 下的 Code Switch 二进制文件
+        # 2. 位于 .../code-switch-R/bin/ 下的 Simon Switch 二进制文件
         
         related_pids=$(lsof +D "$target_path" 2>/dev/null | awk '$1=="node" || $9 ~ /\/bin\// {print $2}' | sort -u)
         

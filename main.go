@@ -734,11 +734,14 @@ func cleanupOldFiles() {
 	// 2. 按平台清理旧版本下载文件
 	switch runtime.GOOS {
 	case "windows":
+		cleanupByCount(updateDir, "SimonSwitch*.exe", 1)
 		cleanupByCount(updateDir, "CodeSwitch*.exe", 1)
 		cleanupByCount(updateDir, "updater*.exe", 1)
 	case "linux":
+		cleanupByCount(updateDir, "SimonSwitch*.AppImage", 1)
 		cleanupByCount(updateDir, "CodeSwitch*.AppImage", 1)
 	case "darwin":
+		cleanupByCount(updateDir, "simonswitch-macos-*.zip", 1)
 		cleanupByCount(updateDir, "codeswitch-macos-*.zip", 1)
 	}
 

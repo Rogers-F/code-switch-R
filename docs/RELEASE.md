@@ -11,7 +11,7 @@
 ## 推荐发布方式：推送 tag 自动发布
 
 1. 在 `RELEASE_NOTES.md` 中新增一段版本说明（可选，但推荐）：
-   - 标题格式：`# Code Switch vX.Y.Z`
+   - 标题格式：`# Simon Switch vX.Y.Z`
 2. 打 tag 并推送：
 
 ```bash
@@ -34,8 +34,8 @@ git push origin vX.Y.Z
 ## 发布产物（默认）
 
 - macOS：`simonswitch-macos-arm64.zip` / `simonswitch-macos-amd64.zip`（旧命名 `codeswitch-macos-*.zip` 仍兼容）
-- Windows：`CodeSwitch-amd64-installer.exe` / `CodeSwitch.exe` / `updater.exe`（含 `.sha256`）
-- Linux：`CodeSwitch.AppImage` / `codeswitch_*.deb` / `codeswitch-*.rpm`（含 `.sha256`）
+- Windows：`SimonSwitch-amd64-installer.exe` / `SimonSwitch.exe` / `updater.exe`（含 `.sha256`，旧命名 `CodeSwitch*.exe` 仍兼容）
+- Linux：`SimonSwitch.AppImage` / `simonswitch_*.deb` / `simonswitch-*.rpm`（含 `.sha256`，旧命名 `CodeSwitch.AppImage` / `codeswitch_*` 仍兼容）
 - 自动更新元数据：`latest.json`
 
 ## 自动更新（latest.json）

@@ -97,9 +97,9 @@ git push origin v1.2.0
 ```
 
 自动构建产物（以 workflow 配置为准）：
-- macOS: `codeswitch-macos-arm64.zip`, `codeswitch-macos-amd64.zip`
-- Windows: `CodeSwitch-amd64-installer.exe`, `CodeSwitch.exe`, `updater.exe`
-- Linux: `CodeSwitch.AppImage`, `codeswitch_*.deb`, `codeswitch-*.rpm`
+- macOS: `simonswitch-macos-arm64.zip`, `simonswitch-macos-amd64.zip`（旧命名 `codeswitch-macos-*.zip` 仍兼容）
+- Windows: `SimonSwitch-amd64-installer.exe`, `SimonSwitch.exe`, `updater.exe`（含 `.sha256`）
+- Linux: `SimonSwitch.AppImage`, `simonswitch_*.deb`, `simonswitch-*.rpm`（含 `.sha256`）
 
 ## 支持的发行版（参考）
 
@@ -138,4 +138,3 @@ git push origin v1.2.0
 | 语言 | TypeScript | 5.x |
 | 样式 | Tailwind CSS | 4.x（以 package.json 为准） |
 | 桌面框架 | Wails 3 | 3.x |
-

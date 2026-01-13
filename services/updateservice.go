@@ -272,7 +272,7 @@ func (us *UpdateService) checkUpdateViaAPI() (*UpdateInfo, error) {
 	}
 
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "CodeSwitch/"+us.currentVersion)
+	req.Header.Set("User-Agent", "SimonSwitch/"+us.currentVersion)
 
 	log.Printf("[UpdateService] 请求 GitHub API: %s", releaseURL)
 
@@ -367,7 +367,7 @@ func (us *UpdateService) findPlatformAsset(assets []struct {
 	case "windows":
 		// 统一下载核心 exe（无论便携版还是安装版）
 		// 安装版通过 updater.exe 提权替换
-		candidates = []string{"CodeSwitch.exe"}
+		candidates = []string{"SimonSwitch.exe", "CodeSwitch.exe"}
 	case "darwin":
 		if runtime.GOARCH == "arm64" {
 			candidates = []string{"simonswitch-macos-arm64.zip", "codeswitch-macos-arm64.zip"}
@@ -375,7 +375,7 @@ func (us *UpdateService) findPlatformAsset(assets []struct {
 			candidates = []string{"simonswitch-macos-amd64.zip", "codeswitch-macos-amd64.zip"}
 		}
 	case "linux":
-		candidates = []string{"CodeSwitch.AppImage"}
+		candidates = []string{"SimonSwitch.AppImage", "CodeSwitch.AppImage"}
 	default:
 		return ""
 	}
@@ -1034,7 +1034,7 @@ func (us *UpdateService) applyUpdateDarwin(zipPath string) error {
 	}
 
 	// 查找新 .app 包：优先同名、浅层优先、必要时递归
-	preferredName := filepath.Base(targetAppPath) // e.g. CodeSwitch.app
+	preferredName := filepath.Base(targetAppPath) // e.g. SimonSwitch.app
 	newAppPath, err := findNewAppBundle(extractDir, preferredName)
 	if err != nil {
 		_ = os.RemoveAll(extractDir)

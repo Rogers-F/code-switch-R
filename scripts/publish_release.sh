@@ -19,26 +19,31 @@ if [ ! -f "$NOTES" ]; then
   exit 1
 fi
 
-MAC_APP_PRIMARY="bin/codeswitch.app"
-MAC_APP_ALT="bin/CodeSwitch.app"
+MAC_APP_PRIMARY="bin/SimonSwitch.app"
+MAC_APP_FALLBACKS=("bin/simonswitch.app" "bin/CodeSwitch.app" "bin/codeswitch.app")
 MAC_ARCHS=("arm64" "amd64")
 MAC_ZIPS=()
 
 package_macos_arch() {
   local arch="$1"
-  local staging_app="bin/codeswitch-${arch}.app"
-  local zip_path="bin/codeswitch-macos-${arch}.zip"
+  local staging_app="bin/SimonSwitch-${arch}.app"
+  local zip_path="bin/simonswitch-macos-${arch}.zip"
 
   echo "==> Building macOS ${arch}"
   env ARCH="$arch" wails3 task package ${BUILD_OPTS:-}
 
   local bundle_path="$MAC_APP_PRIMARY"
-  if [ ! -d "$bundle_path" ] && [ -d "$MAC_APP_ALT" ]; then
-    bundle_path="$MAC_APP_ALT"
+  if [ ! -d "$bundle_path" ]; then
+    for candidate in "${MAC_APP_FALLBACKS[@]}"; do
+      if [ -d "$candidate" ]; then
+        bundle_path="$candidate"
+        break
+      fi
+    done
   fi
 
   if [ ! -d "$bundle_path" ]; then
-    echo "Missing asset: $MAC_APP_PRIMARY (or $MAC_APP_ALT)" >&2
+    echo "Missing asset: $MAC_APP_PRIMARY (or fallbacks: ${MAC_APP_FALLBACKS[*]})" >&2
     exit 1
   fi
 
@@ -66,9 +71,9 @@ env ARCH=amd64 wails3 task windows:package ${BUILD_OPTS:-}
 echo "==> Building updater.exe"
 wails3 task windows:build:updater ${BUILD_OPTS:-}
 
-# 统一文件名大小写（CodeSwitch.exe）
-if [ -f "bin/codeswitch.exe" ] && [ ! -f "bin/CodeSwitch.exe" ]; then
-  mv "bin/codeswitch.exe" "bin/CodeSwitch.exe"
+# 统一文件名大小写（SimonSwitch.exe）
+if [ -f "bin/simonswitch.exe" ] && [ ! -f "bin/SimonSwitch.exe" ]; then
+  mv "bin/simonswitch.exe" "bin/SimonSwitch.exe"
 fi
 
 # 生成 SHA256 哈希文件
@@ -89,14 +94,14 @@ generate_sha256() {
   fi
 }
 
-generate_sha256 "bin/CodeSwitch.exe"
+generate_sha256 "bin/SimonSwitch.exe"
 generate_sha256 "bin/updater.exe"
 
 ASSETS=(
   "${MAC_ZIPS[@]}"
-  "bin/codeswitch-amd64-installer.exe"
-  "bin/CodeSwitch.exe"
-  "bin/CodeSwitch.exe.sha256"
+  "bin/SimonSwitch-amd64-installer.exe"
+  "bin/SimonSwitch.exe"
+  "bin/SimonSwitch.exe.sha256"
   "bin/updater.exe"
   "bin/updater.exe.sha256"
 )

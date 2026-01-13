@@ -3,10 +3,10 @@
   <assemblyIdentity
     version="1.0.0.0"
     processorArchitecture="amd64"
-    name="CodeSwitch.Updater"
+    name="SimonSwitch.Updater"
     type="win32"
   />
-  <description>CodeSwitch Silent Updater</description>
+  <description>SimonSwitch Silent Updater</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

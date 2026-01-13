@@ -5,12 +5,12 @@ version: '3'
 
 # This information is used to generate the build assets.
 info:
-  companyName: "Code Switch" # The name of the company
-  productName: "Code Switch" # The name of the application
-  productIdentifier: "com.codeswitch.app" # The unique product identifier
+  companyName: "Simon Switch" # The name of the company
+  productName: "Simon Switch" # The name of the application
+  productIdentifier: "com.simonswitch.app" # The unique product identifier
   description: "Manage Claude & Codex relays, providers, and request logs." # The application description
-  copyright: "(c) 2025, Code Switch" # Copyright text
-  comments: "Code Switch desktop relay controller" # Comments
+  copyright: "(c) 2025, Simon Switch" # Copyright text
+  comments: "Simon Switch desktop relay controller" # Comments
   version: "0.1.0" # The application version
 
 # Dev mode configuration

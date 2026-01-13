@@ -88,10 +88,14 @@ jobs:
       - name: Find app bundle
         id: find-app
         run: |
-          if [ -d "bin/codeswitch.app" ]; then
-            echo "app_path=bin/codeswitch.app" >> $GITHUB_OUTPUT
+          if [ -d "bin/SimonSwitch.app" ]; then
+            echo "app_path=bin/SimonSwitch.app" >> $GITHUB_OUTPUT
+          elif [ -d "bin/simonswitch.app" ]; then
+            echo "app_path=bin/simonswitch.app" >> $GITHUB_OUTPUT
           elif [ -d "bin/CodeSwitch.app" ]; then
             echo "app_path=bin/CodeSwitch.app" >> $GITHUB_OUTPUT
+          elif [ -d "bin/codeswitch.app" ]; then
+            echo "app_path=bin/codeswitch.app" >> $GITHUB_OUTPUT
           else
             echo "App bundle not found" >&2
             exit 1
@@ -185,9 +189,9 @@ jobs:
 
       - name: Verify Binary
         run: |
-          if (Test-Path "bin\CodeSwitch.exe") {
-            Write-Host "✓ Binary found: bin\CodeSwitch.exe"
-            Get-Item "bin\CodeSwitch.exe" | Format-List Name,Length,LastWriteTime
+          if (Test-Path "bin\SimonSwitch.exe") {
+            Write-Host "✓ Binary found: bin\SimonSwitch.exe"
+            Get-Item "bin\SimonSwitch.exe" | Format-List Name,Length,LastWriteTime
           } else {
             Write-Host "✗ Binary not found!"
             Write-Host "Listing bin directory:"
@@ -200,7 +204,7 @@ jobs:
           $env:PATH += ";C:\Program Files (x86)\NSIS"
           Push-Location build\windows\nsis
           wails3 generate webview2bootstrapper
-          $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
+          $binaryPath = (Resolve-Path "..\..\..\bin\SimonSwitch.exe").Path
           Write-Host "Binary path: $binaryPath"
           makensis -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
           Pop-Location
@@ -218,7 +222,7 @@ jobs:
       - name: Generate SHA256 Checksums
         run: |
           Push-Location bin
-          Get-FileHash -Algorithm SHA256 CodeSwitch.exe | ForEach-Object { "$($_.Hash.ToLower())  CodeSwitch.exe" } | Out-File -Encoding ascii CodeSwitch.exe.sha256
+          Get-FileHash -Algorithm SHA256 SimonSwitch.exe | ForEach-Object { "$($_.Hash.ToLower())  SimonSwitch.exe" } | Out-File -Encoding ascii SimonSwitch.exe.sha256
           Get-FileHash -Algorithm SHA256 updater.exe | ForEach-Object { "$($_.Hash.ToLower())  updater.exe" } | Out-File -Encoding ascii updater.exe.sha256
           Write-Host "SHA256 checksums generated:"
           Get-Content *.sha256
@@ -229,9 +233,9 @@ jobs:
         with:
           name: windows-amd64
           path: |
-            bin/CodeSwitch-amd64-installer.exe
-            bin/CodeSwitch.exe
-            bin/CodeSwitch.exe.sha256
+            bin/SimonSwitch-amd64-installer.exe
+            bin/SimonSwitch.exe
+            bin/SimonSwitch.exe.sha256
             bin/updater.exe
             bin/updater.exe.sha256
 
@@ -317,12 +321,12 @@ jobs:
           # linuxdeploy creates AppImage with lowercase name and arch suffix
           for f in *-x86_64.AppImage *-aarch64.AppImage; do
             if [ -f "$f" ]; then
-              mv "$f" CodeSwitch.AppImage
-              echo "Renamed $f -> CodeSwitch.AppImage"
+              mv "$f" SimonSwitch.AppImage
+              echo "Renamed $f -> SimonSwitch.AppImage"
               break
             fi
           done
-          ls -la CodeSwitch.AppImage
+          ls -la SimonSwitch.AppImage
 
       - name: Set nfpm script permissions
         run: |
@@ -344,9 +348,9 @@ jobs:
       - name: Generate SHA256 Checksums
         run: |
           cd bin
-          sha256sum CodeSwitch.AppImage > CodeSwitch.AppImage.sha256
-          for f in codeswitch_*.deb; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
-          for f in codeswitch-*.rpm; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
+          sha256sum SimonSwitch.AppImage > SimonSwitch.AppImage.sha256
+          for f in simonswitch_*.deb; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
+          for f in simonswitch-*.rpm; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
           echo "SHA256 checksums:"
           cat *.sha256
 
@@ -355,12 +359,12 @@ jobs:
         with:
           name: linux-amd64
           path: |
-            bin/CodeSwitch.AppImage
-            bin/CodeSwitch.AppImage.sha256
-            bin/codeswitch_*.deb
-            bin/codeswitch_*.deb.sha256
-            bin/codeswitch-*.rpm
-            bin/codeswitch-*.rpm.sha256
+            bin/SimonSwitch.AppImage
+            bin/SimonSwitch.AppImage.sha256
+            bin/simonswitch_*.deb
+            bin/simonswitch_*.deb.sha256
+            bin/simonswitch-*.rpm
+            bin/simonswitch-*.rpm.sha256
 
   create-release:
     name: Create Release
@@ -406,19 +410,19 @@ jobs:
           cp artifacts/macos-amd64/simonswitch-macos-amd64.zip release-assets/
 
           # Windows
-          cp artifacts/windows-amd64/CodeSwitch-amd64-installer.exe release-assets/
-          cp artifacts/windows-amd64/CodeSwitch.exe release-assets/
-          cp artifacts/windows-amd64/CodeSwitch.exe.sha256 release-assets/
+          cp artifacts/windows-amd64/SimonSwitch-amd64-installer.exe release-assets/
+          cp artifacts/windows-amd64/SimonSwitch.exe release-assets/
+          cp artifacts/windows-amd64/SimonSwitch.exe.sha256 release-assets/
           cp artifacts/windows-amd64/updater.exe release-assets/
           cp artifacts/windows-amd64/updater.exe.sha256 release-assets/
 
           # Linux
-          cp artifacts/linux-amd64/CodeSwitch.AppImage release-assets/
-          cp artifacts/linux-amd64/CodeSwitch.AppImage.sha256 release-assets/
-          cp artifacts/linux-amd64/codeswitch_*.deb release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch_*.deb.sha256 release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm.sha256 release-assets/ 2>/dev/null || true
+          cp artifacts/linux-amd64/SimonSwitch.AppImage release-assets/
+          cp artifacts/linux-amd64/SimonSwitch.AppImage.sha256 release-assets/
+          cp artifacts/linux-amd64/simonswitch_*.deb release-assets/ 2>/dev/null || true
+          cp artifacts/linux-amd64/simonswitch_*.deb.sha256 release-assets/ 2>/dev/null || true
+          cp artifacts/linux-amd64/simonswitch-*.rpm release-assets/ 2>/dev/null || true
+          cp artifacts/linux-amd64/simonswitch-*.rpm.sha256 release-assets/ 2>/dev/null || true
 
           ls -lh release-assets/
       - name: Generate latest.json
@@ -428,8 +432,8 @@ jobs:
           BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
 
           # Read SHA256 checksums from existing .sha256 files
-          WIN_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch.exe.sha256)
-          LINUX_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch.AppImage.sha256)
+          WIN_SHA=$(cut -d' ' -f1 release-assets/SimonSwitch.exe.sha256)
+          LINUX_SHA=$(cut -d' ' -f1 release-assets/SimonSwitch.AppImage.sha256)
 
           cat > release-assets/latest.json << EOF
           {
@@ -437,8 +441,8 @@ jobs:
             "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "files": {
               "windows": {
-                "name": "CodeSwitch.exe",
-                "url": "${BASE_URL}/CodeSwitch.exe",
+                "name": "SimonSwitch.exe",
+                "url": "${BASE_URL}/SimonSwitch.exe",
                 "sha256": "${WIN_SHA}"
               },
               "darwin-arm64": {
@@ -450,8 +454,8 @@ jobs:
                 "url": "${BASE_URL}/simonswitch-macos-amd64.zip"
               },
               "linux": {
-                "name": "CodeSwitch.AppImage",
-                "url": "${BASE_URL}/CodeSwitch.AppImage",
+                "name": "SimonSwitch.AppImage",
+                "url": "${BASE_URL}/SimonSwitch.AppImage",
                 "sha256": "${LINUX_SHA}"
               }
             }
@@ -469,12 +473,23 @@ jobs:
 
           # 提取当前版本的更新内容（从标题到下一个版本标题之前）
           # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败
-          HEADING="# Code Switch v$VERSION"
-          tr -d '\r' < RELEASE_NOTES.md | awk -v h="$HEADING" '
+          HEADING_PRIMARY="# Simon Switch v$VERSION"
+          HEADING_LEGACY="# Code Switch v$VERSION"
+
+          tr -d '\r' < RELEASE_NOTES.md | awk -v h="$HEADING_PRIMARY" '
             $0 == h { p=1; print; next }
-            p && $0 ~ /^# Code Switch v[0-9]/ { exit }
+            p && $0 ~ /^# (Simon Switch|Code Switch) v[0-9]/ { exit }
             p { print }
           ' > /tmp/version_notes.md
+
+          # 向后兼容：如果没找到 Simon Switch 标题，尝试旧标题 Code Switch
+          if [ ! -s /tmp/version_notes.md ]; then
+            tr -d '\r' < RELEASE_NOTES.md | awk -v h="$HEADING_LEGACY" '
+              $0 == h { p=1; print; next }
+              p && $0 ~ /^# (Simon Switch|Code Switch) v[0-9]/ { exit }
+              p { print }
+            ' > /tmp/version_notes.md
+          fi
 
           # 如果没找到版本说明，使用默认内容
           if [ ! -s /tmp/version_notes.md ]; then
@@ -493,45 +508,45 @@ jobs:
 
           | 平台 | 文件 | 说明 |
           |------|------|------|
-          | **Windows (首次)** | `CodeSwitch-amd64-installer.exe` | NSIS 安装器 |
-          | **Windows (便携)** | `CodeSwitch.exe` | 直接运行 |
+          | **Windows (首次)** | `SimonSwitch-amd64-installer.exe` | NSIS 安装器 |
+          | **Windows (便携)** | `SimonSwitch.exe` | 直接运行 |
           | **Windows (更新)** | `updater.exe` | 静默更新辅助 |
           | **macOS (ARM)** | `simonswitch-macos-arm64.zip` | Apple Silicon |
           | **macOS (Intel)** | `simonswitch-macos-amd64.zip` | Intel 芯片 |
-          | **Linux (通用)** | `CodeSwitch.AppImage` | 跨发行版便携 |
-          | **Linux (Debian/Ubuntu)** | `codeswitch_*.deb` | apt 安装 |
-          | **Linux (RHEL/Fedora)** | `codeswitch-*.rpm` | dnf/yum 安装 |
+          | **Linux (通用)** | `SimonSwitch.AppImage` | 跨发行版便携 |
+          | **Linux (Debian/Ubuntu)** | `simonswitch_*.deb` | apt 安装 |
+          | **Linux (RHEL/Fedora)** | `simonswitch-*.rpm` | dnf/yum 安装 |
 
           ## Linux 安装
 
           ### AppImage (推荐)
           ```bash
-          chmod +x CodeSwitch.AppImage
-          ./CodeSwitch.AppImage
+          chmod +x SimonSwitch.AppImage
+          ./SimonSwitch.AppImage
           ```
-          如遇 FUSE 问题：`./CodeSwitch.AppImage --appimage-extract-and-run`
+          如遇 FUSE 问题：`./SimonSwitch.AppImage --appimage-extract-and-run`
 
           ### Debian/Ubuntu
           ```bash
-          sudo dpkg -i codeswitch_*.deb
+          sudo dpkg -i simonswitch_*.deb
           sudo apt-get install -f  # 安装依赖
           ```
 
           ### RHEL/Fedora
           ```bash
-          sudo rpm -i codeswitch-*.rpm
+          sudo rpm -i simonswitch-*.rpm
           # 或
-          sudo dnf install codeswitch-*.rpm
+          sudo dnf install simonswitch-*.rpm
           ```
 
           ## 文件校验
           所有平台均提供 SHA256 校验文件（`.sha256`），下载后可验证完整性：
           ```bash
           # Linux/macOS
-          sha256sum -c CodeSwitch.AppImage.sha256
+          sha256sum -c SimonSwitch.AppImage.sha256
 
           # Windows PowerShell
-          Get-FileHash CodeSwitch.exe | Format-List
+          Get-FileHash SimonSwitch.exe | Format-List
           ```
           EOF
 

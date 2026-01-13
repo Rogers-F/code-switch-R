@@ -12,6 +12,8 @@ if command -v gtk-update-icon-cache &> /dev/null; then
 fi
 
 # 创建小写别名（方便命令行调用）
-ln -sf /usr/local/bin/CodeSwitch /usr/local/bin/codeswitch 2>/dev/null || true
+ln -sf /usr/local/bin/SimonSwitch /usr/local/bin/simonswitch 2>/dev/null || true
+# 向后兼容旧命令名
+ln -sf /usr/local/bin/SimonSwitch /usr/local/bin/codeswitch 2>/dev/null || true
 
-echo "Code-Switch 安装完成"
+echo "Simon Switch 安装完成"
