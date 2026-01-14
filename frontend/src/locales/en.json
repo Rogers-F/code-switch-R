@@ -46,7 +46,7 @@
     "home": "Home",
     "dashboard": "Dashboard",
     "providers": "Providers",
-    "rules": "Rules",
+    "rules": "FW Rules",
     "prompts": "Prompts",
     "mcp": "MCP",
     "skill": "Skills",
@@ -54,12 +54,14 @@
     "availability": "Availability",
     "speedtest": "Speed Test",
     "env": "Env Check",
-    "logs": "Logs",
-    "terminal_logs": "Terminal Logs",
-    "console": "Console",
+    "request_logs": "Request List",
+    "terminal_logs": "MITM FW Log",
+    "console": "App Log",
     "settings": "Settings",
     "updateFound": "New version: {version}",
-    "updateOpenReleases": "Open GitHub Releases"
+    "updateOpenReleases": "Open GitHub Releases",
+    "mtim":"MITM",
+    "general":"General"
   },
   "dashboard": {
     "lead": "A unified overview of usage and monitoring stats. Data refreshes automatically.",
@@ -635,7 +637,7 @@
         "update": "Application update",
         "blacklist": "Blacklist Settings",
         "configBackup": "Config Export/Import",
-        "dataImport": "Data Import",
+        "dataImport": "CC-Switch Data Import",
         "connectivity": "Connectivity Test",
         "proxy": "Outbound Proxy"
       },

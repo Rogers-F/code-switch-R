@@ -1,13 +1,13 @@
 <template>
   <PageLayout
-    :title="t('sidebar.logs')"
+    :title="t('terminal_logs')"
     :sticky="true"
   >
     <div class="logs-page">
       <!-- Header Actions -->
       <div class="logs-header">
         <div>
-          <h2 class="logs-title">{{ t('sidebar.logs') }}</h2>
+          <h2 class="logs-title">{{ t('terminal_logs') }}</h2>
           <p class="logs-subtitle">{{ t('components.logs.subtitle', 'View application logs in real-time') }}</p>
         </div>
         <div class="logs-actions">

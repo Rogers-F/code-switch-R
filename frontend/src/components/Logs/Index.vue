@@ -1,6 +1,6 @@
 <template>
   <PageLayout
-    :title="t('sidebar.logs')"
+    :title="t('terminal_logs')"
     :sticky="true"
   >
     <template #actions>
