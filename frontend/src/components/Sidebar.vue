@@ -176,6 +176,7 @@ const navGroups: NavGroup[] = [
     collapsible: true,
     items: [
       { path: '/providers', icon: 'layers', labelKey: 'sidebar.providers', isNew: true },
+      { path: '/', icon: 'grid', labelKey: 'sidebar.providers' },
       { path: '/mcp', icon: 'plug', labelKey: 'sidebar.mcp' },
       { path: '/skill', icon: 'tool', labelKey: 'sidebar.skill' },
       { path: '/prompts', icon: 'file-text', labelKey: 'sidebar.prompts', isNew: true },
