@@ -84,7 +84,7 @@
 
 | 范围 | 回滚文档 | 就绪状态 |
 |------|---------|---------|
-| 系统集成（Hosts/Root CA/端口转发） | [P0-system-rollback.md](./rollback/P0-system-rollback.md) | Draft |
+| 系统集成（Hosts/Root CA/端口转发） | [P0-system-rollback.md](./rollback/P0-system-rollback.md) | Final |
 
 ---
 
@@ -132,5 +132,5 @@
 
 **下一步行动（P5 验证）**：
 1. 跑通 macOS 全链路手工验证（含 443 权限失败路径）
-2. 补齐回滚文档为 Final（Hosts/Root CA）
+2. 在 Windows/Linux 实机执行验证脚本并回填（`scripts/verify/*`）
 3. 推进 Windows 验证（UAC、证书、hosts 可逆性）

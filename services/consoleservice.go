@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +72,27 @@ func NewConsoleService() *ConsoleService {
 	cs.captureStdout()
 
 	return cs
+}
+
+func defaultLogDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, ".code-switch", "logs"), nil
+}
+
+// OpenLogFolder 在系统文件管理器中打开日志目录
+// 用于对齐 P4 计划中的“打开日志目录”能力
+func (cs *ConsoleService) OpenLogFolder() error {
+	logDir, err := defaultLogDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return err
+	}
+	return OpenInExplorer(logDir)
 }
 
 // captureStdout 捕获标准输出和标准错误

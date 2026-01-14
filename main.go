@@ -279,6 +279,19 @@ func main() {
 		_ = mitmService.Stop()
 		log.Println("✅ MITM 服务已停止")
 
+		// 【P3】best-effort 清理 Hosts（避免残留拦截导致断网）
+		// 仅当存在 marker 时才会触发写入与提权（HostsService.Cleanup 内部会做 no-op 判断）
+		if managed, err := hostsService.GetManagedDomains(); err != nil {
+			log.Printf("⚠️ Hosts 状态检查失败（跳过自动清理）: %v", err)
+		} else if len(managed) > 0 {
+			log.Printf("🧹 检测到 Hosts 残留（%d 条），尝试清理...", len(managed))
+			if err := hostsService.Cleanup(); err != nil {
+				log.Printf("⚠️ Hosts 自动清理失败: %v（请在 UI 中手动执行“清理 Hosts”）", err)
+			} else {
+				log.Println("✅ Hosts 已自动清理")
+			}
+		}
+
 		// 4. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {
 			log.Printf("⚠️ 队列关闭超时: %v", err)

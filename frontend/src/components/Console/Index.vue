@@ -14,6 +14,12 @@
             </svg>
             {{ t('components.console.actions.copy') }}
           </Button>
+          <Button variant="outline" size="sm" @click="handleOpenFolder">
+            <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            {{ t('components.console.actions.openFolder') }}
+          </Button>
           <Button variant="destructive" size="sm" @click="handleClear">
             <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z" />
@@ -58,6 +64,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
 import Button from '../ui/Button.vue'
 import ScrollArea from '../ui/ScrollArea.vue'
@@ -113,6 +120,15 @@ const handleCopy = () => {
   const text = logs.value.map((l) => `[${formatTime(l.timestamp)}] [${l.level}] ${l.message}`).join('\n')
   navigator.clipboard.writeText(text)
   alert(t('components.logs.detail.copied', 'Copied'))
+}
+
+const handleOpenFolder = async () => {
+  try {
+    await Call.ByName('codeswitch/services.ConsoleService.OpenLogFolder')
+  } catch (error) {
+    console.error('Failed to open log folder:', error)
+    alert(t('components.console.openFolderFailed', 'Failed to open log folder'))
+  }
 }
 
 const toggleAutoScroll = () => {
@@ -364,4 +380,3 @@ onUnmounted(() => {
   color: inherit;
 }
 </style>
-

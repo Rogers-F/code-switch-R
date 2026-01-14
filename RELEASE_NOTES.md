@@ -1,3 +1,14 @@
+# Simon Switch v2.8.2
+
+## 🔧 审计整改与稳定性改进
+
+- **MITM**：证书缓存改为有上限 LRU（默认 200），避免长期运行内存无上限增长
+- **Hosts**：Apply/Cleanup 幂等优化；应用退出时 best-effort 自动清理 Hosts 残留 marker，降低断网风险
+- **Logs**：Console/MITM 转发日志页支持“打开日志目录”
+- **安全**：支持通过环境变量 `CODE_SWITCH_UPSTREAM_TLS_VERIFY=1` 启用上游 TLS 校验（默认仍保持兼容策略）
+
+---
+
 # Simon Switch v2.8.1
 
 ## 🐛 Bug 修复

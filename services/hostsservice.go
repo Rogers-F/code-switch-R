@@ -71,22 +71,20 @@ func (h *HostsService) Apply(domains []string, ipv4 bool, ipv6 bool) error {
 	defer h.mu.Unlock()
 
 	// Read current hosts file
-	content, err := h.readHosts()
+	original, err := h.readHosts()
 	if err != nil {
 		return fmt.Errorf("failed to read hosts file: %w", err)
 	}
 
-	// Create backup
-	if err := h.createBackup(content); err != nil {
-		return fmt.Errorf("failed to create backup: %w", err)
-	}
-
 	// Remove old managed block
-	content = h.removeManagedBlock(content)
+	content := h.removeManagedBlock(original)
 
 	// Build new entries
 	var entries []string
-	eol := getLineEnding()
+	eol := detectLineEnding(original)
+	if eol == "" {
+		eol = getLineEnding()
+	}
 
 	for _, domain := range domains {
 		if ipv4 {
@@ -112,6 +110,16 @@ func (h *HostsService) Apply(domains []string, ipv4 bool, ipv6 bool) error {
 		content += managedBlock
 	}
 
+	// No changes, skip backup and write (avoids unnecessary privilege prompt)
+	if content == original {
+		return nil
+	}
+
+	// Create backup (only when content will change)
+	if err := h.createBackup(original); err != nil {
+		return fmt.Errorf("failed to create backup: %w", err)
+	}
+
 	// Write back
 	if err := h.writeHosts(content); err != nil {
 		return fmt.Errorf("failed to write hosts file: %w", err)
@@ -126,18 +134,28 @@ func (h *HostsService) Cleanup() error {
 	defer h.mu.Unlock()
 
 	// Read current hosts file
-	content, err := h.readHosts()
+	original, err := h.readHosts()
 	if err != nil {
 		return fmt.Errorf("failed to read hosts file: %w", err)
 	}
 
-	// Create backup
-	if err := h.createBackup(content); err != nil {
-		return fmt.Errorf("failed to create backup: %w", err)
+	// No managed block, no-op (avoid unnecessary privilege prompt)
+	if !strings.Contains(original, hostsMarkerStart) {
+		return nil
 	}
 
 	// Remove managed block
-	content = h.removeManagedBlock(content)
+	content := h.removeManagedBlock(original)
+
+	// No changes, skip backup and write
+	if content == original {
+		return nil
+	}
+
+	// Create backup (only when content will change)
+	if err := h.createBackup(original); err != nil {
+		return fmt.Errorf("failed to create backup: %w", err)
+	}
 
 	// Write back
 	if err := h.writeHosts(content); err != nil {
@@ -164,7 +182,7 @@ func (h *HostsService) CheckStatus(domain string) (bool, error) {
 	}
 
 	// Check if domain is in managed block
-	lines := strings.Split(managedBlock, "\n")
+	lines := splitHostLines(managedBlock)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, domain) {
@@ -193,7 +211,7 @@ func (h *HostsService) GetManagedDomains() ([]HostsEntry, error) {
 
 	// Parse entries
 	var entries []HostsEntry
-	lines := strings.Split(managedBlock, "\n")
+	lines := splitHostLines(managedBlock)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -225,6 +243,15 @@ func (h *HostsService) readHosts() (string, error) {
 
 // writeHosts writes content to hosts file (requires privilege)
 func (h *HostsService) writeHosts(content string) error {
+	// 1) Fast-path: if file is writable, do an atomic replace without elevation.
+	// This avoids privilege prompt for tests and user-writable environments.
+	if err := atomicWriteHostsFile(h.hostsPath, []byte(content)); err == nil {
+		return nil
+	} else if !looksLikePermissionError(err) {
+		// Not a permission issue: fail fast (avoid confusing privilege prompt for invalid paths)
+		return err
+	}
+
 	// Create temporary file with new content
 	tmpDir := os.TempDir()
 	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("hosts-temp-%d", time.Now().UnixNano()))
@@ -262,7 +289,11 @@ func (h *HostsService) writeHosts(content string) error {
 
 // removeManagedBlock removes the managed block from content
 func (h *HostsService) removeManagedBlock(content string) string {
-	lines := strings.Split(content, "\n")
+	lines := splitHostLines(content)
+	eol := detectLineEnding(content)
+	if eol == "" {
+		eol = getLineEnding()
+	}
 	var result []string
 	inManagedBlock := false
 
@@ -280,12 +311,12 @@ func (h *HostsService) removeManagedBlock(content string) string {
 		}
 	}
 
-	return strings.Join(result, "\n")
+	return strings.Join(result, eol)
 }
 
 // extractManagedBlock extracts the managed block from content
 func (h *HostsService) extractManagedBlock(content string) string {
-	lines := strings.Split(content, "\n")
+	lines := splitHostLines(content)
 	var result []string
 	inManagedBlock := false
 
@@ -322,9 +353,59 @@ func (h *HostsService) createBackup(content string) error {
 	h.cleanupOldBackups(backupDir, 5)
 
 	// Create new backup
-	timestamp := time.Now().Format("20060102-150405")
+	// 使用纳秒级时间戳，避免并发/快速调用导致备份文件名碰撞
+	timestamp := time.Now().Format("20060102-150405.000000000")
 	backupPath := filepath.Join(backupDir, fmt.Sprintf("hosts.%s.bak", timestamp))
 	return os.WriteFile(backupPath, []byte(content), 0600)
+}
+
+func detectLineEnding(content string) string {
+	if strings.Contains(content, "\r\n") {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func splitHostLines(content string) []string {
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSuffix(lines[i], "\r")
+	}
+	return lines
+}
+
+func looksLikePermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if os.IsPermission(err) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "operation not permitted") || strings.Contains(msg, "permission denied")
+}
+
+func atomicWriteHostsFile(path string, data []byte) error {
+	tmpPath := fmt.Sprintf("%s.tmp.%d", path, time.Now().UnixNano())
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return err
+	}
+
+	// Windows: rename 目标存在时会失败，需要先删除
+	if runtime.GOOS == "windows" {
+		if _, err := os.Stat(path); err == nil {
+			if err := os.Remove(path); err != nil {
+				_ = os.Remove(tmpPath)
+				return err
+			}
+		}
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // cleanupOldBackups removes old backup files, keeping only the most recent N

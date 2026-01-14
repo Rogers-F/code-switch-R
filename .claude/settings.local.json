@@ -16,7 +16,8 @@
       "Bash(npm run build:*)",
       "Bash(done)",
       "Bash(git push:*)",
-      "Bash(git tag:*)"
+      "Bash(git tag:*)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []

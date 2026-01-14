@@ -543,9 +543,11 @@
       "filename": "application.log",
       "empty": "暂无日志",
       "clearConfirm": "确定要清空所有日志吗？",
+      "openFolderFailed": "打开日志目录失败",
       "actions": {
         "copy": "复制",
         "clear": "清空日志",
+        "openFolder": "打开目录",
         "autoScroll": "自动滚动"
       }
     },
@@ -554,9 +556,11 @@
       "filename": "mitm.forward.log",
       "empty": "暂无转发日志",
       "clearConfirm": "确定要清空当前显示的转发日志吗？",
+      "openFolderFailed": "打开日志目录失败",
       "actions": {
         "copy": "复制",
-        "clear": "清空"
+        "clear": "清空",
+        "openFolder": "打开目录"
       }
     },
     "mitm": {

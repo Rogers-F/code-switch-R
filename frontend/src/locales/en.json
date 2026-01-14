@@ -542,9 +542,11 @@
       "filename": "application.log",
       "empty": "No logs yet",
       "clearConfirm": "Are you sure you want to clear all logs?",
+      "openFolderFailed": "Failed to open log folder",
       "actions": {
         "copy": "Copy",
         "clear": "Clear logs",
+        "openFolder": "Open folder",
         "autoScroll": "Auto scroll"
       }
     },
@@ -553,9 +555,11 @@
       "filename": "mitm.forward.log",
       "empty": "No forwarding logs yet",
       "clearConfirm": "Clear the currently displayed forwarding logs?",
+      "openFolderFailed": "Failed to open log folder",
       "actions": {
         "copy": "Copy",
-        "clear": "Clear"
+        "clear": "Clear",
+        "openFolder": "Open folder"
       }
     },
     "mitm": {

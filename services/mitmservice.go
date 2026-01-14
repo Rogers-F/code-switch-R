@@ -1,6 +1,7 @@
 package services
 
 import (
+	"container/list"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -19,13 +20,85 @@ import (
 	"time"
 )
 
+const defaultMITMCertCacheCapacity = 200
+
+type mitmCertCacheEntry struct {
+	domain string
+	cert   *tls.Certificate
+}
+
+// mitmCertLRUCache is a small bounded LRU cache for generated server certificates.
+// It is NOT concurrency-safe; callers must synchronize access.
+type mitmCertLRUCache struct {
+	capacity int
+	ll       *list.List
+	byDomain map[string]*list.Element
+}
+
+func newMITMCertLRUCache(capacity int) *mitmCertLRUCache {
+	if capacity <= 0 {
+		capacity = defaultMITMCertCacheCapacity
+	}
+	return &mitmCertLRUCache{
+		capacity: capacity,
+		ll:       list.New(),
+		byDomain: make(map[string]*list.Element, capacity),
+	}
+}
+
+func (c *mitmCertLRUCache) Get(domain string) (*tls.Certificate, bool) {
+	el, ok := c.byDomain[domain]
+	if !ok {
+		return nil, false
+	}
+	c.ll.MoveToFront(el)
+	entry, ok := el.Value.(mitmCertCacheEntry)
+	if !ok {
+		return nil, false
+	}
+	return entry.cert, entry.cert != nil
+}
+
+func (c *mitmCertLRUCache) Put(domain string, cert *tls.Certificate) {
+	if domain == "" || cert == nil {
+		return
+	}
+	if el, ok := c.byDomain[domain]; ok {
+		el.Value = mitmCertCacheEntry{domain: domain, cert: cert}
+		c.ll.MoveToFront(el)
+		return
+	}
+
+	el := c.ll.PushFront(mitmCertCacheEntry{domain: domain, cert: cert})
+	c.byDomain[domain] = el
+
+	for c.ll.Len() > c.capacity {
+		back := c.ll.Back()
+		if back == nil {
+			break
+		}
+		entry, ok := back.Value.(mitmCertCacheEntry)
+		if ok {
+			delete(c.byDomain, entry.domain)
+		}
+		c.ll.Remove(back)
+	}
+}
+
+func (c *mitmCertLRUCache) Len() int {
+	if c == nil || c.ll == nil {
+		return 0
+	}
+	return c.ll.Len()
+}
+
 // MITMService handles HTTPS interception and forwarding
 type MITMService struct {
 	// Certificate management
 	certDir   string
 	caCert    *x509.Certificate
 	caKey     *rsa.PrivateKey
-	certCache map[string]*tls.Certificate // domain -> cert cache
+	certCache *mitmCertLRUCache // domain -> cert cache (bounded)
 	certMu    sync.RWMutex
 
 	// Server
@@ -69,7 +142,7 @@ func NewMITMService(ruleService *RuleService, providerService *ProviderService) 
 
 	svc := &MITMService{
 		certDir:    certDir,
-		certCache:  make(map[string]*tls.Certificate),
+		certCache:  newMITMCertLRUCache(defaultMITMCertCacheCapacity),
 		port:       443, // Default HTTPS port for MITM interception
 		targetHost: "rule-based",
 		logChan:    make(chan MITMLogEntry, 100),
@@ -211,21 +284,14 @@ func (m *MITMService) generateCA(certPath, keyPath string) error {
 
 // generateServerCert generates a certificate for a specific domain
 func (m *MITMService) generateServerCert(domain string) (*tls.Certificate, error) {
-	// Check cache first
-	m.certMu.RLock()
-	if cert, ok := m.certCache[domain]; ok {
-		m.certMu.RUnlock()
-		return cert, nil
-	}
-	m.certMu.RUnlock()
-
-	// Generate new certificate
 	m.certMu.Lock()
 	defer m.certMu.Unlock()
 
-	// Double-check after acquiring write lock
-	if cert, ok := m.certCache[domain]; ok {
-		return cert, nil
+	// Check cache first (Get will refresh LRU position)
+	if m.certCache != nil {
+		if cert, ok := m.certCache.Get(domain); ok {
+			return cert, nil
+		}
 	}
 
 	log.Printf("[MITM] Generating server certificate for %s...\n", domain)
@@ -268,7 +334,9 @@ func (m *MITMService) generateServerCert(domain string) (*tls.Certificate, error
 	}
 
 	// Cache it
-	m.certCache[domain] = cert
+	if m.certCache != nil {
+		m.certCache.Put(domain, cert)
+	}
 
 	return cert, nil
 }

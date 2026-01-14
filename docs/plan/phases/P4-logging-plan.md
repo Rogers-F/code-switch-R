@@ -76,4 +76,5 @@
 
 ### 仍待完成
 
-- “打开日志目录”能力（跨平台）与更结构化的实时推送（events）仍未实现，建议在 P5 验证阶段补齐或明确不做。`services/consoleservice.go`、`services/mitmservice.go`
+- “打开日志目录”能力（跨平台）已补齐：`services/consoleservice.go` + Console/MITM 日志页按钮。
+- 更结构化的实时推送（events）仍未实现，建议在 P5 验证阶段补齐或明确不做。`services/consoleservice.go`、`services/mitmservice.go`

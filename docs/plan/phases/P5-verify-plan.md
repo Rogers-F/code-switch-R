@@ -41,6 +41,7 @@
    - 规则匹配（host → rule）
 2. 手工验证脚本
    - 每个平台提供一份可复制的验证步骤（含失败回滚命令）
+   - 仓库内置只读脚本：`scripts/verify/*`
 
 ---
 
@@ -65,6 +66,12 @@
 ---
 
 ## 本轮验证记录（开发机优先：macOS）
+
+### 0) 跨平台只读自检脚本（已补齐 2026-01-14）
+
+- macOS：`scripts/verify/macos.sh`
+- Linux：`scripts/verify/linux.sh`
+- Windows：`scripts/verify/windows.ps1`
 
 ### 1) 构建与单测（已执行 2026-01-14）
 

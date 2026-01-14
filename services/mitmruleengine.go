@@ -10,12 +10,19 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+func shouldSkipUpstreamTLSVerify() bool {
+	// 默认行为：跳过上游 TLS 校验（对齐 ghosxy，兼容自签/中间层网关等场景）。
+	// 如需启用校验：设置环境变量 CODE_SWITCH_UPSTREAM_TLS_VERIFY=1
+	return strings.TrimSpace(os.Getenv("CODE_SWITCH_UPSTREAM_TLS_VERIFY")) != "1"
+}
 
 // MITMRuleEngine handles rule-based routing for MITM proxy
 type MITMRuleEngine struct {
@@ -376,7 +383,7 @@ func (e *MITMRuleEngine) CreateRuleBasedProxy(logChan chan MITMLogEntry) http.Ha
 		transport := e.transport
 		if transport == nil {
 			transport = &http.Transport{
-				TLSClientConfig:       &tls.Config{InsecureSkipVerify: true}, // TODO: Make configurable
+				TLSClientConfig:       &tls.Config{InsecureSkipVerify: shouldSkipUpstreamTLSVerify()},
 				MaxIdleConns:          100,
 				IdleConnTimeout:       90 * time.Second,
 				DisableCompression:    false,
@@ -385,7 +392,7 @@ func (e *MITMRuleEngine) CreateRuleBasedProxy(logChan chan MITMLogEntry) http.Ha
 			}
 		}
 		proxy := &httputil.ReverseProxy{
-			Director: director,
+			Director:  director,
 			Transport: transport,
 			ModifyResponse: func(resp *http.Response) error {
 				log.Printf("[MITM] <- %d %s\n", resp.StatusCode, resp.Request.URL.Path)

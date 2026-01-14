@@ -1,7 +1,7 @@
 # 系统集成回滚程序（Hosts / Root CA / 端口转发）
 
-**版本**：Draft  
-**最后更新**：2026-01-13  
+**版本**：Final  
+**最后更新**：2026-01-14  
 
 ---
 
@@ -17,16 +17,37 @@
 
 回滚原则：只删除本应用插入的 marker 块，不要修改其它自定义条目。
 
+本应用的 marker 块为：
+
+- Start：`# === Code-Switch MITM Start ===`
+- End：`# === Code-Switch MITM End ===`
+
 ### macOS / Linux
 
 1. 打开 hosts 文件：`/etc/hosts`
-2. 查找包含本应用标识的块（例如包含 `code-switch` 或 `MITM` 的注释）
-3. 删除该块后保存
+2. 查找并删除上述 marker 块（含 Start/End 两行与中间内容）
+3. 保存后立即验证目标域名是否恢复解析（或直接重试访问）
 
 如需命令行（需要管理员权限）：
 
 ```bash
 sudo nano /etc/hosts
+```
+
+自动删除（更快，建议先备份）：
+
+macOS：
+
+```bash
+sudo cp /etc/hosts "/etc/hosts.bak.$(date +%s)"
+sudo sed -i '' '/# === Code-Switch MITM Start ===/,/# === Code-Switch MITM End ===/d' /etc/hosts
+```
+
+Linux（Debian/Ubuntu 等）：
+
+```bash
+sudo cp /etc/hosts "/etc/hosts.bak.$(date +%s)"
+sudo sed -i '/# === Code-Switch MITM Start ===/,/# === Code-Switch MITM End ===/d' /etc/hosts
 ```
 
 ### Windows
@@ -36,6 +57,25 @@ hosts 文件路径通常为：
 - `C:\\Windows\\System32\\drivers\\etc\\hosts`
 
 以管理员身份打开记事本编辑并删除 marker 块。
+
+自动删除（PowerShell，需管理员）：
+
+```powershell
+$hosts = Join-Path $env:SystemRoot "System32\drivers\etc\hosts"
+$markerStart = "# === Code-Switch MITM Start ==="
+$markerEnd = "# === Code-Switch MITM End ==="
+
+Copy-Item $hosts "$hosts.bak.$(Get-Date -Format yyyyMMddHHmmss)" -Force
+
+$inBlock = $false
+$out = New-Object System.Collections.Generic.List[string]
+foreach ($line in Get-Content -LiteralPath $hosts) {
+  if ($line -like "*$markerStart*") { $inBlock = $true; continue }
+  if ($line -like "*$markerEnd*") { $inBlock = $false; continue }
+  if (-not $inBlock) { $out.Add($line) }
+}
+$out | Set-Content -LiteralPath $hosts -Encoding ascii
+```
 
 ---
 
@@ -64,6 +104,11 @@ sudo rm -f /usr/local/share/ca-certificates/code-switch-mitm.crt
 sudo update-ca-certificates --fresh
 ```
 
+其它发行版：
+
+- 如使用 `update-ca-trust`：请按发行版文档将证书从信任目录移除后刷新信任库
+- 如系统信任不在 `/usr/local/share/ca-certificates`：请在 `/etc/ssl/certs` 或对应目录中定位并删除
+
 ---
 
 ## 3. 端口转发关闭（若启用过）
@@ -85,3 +130,13 @@ sudo update-ca-certificates --fresh
 2. 清理 Hosts
 3. 卸载 Root CA（如不再需要）
 4. 关闭端口转发
+
+---
+
+## 5. 验证脚本（只读）
+
+回滚完成后，可运行对应平台脚本快速检查残留：
+
+- macOS：`scripts/verify/macos.sh`
+- Linux：`scripts/verify/linux.sh`
+- Windows：`scripts/verify/windows.ps1`
