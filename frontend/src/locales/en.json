@@ -538,10 +538,33 @@
     "console": {
       "eyebrow": "Debug",
       "title": "Console",
+      "subtitle": "View application runtime logs (stdout/stderr) for troubleshooting.",
+      "filename": "application.log",
+      "empty": "No logs yet",
+      "clearConfirm": "Are you sure you want to clear all logs?",
       "actions": {
+        "copy": "Copy",
         "clear": "Clear logs",
         "autoScroll": "Auto scroll"
       }
+    },
+    "terminalLogs": {
+      "subtitle": "View real-time MITM forwarding logs.",
+      "filename": "mitm.forward.log",
+      "empty": "No forwarding logs yet",
+      "clearConfirm": "Clear the currently displayed forwarding logs?",
+      "actions": {
+        "copy": "Copy",
+        "clear": "Clear"
+      }
+    },
+    "mitm": {
+      "refresh": "Refresh",
+      "lead": "Start/stop MITM, install the Root CA, and apply Hosts entries based on enabled rules to intercept specified domains. Note: listening on port 443 requires administrator privileges.",
+      "errors": {
+        "adminPort": "Listening on port 443 requires administrator privileges. Restart the app with elevated rights and try again."
+      },
+      "openLogs": "Open forwarding logs"
     },
     "logs": {
       "eyebrow": "Request diagnostics",

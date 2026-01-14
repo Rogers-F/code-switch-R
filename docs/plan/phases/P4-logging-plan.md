@@ -1,7 +1,7 @@
 # Phase P4 Plan: 日志系统优化（后端 + 前端效果）
 
 **创建日期**：2026-01-13  
-**状态**：Not Started  
+**状态**：🚧 Execute (2026-01-14)  
 **范围**：日志采集、实时推送与前端展示整体优化（参考 ghosxy）  
 
 ---
@@ -65,3 +65,15 @@
 - 当前 Logs：`frontend/src/components/Logs/Index.vue`
 - 当前 Console：`frontend/src/components/Console/Index.vue`
 
+---
+
+## 落地情况（与当前代码对照）
+
+### 已完成（阶段性）
+
+- 终端风格日志视图已落地（复制/清空/自动滚动），MITM 转发日志与应用 Console 风格已统一。`frontend/src/components/Logs/TerminalView.vue`、`frontend/src/components/Console/Index.vue`
+- 自动滚动开关在两处页面通过 localStorage 同步。`frontend/src/components/Logs/TerminalView.vue`、`frontend/src/components/Console/Index.vue`
+
+### 仍待完成
+
+- “打开日志目录”能力（跨平台）与更结构化的实时推送（events）仍未实现，建议在 P5 验证阶段补齐或明确不做。`services/consoleservice.go`、`services/mitmservice.go`

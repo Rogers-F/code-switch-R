@@ -1,7 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import MainPage from '../components/Main/Index.vue'
 import DashboardPage from '../components/Dashboard/Index.vue'
-import ProvidersPage from '../components/Providers/Index.vue'
 import RulesPage from '../components/Rules/Index.vue'
 import LogsPage from '../components/Logs/Index.vue'
 import TerminalLogsPage from '../components/Logs/TerminalView.vue'
@@ -18,7 +17,6 @@ import MitmPocPage from '../components/MitmPoC/Index.vue'
 const routes = [
   { path: '/', component: MainPage },
   { path: '/dashboard', component: DashboardPage },
-  { path: '/providers', component: ProvidersPage },
   { path: '/rules', component: RulesPage },
   { path: '/logs', component: LogsPage },
   { path: '/logs/terminal', component: TerminalLogsPage },

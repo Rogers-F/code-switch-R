@@ -37,9 +37,9 @@
 | P0 | 设计与 PoC（ADR + 可行性验证） | Completed | Claude | 是 | 否 |
 | P1 | 前端 UI 2.0（对齐 ghosxy 设计） | Completed | Claude | 是 | 否 |
 | P2 | HTTPS MITM 解密拦截与分流转发（核心） | Completed | Claude | 是 | 否 |
-| P3 | 系统集成（Hosts + Root CA + 提权/端口策略） | Completed | Claude | 是 | 否 |
-| P4 | 日志系统优化（后端 + 前端效果） | Not Started | Claude | 否 | 否 |
-| P5 | 验证、打包与回滚演练（跨平台） | Not Started | Claude | 否 | 否 |
+| P3 | 系统集成（Hosts + Root CA + 提权/端口策略） | Execute | Claude | 否 | Draft |
+| P4 | 日志系统优化（后端 + 前端效果） | Execute | Claude | 否 | 否 |
+| P5 | 验证、打包与回滚演练（跨平台） | Verify | Claude | 否 | 否 |
 
 **状态图例**：
 
@@ -122,18 +122,15 @@
 
 ## 当前进度
 
-**当前阶段**：P0 Completed → P1 Planning
-**最近更新**：2026-01-13
+**当前阶段**：P5 Verify（优先 macOS 开发机）
+**最近更新**：2026-01-14
 
-**P0 完成内容**：
-- ✅ 三个 ADR 已确认（前端技术栈、MITM 端口策略、提权策略）
-- ✅ 后端 PoC 实现（证书生成、TLS SNI、HTTPS 代理、日志记录）
-- ✅ 前端 PoC 实现（MITM 控制界面、实时日志展示）
-- ✅ 风险清单与缓解方案已文档化
-- ✅ 代码编译通过，路由配置完成
+**近期关键变更**：
+- ✅ MITM 从 PoC 固定 target 升级为“按 Rules 命中 → 按 Provider 选路 → 真实转发”
+- ✅ 端口策略按 ADR-0002 选择方案 A：默认监听 443（失败时给出权限提示）
+- ✅ 供应商管理收敛为单一入口（移除 `/providers` 重复页面）
 
-**下一步行动（P1 阶段）**：
-1. 参考 ghosxy 的 UI 设计，建立 Vue 版基础组件库
-2. 重构现有页面，对齐 ghosxy 的信息架构与视觉风格
-3. 优化导航结构和交互体验
-
+**下一步行动（P5 验证）**：
+1. 跑通 macOS 全链路手工验证（含 443 权限失败路径）
+2. 补齐回滚文档为 Final（Hosts/Root CA）
+3. 推进 Windows 验证（UAC、证书、hosts 可逆性）

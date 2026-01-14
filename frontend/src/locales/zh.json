@@ -53,7 +53,7 @@
     "gemini": "Gemini",
     "availability": "可用性监测",
     "speedtest": "测速",
-    "env": "环境",
+    "env": "环境变量检查",
     "request_logs": "请求清单",
     "terminal_logs": "MITM转发日志",
     "console": "程序日志",
@@ -539,10 +539,33 @@
     "console": {
       "eyebrow": "调试",
       "title": "控制台",
+      "subtitle": "查看应用运行日志（stdout/stderr），用于排查问题。",
+      "filename": "application.log",
+      "empty": "暂无日志",
+      "clearConfirm": "确定要清空所有日志吗？",
       "actions": {
+        "copy": "复制",
         "clear": "清空日志",
         "autoScroll": "自动滚动"
       }
+    },
+    "terminalLogs": {
+      "subtitle": "查看 MITM 转发请求的实时日志。",
+      "filename": "mitm.forward.log",
+      "empty": "暂无转发日志",
+      "clearConfirm": "确定要清空当前显示的转发日志吗？",
+      "actions": {
+        "copy": "复制",
+        "clear": "清空"
+      }
+    },
+    "mitm": {
+      "refresh": "刷新",
+      "lead": "启动/停止 MITM、安装根证书，并根据已启用的规则写入 Hosts 以便拦截指定域名。提示：监听 443 需要管理员权限。",
+      "errors": {
+        "adminPort": "监听 443 需要管理员权限。请以管理员权限重新启动应用后再启动 MITM。"
+      },
+      "openLogs": "打开转发日志"
     },
     "logs": {
       "eyebrow": "请求追踪",

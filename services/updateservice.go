@@ -1618,7 +1618,7 @@ func (us *UpdateService) RestartApp() error {
 	return nil
 }
 
-// StartDailyCheck 启动每日8点定时检查
+// StartDailyCheck 启动定时检查（默认每 6 小时一次）
 // P1-3 修复：单次持锁完成检查+调度，消除竞态窗口
 func (us *UpdateService) StartDailyCheck() {
 	us.mu.Lock()
@@ -1653,7 +1653,8 @@ func (us *UpdateService) StartDailyCheck() {
 		us.StartDailyCheck() // 重新调度下次检查
 	})
 
-	log.Printf("[UpdateService] 定时检查已启动，下次检查时间: %s", time.Now().Add(duration).Format("2006-01-02 15:04:05"))
+	log.Printf("[UpdateService] 定时检查已启动，下次检查时间: %s（间隔: %s）",
+		time.Now().Add(duration).Format("2006-01-02 15:04:05"), duration)
 }
 
 // StopDailyCheck 停止定时检查（公开方法，供外部调用）
@@ -1668,24 +1669,14 @@ func (us *UpdateService) StopDailyCheck() {
 	}
 }
 
-// calculateNextCheckDuration 计算距离下一个8点的时长
+// calculateNextCheckDuration 计算距离下次检查的时长（默认每 6 小时）
 func (us *UpdateService) calculateNextCheckDuration() time.Duration {
-	now := time.Now()
-
-	// 今天早上8点
-	next := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
-
-	// 如果已经过了今天8点，调整到明天8点
-	if now.After(next) {
-		next = next.Add(24 * time.Hour)
-	}
-
-	return next.Sub(now)
+	return 6 * time.Hour
 }
 
-// performDailyCheck 执行每日检查（带重试）
+// performDailyCheck 执行定时检查（带重试）
 func (us *UpdateService) performDailyCheck() {
-	log.Println("[UpdateService] 开始每日定时检查更新...")
+	log.Println("[UpdateService] 开始定时检查更新...")
 
 	var updateInfo *UpdateInfo
 	var err error
@@ -1725,7 +1716,7 @@ func (us *UpdateService) performDailyCheck() {
 
 	// 3次都失败，静默放弃
 	us.SaveState()
-	log.Println("[UpdateService] 检查更新失败，将在明天8点重试")
+	log.Println("[UpdateService] 检查更新失败，将在下次定时检查时重试")
 }
 
 // autoDownload 自动下载更新（静默失败）

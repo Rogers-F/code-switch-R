@@ -21,6 +21,45 @@ import (
 type MITMRuleEngine struct {
 	ruleService     *RuleService
 	providerService *ProviderService
+	transport       http.RoundTripper
+}
+
+func parseTargetProviderSpec(spec string) (platform string, providerKey string, hasProviderKey bool, err error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return "", "", false, fmt.Errorf("target provider is empty")
+	}
+
+	// 支持 custom:{toolId}（platform 本身含 ":"），以及 custom:{toolId}:{providerId}
+	if strings.HasPrefix(spec, "custom:") {
+		firstColon := strings.Index(spec, ":")
+		lastColon := strings.LastIndex(spec, ":")
+		if firstColon == lastColon {
+			// 只有一个 ":"，表示只有 platform（custom:{toolId}），不指定具体 provider
+			return spec, "", false, nil
+		}
+		platform = spec[:lastColon]
+		providerKey = strings.TrimSpace(spec[lastColon+1:])
+		if providerKey == "" {
+			return "", "", false, fmt.Errorf("invalid target provider format: %s", spec)
+		}
+		return platform, providerKey, true, nil
+	}
+
+	parts := strings.SplitN(spec, ":", 2)
+	platform = strings.TrimSpace(parts[0])
+	if platform == "" {
+		return "", "", false, fmt.Errorf("invalid target provider format: %s", spec)
+	}
+
+	if len(parts) == 2 {
+		providerKey = strings.TrimSpace(parts[1])
+		if providerKey != "" {
+			return platform, providerKey, true, nil
+		}
+	}
+
+	return platform, "", false, nil
 }
 
 // NewMITMRuleEngine creates a new rule engine
@@ -29,6 +68,11 @@ func NewMITMRuleEngine(ruleService *RuleService, providerService *ProviderServic
 		ruleService:     ruleService,
 		providerService: providerService,
 	}
+}
+
+// SetTransport allows overriding the default HTTP transport (useful for smoke tests).
+func (e *MITMRuleEngine) SetTransport(transport http.RoundTripper) {
+	e.transport = transport
 }
 
 // MatchRule finds a matching rule for the given host
@@ -56,13 +100,10 @@ func (e *MITMRuleEngine) GetTargetProvider(rule *MITMRule) (*Provider, error) {
 		return nil, fmt.Errorf("rule is nil")
 	}
 
-	// Parse provider ID format: "platform:id" or just "platform"
-	parts := strings.SplitN(rule.TargetProvider, ":", 2)
-	if len(parts) == 0 {
-		return nil, fmt.Errorf("invalid target provider format: %s", rule.TargetProvider)
+	platform, providerKey, hasProviderKey, err := parseTargetProviderSpec(rule.TargetProvider)
+	if err != nil {
+		return nil, err
 	}
-
-	platform := parts[0]
 
 	// Load providers for the platform
 	providers, err := e.providerService.LoadProviders(platform)
@@ -71,10 +112,9 @@ func (e *MITMRuleEngine) GetTargetProvider(rule *MITMRule) (*Provider, error) {
 	}
 
 	// If specific ID provided, find by ID
-	if len(parts) == 2 {
-		providerID := parts[1]
+	if hasProviderKey {
 		for i := range providers {
-			if providers[i].Name == providerID || fmt.Sprintf("%d", providers[i].ID) == providerID {
+			if providers[i].Name == providerKey || fmt.Sprintf("%d", providers[i].ID) == providerKey {
 				return &providers[i], nil
 			}
 		}
@@ -160,14 +200,26 @@ func (e *MITMRuleEngine) ApplyPathRewrite(path string, rule *MITMRule) string {
 	return path
 }
 
+func (e *MITMRuleEngine) defaultAuthTypeForSource(sourceHost string) string {
+	host := strings.ToLower(strings.TrimSpace(sourceHost))
+	switch {
+	case strings.Contains(host, "anthropic.com"):
+		return "x-api-key"
+	case strings.Contains(host, "openai.com"):
+		return "bearer"
+	default:
+		return "bearer"
+	}
+}
+
 // BuildAuthHeaders builds authentication headers for the target provider
-func (e *MITMRuleEngine) BuildAuthHeaders(provider *Provider) map[string]string {
+func (e *MITMRuleEngine) BuildAuthHeaders(sourceHost string, provider *Provider) map[string]string {
 	headers := make(map[string]string)
 
 	// Determine auth type
 	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
 	if authType == "" {
-		authType = "x-api-key" // Default for Claude
+		authType = e.defaultAuthTypeForSource(sourceHost)
 	}
 
 	switch authType {
@@ -199,7 +251,11 @@ func (e *MITMRuleEngine) BuildAuthHeaders(provider *Provider) map[string]string 
 func (e *MITMRuleEngine) CreateRuleBasedProxy(logChan chan MITMLogEntry) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		domain := r.Host
+		// 匹配优先级：SNI > Host（去端口）
+		domain := strings.TrimSpace(r.Host)
+		if r.TLS != nil && strings.TrimSpace(r.TLS.ServerName) != "" {
+			domain = strings.TrimSpace(r.TLS.ServerName)
+		}
 
 		// Remove port from domain
 		if colonIdx := strings.LastIndex(domain, ":"); colonIdx > 0 {
@@ -251,19 +307,40 @@ func (e *MITMRuleEngine) CreateRuleBasedProxy(logChan chan MITMLogEntry) http.Ha
 
 		// Apply path rewrite
 		originalPath := r.URL.Path
-		r.URL.Path = e.ApplyPathRewrite(r.URL.Path, rule)
+		rewrittenPath := e.ApplyPathRewrite(r.URL.Path, rule)
 
 		// Parse target URL
-		targetURL, err := url.Parse(provider.APIURL)
+		targetURL, err := url.Parse(strings.TrimSpace(provider.APIURL))
 		if err != nil {
 			log.Printf("[MITM] Invalid provider URL %s: %v\n", provider.APIURL, err)
 			http.Error(w, "Invalid provider URL", http.StatusBadGateway)
 			return
 		}
+		if targetURL.Scheme == "" || targetURL.Host == "" {
+			log.Printf("[MITM] Invalid provider URL (missing scheme/host) %s\n", provider.APIURL)
+			http.Error(w, "Invalid provider URL", http.StatusBadGateway)
+			return
+		}
 
 		// Override endpoint if specified
-		if provider.APIEndpoint != "" {
-			r.URL.Path = provider.APIEndpoint
+		effectivePath := rewrittenPath
+		if strings.TrimSpace(provider.APIEndpoint) != "" {
+			effectivePath = strings.TrimSpace(provider.APIEndpoint)
+			if !strings.HasPrefix(effectivePath, "/") {
+				effectivePath = "/" + effectivePath
+			}
+		} else if effectivePath == "" {
+			effectivePath = "/"
+		}
+
+		// Support provider.APIURL with a path prefix (e.g. https://example.com/openai)
+		upstreamPath := effectivePath
+		basePath := strings.TrimSuffix(targetURL.Path, "/")
+		if basePath != "" && basePath != "/" {
+			// Avoid duplicating /v1/... when basePath already included
+			if upstreamPath != basePath && !strings.HasPrefix(upstreamPath, basePath+"/") {
+				upstreamPath = basePath + upstreamPath
+			}
 		}
 
 		// Create reverse proxy director
@@ -271,9 +348,10 @@ func (e *MITMRuleEngine) CreateRuleBasedProxy(logChan chan MITMLogEntry) http.Ha
 			req.URL.Scheme = targetURL.Scheme
 			req.URL.Host = targetURL.Host
 			req.Host = targetURL.Host
+			req.URL.Path = upstreamPath
 
 			// Set auth headers
-			authHeaders := e.BuildAuthHeaders(provider)
+			authHeaders := e.BuildAuthHeaders(domain, provider)
 			for k, v := range authHeaders {
 				req.Header.Set(k, v)
 			}
@@ -291,20 +369,24 @@ func (e *MITMRuleEngine) CreateRuleBasedProxy(logChan chan MITMLogEntry) http.Ha
 			}
 
 			log.Printf("[MITM] Routing %s %s -> %s%s (rule: %s)\n",
-				req.Method, originalPath, targetURL.Host, req.URL.Path, rule.Name)
+				req.Method, originalPath, targetURL.Host, upstreamPath, rule.Name)
 		}
 
 		// Create proxy
-		proxy := &httputil.ReverseProxy{
-			Director: director,
-			Transport: &http.Transport{
+		transport := e.transport
+		if transport == nil {
+			transport = &http.Transport{
 				TLSClientConfig:       &tls.Config{InsecureSkipVerify: true}, // TODO: Make configurable
 				MaxIdleConns:          100,
 				IdleConnTimeout:       90 * time.Second,
 				DisableCompression:    false,
 				DisableKeepAlives:     false,
 				ResponseHeaderTimeout: 30 * time.Second,
-			},
+			}
+		}
+		proxy := &httputil.ReverseProxy{
+			Director: director,
+			Transport: transport,
 			ModifyResponse: func(resp *http.Response) error {
 				log.Printf("[MITM] <- %d %s\n", resp.StatusCode, resp.Request.URL.Path)
 				return nil

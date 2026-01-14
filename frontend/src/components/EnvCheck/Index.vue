@@ -1,5 +1,7 @@
 <template>
   <PageLayout :title="t('sidebar.env')">
+    <p class="page-lead">{{ t('envcheck.hero.lead') }}</p>
+
     <div class="section-header">
       <div class="tab-group" role="tablist" :aria-label="t('sidebar.env')">
         <button

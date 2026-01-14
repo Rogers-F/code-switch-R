@@ -37,6 +37,7 @@ type MITMService struct {
 
 	// Configuration
 	targetHost string // PoC: fixed target (e.g., api.anthropic.com)
+	ruleEngine *MITMRuleEngine
 
 	// Logging
 	logChan chan MITMLogEntry
@@ -55,7 +56,7 @@ type MITMLogEntry struct {
 }
 
 // NewMITMService creates a new MITM service instance
-func NewMITMService() (*MITMService, error) {
+func NewMITMService(ruleService *RuleService, providerService *ProviderService) (*MITMService, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user home dir: %w", err)
@@ -69,9 +70,13 @@ func NewMITMService() (*MITMService, error) {
 	svc := &MITMService{
 		certDir:    certDir,
 		certCache:  make(map[string]*tls.Certificate),
-		port:       8443, // Default high port
-		targetHost: "api.anthropic.com:443",
+		port:       443, // Default HTTPS port for MITM interception
+		targetHost: "rule-based",
 		logChan:    make(chan MITMLogEntry, 100),
+	}
+
+	if ruleService != nil && providerService != nil {
+		svc.ruleEngine = NewMITMRuleEngine(ruleService, providerService)
 	}
 
 	// Ensure CA exists
@@ -272,7 +277,8 @@ func (m *MITMService) generateServerCert(domain string) (*tls.Certificate, error
 func (m *MITMService) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	domain := hello.ServerName
 	if domain == "" {
-		return nil, fmt.Errorf("no SNI provided")
+		// 兜底：无 SNI 的客户端也允许完成握手（证书名可能不匹配，但不直接失败）
+		domain = "localhost"
 	}
 
 	return m.generateServerCert(domain)
@@ -297,6 +303,10 @@ func (m *MITMService) Start() error {
 	addr := fmt.Sprintf(":%d", m.port)
 	listener, err := tls.Listen("tcp", addr, tlsConfig)
 	if err != nil {
+		// 低端口（<1024）在多数系统上需要管理员权限
+		if m.port < 1024 {
+			return fmt.Errorf("failed to start listener on port %d (administrator privileges required): %w", m.port, err)
+		}
 		return fmt.Errorf("failed to start listener: %w", err)
 	}
 
@@ -361,6 +371,10 @@ func (m *MITMService) GetCACertPath() string {
 
 // createHandler creates the HTTP handler for proxying
 func (m *MITMService) createHandler() http.Handler {
+	if m.ruleEngine != nil {
+		return m.ruleEngine.CreateRuleBasedProxy(m.logChan)
+	}
+
 	director := func(req *http.Request) {
 		// Set target
 		req.URL.Scheme = "https"
@@ -378,10 +392,10 @@ func (m *MITMService) createHandler() http.Handler {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true, // PoC: skip verification
 			},
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			DisableCompression:  false,
-			DisableKeepAlives:   false,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			DisableCompression:    false,
+			DisableKeepAlives:     false,
 			ResponseHeaderTimeout: 30 * time.Second,
 		},
 		ModifyResponse: func(resp *http.Response) error {
@@ -498,7 +512,7 @@ func (m *MITMService) SetMITMPort(port int) error {
 		return fmt.Errorf("cannot change port while server is running")
 	}
 
-	if port < 1024 || port > 65535 {
+	if port < 1 || port > 65535 {
 		return fmt.Errorf("invalid port: %d", port)
 	}
 

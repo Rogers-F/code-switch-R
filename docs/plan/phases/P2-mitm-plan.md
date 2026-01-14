@@ -1,7 +1,7 @@
 # Phase P2 Plan: HTTPS MITM 解密拦截与分流转发（核心）
 
 **创建日期**：2026-01-13
-**状态**：✅ Completed (2026-01-13)
+**状态**：✅ Completed (2026-01-14)
 **范围**：`services/`（新增 MITM 服务 + 配置/日志联动），不破坏现有 Relay 栈  
 
 ---
@@ -76,3 +76,17 @@
 - ghosxy：`/Users/zhuoxiongliang/Documents/coding/ghosxy/src/main/services/CertService.ts`
 - code-switch-R：`services/providerrelay.go`（转发/streaming/日志采集参考）
 
+---
+
+## 落地情况（与当前代码对照）
+
+### 已实现
+
+- TLS SNI 动态证书：`tls.Config.GetCertificate` 按域名生成并缓存证书。无 SNI 时使用 `localhost` 兜底证书（握手不直接失败）。`services/mitmservice.go`
+- 规则命中 → Provider 选路 → 反代转发：`MITMRuleEngine` 读取 `RuleService` 的 `sourceHost` 规则，并通过 `ProviderService` 解析 `targetProvider`（支持 `platform` / `platform:id` / `custom:{toolId}`）。`services/mitmruleengine.go`
+- 未命中规则安全默认：直接拒绝并返回可读错误（而不是盲转发）。`services/mitmruleengine.go`
+- 可观测日志：每次请求记录 host、rule、target、status、latency、error；前端终端日志可查看。`services/mitmservice.go`、`frontend/src/components/Logs/TerminalView.vue`
+
+### 已知限制（不阻塞主链路）
+
+- 上游 TLS 校验当前允许跳过（`InsecureSkipVerify: true`），对齐 ghosxy 的“可连自签名/中转”行为；后续可在 P3/P5 做成可配置并增加风险提示。`services/mitmruleengine.go`

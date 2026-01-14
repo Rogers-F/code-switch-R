@@ -175,7 +175,6 @@ const navGroups: NavGroup[] = [
     icon: 'providers',
     collapsible: true,
     items: [
-      { path: '/providers', icon: 'layers', labelKey: 'sidebar.providers', isNew: true },
       { path: '/', icon: 'grid', labelKey: 'sidebar.providers' },
       { path: '/mcp', icon: 'plug', labelKey: 'sidebar.mcp' },
       { path: '/skill', icon: 'tool', labelKey: 'sidebar.skill' },
@@ -189,7 +188,7 @@ const navGroups: NavGroup[] = [
     collapsible: true,
     items: [
       { path: '/rules', icon: 'star', labelKey: 'sidebar.rules', isNew: true },
-      { path: '/mitm-poc', icon: 'shield', labelKey: 'MITM PoC', isNew: true },
+      { path: '/mitm-poc', icon: 'shield', labelKey: 'dashboard.mitm.controls', isNew: true },
       { path: '/logs/terminal', icon: 'terminal', labelKey: 'sidebar.terminal_logs', isNew: true },
     ]
   },

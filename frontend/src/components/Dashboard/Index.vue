@@ -60,42 +60,6 @@
         </Card>
       </div>
 
-      <!-- MITM Control Actions -->
-      <div class="mitm-controls">
-        <h3 class="controls-title">{{ t('dashboard.mitm.controls', 'MITM Controls') }}</h3>
-        <div class="controls-grid">
-          <Button
-            :variant="systemStatus.mitm ? 'destructive' : 'default'"
-            @click="toggleMITM"
-            :disabled="mitmLoading"
-          >
-            {{ systemStatus.mitm ? t('dashboard.mitm.stop') : t('dashboard.mitm.start') }}
-          </Button>
-
-          <Button
-            :variant="systemStatus.rootCA ? 'destructive' : 'default'"
-            @click="toggleRootCA"
-            :disabled="caLoading"
-          >
-            {{ systemStatus.rootCA ? t('dashboard.mitm.uninstallCA') : t('dashboard.mitm.installCA') }}
-          </Button>
-
-          <Button
-            :variant="systemStatus.hosts ? 'destructive' : 'default'"
-            @click="toggleHosts"
-            :disabled="hostsLoading"
-          >
-            {{ systemStatus.hosts ? t('dashboard.mitm.cleanupHosts') : t('dashboard.mitm.applyHosts') }}
-          </Button>
-
-          <Button
-            variant="outline"
-            @click="openCACert"
-          >
-            {{ t('dashboard.mitm.exportCA') }}
-          </Button>
-        </div>
-      </div>
     </section>
 
     <!-- 1) 热力图（从首页迁移） -->
@@ -257,25 +221,16 @@ import {
 } from '../../services/healthcheck'
 // @ts-ignore
 import {
-  Start as StartMITM,
-  Stop as StopMITM,
   GetMITMStatus,
-  GetCACertPath
 } from '../../../bindings/codeswitch/services/mitmservice'
 // @ts-ignore
 import {
-  Install as InstallCertificate,
-  Uninstall as UninstallCertificate,
   CheckInstalled as CheckCertificateInstalled
 } from '../../../bindings/codeswitch/services/systemtrustservice'
 // @ts-ignore
 import {
-  Apply as ApplyHostsEntries,
-  Cleanup as CleanupHostsEntries,
   GetManagedDomains
 } from '../../../bindings/codeswitch/services/hostsservice'
-// @ts-ignore
-import { ListEnabled as ListEnabledRules } from '../../../bindings/codeswitch/services/ruleservice'
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
@@ -292,11 +247,6 @@ const systemStatus = reactive({
   rootCA: false, // Root CA安装状态
   hosts: false,  // Hosts配置状态
 })
-
-// MITM 控制状态
-const mitmLoading = ref(false)
-const caLoading = ref(false)
-const hostsLoading = ref(false)
 
 // ===== 1) 热力图 =====
 const HEATMAP_DAYS = DEFAULT_HEATMAP_DAYS
@@ -743,7 +693,7 @@ const loadMonitorStats = async () => {
   monitorTimelines.value = await getLatestResults()
 }
 
-// ===== MITM 控制方法 =====
+// ===== 系统状态刷新 =====
 const refreshSystemStatus = async () => {
   try {
     // 检查 MITM 状态
@@ -759,106 +709,6 @@ const refreshSystemStatus = async () => {
     systemStatus.hosts = managedDomains && managedDomains.length > 0
   } catch (error) {
     console.error('Failed to refresh system status:', error)
-  }
-}
-
-const toggleMITM = async () => {
-  if (mitmLoading.value) return
-  mitmLoading.value = true
-
-  try {
-    if (systemStatus.mitm) {
-      await StopMITM()
-      console.log('MITM proxy stopped')
-    } else {
-      await StartMITM()
-      console.log('MITM proxy started')
-    }
-    await refreshSystemStatus()
-  } catch (error) {
-    console.error('Failed to toggle MITM:', error)
-    alert(t('dashboard.mitm.error.toggle', 'Failed to toggle MITM proxy. Check console for details.'))
-  } finally {
-    mitmLoading.value = false
-  }
-}
-
-const toggleRootCA = async () => {
-  if (caLoading.value) return
-  caLoading.value = true
-
-  try {
-    if (systemStatus.rootCA) {
-      await UninstallCertificate('Code-Switch MITM CA')
-      console.log('Root CA uninstalled')
-    } else {
-      const certPath = await GetCACertPath()
-      if (!certPath) {
-        throw new Error('CA certificate path not available')
-      }
-      await InstallCertificate(certPath)
-      console.log('Root CA installed')
-    }
-    await refreshSystemStatus()
-  } catch (error) {
-    console.error('Failed to toggle Root CA:', error)
-    alert(t('dashboard.mitm.error.ca', 'Failed to install/uninstall Root CA. Administrator privileges may be required.'))
-  } finally {
-    caLoading.value = false
-  }
-}
-
-const toggleHosts = async () => {
-  if (hostsLoading.value) return
-  hostsLoading.value = true
-
-  try {
-    if (systemStatus.hosts) {
-      await CleanupHostsEntries()
-      console.log('Hosts entries cleaned up')
-    } else {
-      // 获取所有启用的规则
-      const rules = await ListEnabledRules()
-      if (!rules || rules.length === 0) {
-        alert(t('dashboard.mitm.error.noRules', 'No enabled rules found. Please create and enable rules first.'))
-        return
-      }
-
-      // 提取所有源域名
-      const domains = rules.map((rule: any) => rule.sourceHost).filter(Boolean)
-      if (domains.length === 0) {
-        alert(t('dashboard.mitm.error.noDomains', 'No valid domains found in enabled rules.'))
-        return
-      }
-
-      // 应用 Hosts 条目（IPv4 + IPv6）
-      await ApplyHostsEntries(domains, true, true)
-      console.log(`Applied hosts entries for ${domains.length} domains`)
-    }
-    await refreshSystemStatus()
-  } catch (error) {
-    console.error('Failed to toggle Hosts:', error)
-    alert(t('dashboard.mitm.error.hosts', 'Failed to apply/cleanup hosts entries. Administrator privileges may be required.'))
-  } finally {
-    hostsLoading.value = false
-  }
-}
-
-const openCACert = async () => {
-  try {
-    const certPath = await GetCACertPath()
-    if (!certPath) {
-      alert(t('dashboard.mitm.error.noCert', 'CA certificate not found. Please start MITM proxy first.'))
-      return
-    }
-
-    // 使用系统默认程序打开证书文件
-    // 在 Wails 3 中可以使用 window.open 或者通过后端服务调用系统命令
-    console.log('Opening CA certificate:', certPath)
-    alert(t('dashboard.mitm.info.certPath', { path: certPath }, `Certificate path: ${certPath}`))
-  } catch (error) {
-    console.error('Failed to open CA certificate:', error)
-    alert(t('dashboard.mitm.error.openCert', 'Failed to open CA certificate.'))
   }
 }
 

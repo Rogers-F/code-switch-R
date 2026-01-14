@@ -319,7 +319,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+  import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
@@ -771,6 +771,8 @@ const handleImportBackup = async () => {
   }
 }
 
+let updateStateTimer: number | undefined
+
 onMounted(async () => {
   await loadAppSettings()
 
@@ -783,6 +785,9 @@ onMounted(async () => {
 
   // 加载更新状态
   await loadUpdateState()
+  updateStateTimer = window.setInterval(() => {
+    void loadUpdateState()
+  }, 30_000)
 
   // 加载拉黑配置
   await loadBlacklistSettings()
@@ -792,6 +797,13 @@ onMounted(async () => {
 
   // 初始化导出默认路径
   await loadBackupDefaults()
+})
+
+onUnmounted(() => {
+  if (updateStateTimer) {
+    window.clearInterval(updateStateTimer)
+    updateStateTimer = undefined
+  }
 })
 </script>
 

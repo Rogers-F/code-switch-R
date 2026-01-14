@@ -135,18 +135,18 @@ func main() {
 	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
 	requestDetailService := services.NewRequestDetailService()
 
-	// 【P2/P3】初始化 MITM 相关服务
-	mitmService, err := services.NewMITMService()
-	if err != nil {
-		log.Fatalf("MITM 服务初始化失败: %v", err)
-	}
-	log.Println("✅ MITM 服务已初始化（未启动）")
-
 	ruleService, err := services.NewRuleService()
 	if err != nil {
 		log.Fatalf("规则服务初始化失败: %v", err)
 	}
 	log.Println("✅ MITM 规则服务已初始化")
+
+	// 【P2/P3】初始化 MITM 相关服务
+	mitmService, err := services.NewMITMService(ruleService, providerService)
+	if err != nil {
+		log.Fatalf("MITM 服务初始化失败: %v", err)
+	}
+	log.Println("✅ MITM 服务已初始化（未启动）")
 
 	hostsService, err := services.NewHostsService()
 	if err != nil {
@@ -171,9 +171,9 @@ func main() {
 	// 启动定时检查（如果启用）
 	if updateService.IsAutoCheckEnabled() {
 		go func() {
-			time.Sleep(10 * time.Second)     // 延迟10秒，等待应用完成初始化
+			time.Sleep(2 * time.Second)      // 延迟2秒，等待应用完成初始化
 			updateService.CheckUpdateAsync() // 启动时检查一次
-			updateService.StartDailyCheck()  // 启动每日8点定时检查
+			updateService.StartDailyCheck()  // 每 6 小时检查一次
 		}()
 	}
 
@@ -183,32 +183,13 @@ func main() {
 		}
 	}()
 
-	// 启动黑名单自动恢复定时器（每分钟检查一次）
-	blacklistStopChan := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				if err := blacklistService.AutoRecoverExpired(); err != nil {
-					log.Printf("自动恢复黑名单失败: %v", err)
-				}
-			case <-blacklistStopChan:
-				log.Println("✅ 黑名单定时器已停止")
-				return
-			}
-		}
-	}()
-
 	// 根据应用设置决定是否启动可用性监控（复用旧的 auto_connectivity_test 字段）
 	go func() {
 		time.Sleep(3 * time.Second) // 延迟3秒，等待应用初始化
 		settings, err := appSettings.GetAppSettings()
 
-		// 默认启用自动监控（保持开箱即用）
-		autoEnabled := true
+		// 默认不启用自动监控（避免对供应商产生不必要的后台请求）
+		autoEnabled := false
 		if err != nil {
 			log.Printf("读取应用设置失败（使用默认值）: %v", err)
 		} else {
@@ -264,9 +245,9 @@ func main() {
 			application.NewService(networkService),
 			application.NewService(providerRelay),
 			application.NewService(requestDetailService),
-			application.NewService(mitmService), // P2: MITM Service
-			application.NewService(ruleService), // P2: Rule Service
-			application.NewService(hostsService), // P3: Hosts Service
+			application.NewService(mitmService),        // P2: MITM Service
+			application.NewService(ruleService),        // P2: Rule Service
+			application.NewService(hostsService),       // P3: Hosts Service
 			application.NewService(systemTrustService), // P3: System Trust Service
 		},
 		Assets: application.AssetOptions{
@@ -283,25 +264,22 @@ func main() {
 	app.OnShutdown(func() {
 		log.Println("🛑 应用正在关闭，停止后台服务...")
 
-		// 1. 停止黑名单定时器
-		close(blacklistStopChan)
-
-		// 2. 停止健康检查轮询
+		// 1. 停止健康检查轮询
 		healthCheckService.StopBackgroundPolling()
 		log.Println("✅ 健康检查服务已停止")
 
-		// 3. 停止更新定时器
+		// 2. 停止更新定时器
 		updateService.StopDailyCheck()
 		log.Println("✅ 更新检查服务已停止")
 
-		// 4. 停止代理服务器
+		// 3. 停止代理服务器
 		_ = providerRelay.Stop()
 
 		// 【P0 PoC】停止 MITM 服务
 		_ = mitmService.Stop()
 		log.Println("✅ MITM 服务已停止")
 
-		// 5. 优雅关闭数据库写入队列（10秒超时，双队列架构）
+		// 4. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {
 			log.Printf("⚠️ 队列关闭超时: %v", err)
 		} else {

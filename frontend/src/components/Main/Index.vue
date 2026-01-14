@@ -1,6 +1,6 @@
 <template>
   <PageLayout
-    :title="t('sidebar.home')"
+    :title="t('sidebar.providers')"
     :sticky="true"
   >
     <template #actions>

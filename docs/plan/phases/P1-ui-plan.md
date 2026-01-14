@@ -1,7 +1,7 @@
 # Phase P1 Plan: 前端 UI 2.0（对齐 ghosxy 设计）
 
 **创建日期**：2026-01-13
-**状态**：✅ Completed (2026-01-13)
+**状态**：✅ Completed (2026-01-14)
 **范围**：`frontend/`（Vue3 + Tailwind），不改后端代理核心逻辑  
 
 ---
@@ -93,14 +93,13 @@
 **完成内容：**
 - 实现 5 组导航结构：Dashboard / Providers / Rules / Logs / Settings
 - 新增可折叠分组功能，状态持久化到 localStorage
-- 新增 `/providers` 和 `/rules` 路由与占位页面
+- 新增 `/rules` 路由；移除 `/providers` 重复入口，供应商管理收敛到 `/`（避免两套供应商体系）
 - Settings 组整合：Console、MCP、Skills、Prompts、Env Check、Speed Test、Availability、MITM PoC
 - 新增 layers 图标（Providers）和 star 图标（Rules）
 - 完整国际化支持（en.json / zh.json）
 
 **关键文件：**
 - `frontend/src/components/Sidebar.vue`（新增 NavGroup 接口、分组逻辑）
-- `frontend/src/components/Providers/Index.vue`（占位页面）
 - `frontend/src/components/Rules/Index.vue`（占位页面）
 - `frontend/src/router/index.ts`（新增路由）
 - `frontend/src/locales/`（新增翻译键）
@@ -152,19 +151,14 @@
   - 响应式网格布局
   - 完整国际化支持
 
-- ✅ Providers 页面实现
-  - 供应商卡片网格展示（响应式布局）
-  - 显示端点、模型、优先级信息
-  - 启用/禁用状态徽章
-  - 平台渐变图标（Claude/Codex/Gemini）
-  - 编辑和测试按钮（UI就绪）
-  - 空状态展示
-  - Mock 3个供应商数据
+- ✅ 供应商管理页面（单一入口）
+  - 供应商管理使用原有 `/` 页面（真实 ProviderService 数据与操作）
+  - 移除 `/providers` 重复页面，避免“供应商管理出现两套体系”的产品误导
 
 **关键文件：**
 - `frontend/src/components/Logs/TerminalView.vue` ✅
 - `frontend/src/components/Dashboard/Index.vue` ✅
-- `frontend/src/components/Providers/Index.vue` ✅
+- `frontend/src/components/Main/Index.vue` ✅
 
 **技术亮点：**
 - 系统状态通过 reactive 对象管理
@@ -183,7 +177,7 @@ P1 Phase **全部完成**，实现了以下目标：
 ### 核心成果
 1. **信息架构重组**：5组导航结构（Dashboard/Providers/Rules/Logs/Settings）
 2. **组件体系建立**：5个基础 UI 组件（shadcn 风格）
-3. **核心页面重构**：Dashboard 系统状态 + Providers 管理 + Terminal Logs
+3. **核心页面重构**：Dashboard 系统状态 + 供应商管理（`/`）+ Terminal Logs
 
 ### 技术成就
 - Vue3 + TypeScript + Tailwind CSS 技术栈
@@ -213,4 +207,3 @@ P1 UI 重构已完成，后续阶段：
 - **P2**: MITM 域名路由规则实现
 - **P3**: 系统集成（Hosts管理、Root CA安装）
 - **P4**: 日志系统优化
-

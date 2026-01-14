@@ -1,7 +1,7 @@
 # Phase P3 Plan: 系统集成（Hosts + Root CA + 提权/端口策略）
 
 **创建日期**：2026-01-13
-**状态**：✅ Completed (2026-01-13)
+**状态**：🚧 Execute (2026-01-14)
 **范围**：新增系统服务（跨平台），提供 UI 一键操作与自动清理策略  
 
 ---
@@ -50,20 +50,17 @@
 
 ### Stage 4：端口策略（与 P2 联动）
 
-根据 ADR-0002 执行二选一（或组合）：
+根据 ADR-0002（当前选择方案 A）：
 
-1. 直接监听 443（需要管理员/特权能力；Windows 可能可行，macOS/Linux 通常需要提权）
-2. 默认监听高位端口（如 8443），并提供“一键开启/关闭端口转发”
-   - Windows：`netsh interface portproxy`
-   - macOS：`pfctl`（需要谨慎处理规则与回滚）
-   - Linux：`iptables/nftables`（需要发行版差异处理）
+1. 默认直接监听 443（对齐 ghosxy）
+   - 需要管理员权限：启动 MITM 失败时必须提示“请以管理员权限重启应用”
+2. 高位端口 + 端口转发作为未来可选优化（不作为当前阶段的默认实现）
 
 ### Stage 5：生命周期与自动清理
 
 1. 应用退出时 best-effort：
    - Stop MITM
    - Cleanup Hosts（仅当本应用曾注入且用户开启“自动清理”）
-   - 关闭端口转发（同上）
 2. 崩溃恢复：
    - 下次启动时检测“残留 marker/转发规则”，在 UI 明确提示并提供“一键清理”
 
@@ -73,7 +70,7 @@
 
 - Hosts：注入/清理幂等；不会破坏 hosts 文件其它内容；IPv4/IPv6 可选且正确
 - Root CA：安装/卸载可逆；用户取消/失败时状态明确且不影响网络可用性
-- 端口策略：在至少 1 个 OS 上可用，并明确其它 OS 的限制与替代方案
+- 端口策略（方案 A）：在至少 1 个 OS 上可用（开发机优先），并明确“需要管理员权限”的限制与替代方案
 
 ---
 
@@ -89,4 +86,3 @@
 - ghosxy Hosts：`/Users/zhuoxiongliang/Documents/coding/ghosxy/src/main/services/HostsService.ts`
 - ghosxy SystemTrust：`/Users/zhuoxiongliang/Documents/coding/ghosxy/src/main/services/SystemTrust.ts`
 - code-switch-R：`services/updateservice.go`（Windows UAC 提权示例）
-

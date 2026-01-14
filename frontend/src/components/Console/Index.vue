@@ -1,256 +1,367 @@
 <template>
-  <PageLayout
-    :title="t('sidebar.console')"
-    :sticky="true"
-  >
-    <template #actions>
-      <button
-        type="button"
-        class="ghost-icon"
-        :data-tooltip="t('components.console.actions.clear')"
-        :aria-label="t('components.console.actions.clear')"
-        @click="clearLogs"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-    </template>
-
-    <div class="console-toolbar">
-      <div class="auto-scroll-toggle">
-        <span>{{ t('components.console.actions.autoScroll') }}</span>
-        <label class="mac-switch sm">
-          <input type="checkbox" v-model="autoScroll" />
-          <span></span>
-        </label>
-      </div>
-    </div>
-
-    <div class="console-container">
-      <div v-if="loading" class="loading-state">
-        <div class="spinner"></div>
-        <p>加载中...</p>
-      </div>
-
-      <div v-else class="console-content" ref="logsContainer">
-        <div v-if="logs.length === 0" class="empty-state">
-          <p>暂无日志</p>
+  <PageLayout :title="t('sidebar.console')" :sticky="true">
+    <div class="logs-page">
+      <div class="logs-header">
+        <div>
+          <h2 class="logs-title">{{ t('sidebar.console') }}</h2>
+          <p class="logs-subtitle">{{ t('components.console.subtitle') }}</p>
         </div>
-
-        <div v-for="(log, index) in logs" :key="index" class="log-entry" :class="getLevelClass(log.level)">
-          <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
-          <span class="log-level">{{ log.level }}</span>
-          <span class="log-message">{{ log.message }}</span>
+        <div class="logs-actions">
+          <Button variant="outline" size="sm" @click="handleCopy">
+            <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            {{ t('components.console.actions.copy') }}
+          </Button>
+          <Button variant="destructive" size="sm" @click="handleClear">
+            <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z" />
+            </svg>
+            {{ t('components.console.actions.clear') }}
+          </Button>
         </div>
       </div>
-    </div>
 
+      <div class="terminal-container">
+        <div class="terminal-header">
+          <div class="terminal-buttons">
+            <div class="terminal-button terminal-button-red"></div>
+            <div class="terminal-button terminal-button-yellow"></div>
+            <div class="terminal-button terminal-button-green"></div>
+          </div>
+          <div class="terminal-title">{{ t('components.console.filename') }}</div>
+          <div class="terminal-auto-scroll" @click="toggleAutoScroll">
+            <span class="terminal-auto-scroll-text">{{ t('components.console.actions.autoScroll') }}</span>
+            <div class="terminal-auto-scroll-indicator" :class="{ active: autoScroll }" />
+          </div>
+        </div>
+
+        <ScrollArea ref="scrollAreaRef" height="calc(100vh - 280px)">
+          <div class="terminal-content">
+            <div v-if="logs.length === 0" class="terminal-empty">
+              <p>{{ t('components.console.empty') }}</p>
+            </div>
+
+            <div v-for="(log, index) in logs" :key="index" class="log-line">
+              <span class="log-timestamp">{{ formatTime(log.timestamp) }}</span>
+              <span class="log-level" :class="getLevelClass(log.level)">{{ log.level }}</span>
+              <span class="log-message">{{ log.message }}</span>
+            </div>
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
   </PageLayout>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
+import Button from '../ui/Button.vue'
+import ScrollArea from '../ui/ScrollArea.vue'
+import { GetLogs, ClearLogs } from '../../../bindings/codeswitch/services/consoleservice'
+import type { ConsoleLog } from '../../../bindings/codeswitch/services/models'
 
 const { t } = useI18n()
 
-interface ConsoleLog {
-  timestamp: string
-  level: string
+type LogLevel = 'INFO' | 'WARN' | 'ERROR'
+interface TerminalLogLine {
+  timestamp: ConsoleLog['timestamp']
+  level: LogLevel
   message: string
 }
 
-const logs = ref<ConsoleLog[]>([])
+const AUTO_SCROLL_STORAGE_KEY = 'logs-auto-scroll'
+const AUTO_SCROLL_EVENT = 'logs-auto-scroll-change'
+
+const logs = ref<TerminalLogLine[]>([])
 const autoScroll = ref(true)
-const loading = ref(false)
-const logsContainer = ref<HTMLElement>()
+const scrollAreaRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 let refreshInterval: number | null = null
+
+const onAutoScrollChanged = (event: Event) => {
+  autoScroll.value = Boolean((event as CustomEvent<boolean>).detail)
+}
 
 const loadLogs = async () => {
   try {
-    const result = await Call.ByName('codeswitch/services.ConsoleService.GetLogs')
-    logs.value = result as ConsoleLog[]
+    const newLogs = await GetLogs()
+    logs.value = newLogs.map(toTerminalLine).filter(Boolean) as TerminalLogLine[]
 
     if (autoScroll.value) {
       await nextTick()
-      scrollToBottom()
+      scrollAreaRef.value?.scrollToBottom()
     }
   } catch (error) {
-    console.error('加载控制台日志失败:', error)
+    console.error('Failed to load console logs:', error)
   }
 }
 
-const clearLogs = async () => {
-  if (!confirm('确定要清空所有控制台日志吗？')) {
-    return
-  }
-
+const handleClear = async () => {
+  if (!confirm(t('components.console.clearConfirm'))) return
   try {
-    await Call.ByName('codeswitch/services.ConsoleService.ClearLogs')
+    await ClearLogs()
     logs.value = []
   } catch (error) {
-    console.error('清空日志失败:', error)
-    alert('清空失败：' + (error as Error).message)
+    console.error('Failed to clear console logs:', error)
   }
 }
 
-const scrollToBottom = () => {
-  if (logsContainer.value) {
-    logsContainer.value.scrollTop = logsContainer.value.scrollHeight
+const handleCopy = () => {
+  const text = logs.value.map((l) => `[${formatTime(l.timestamp)}] [${l.level}] ${l.message}`).join('\n')
+  navigator.clipboard.writeText(text)
+  alert(t('components.logs.detail.copied', 'Copied'))
+}
+
+const toggleAutoScroll = () => {
+  const nextValue = !autoScroll.value
+  autoScroll.value = nextValue
+  localStorage.setItem(AUTO_SCROLL_STORAGE_KEY, String(nextValue))
+  window.dispatchEvent(new CustomEvent(AUTO_SCROLL_EVENT, { detail: nextValue }))
+}
+
+const formatTime = (timestamp: any) => {
+  if (!timestamp) return '--:--:--'
+  try {
+    const value = String(timestamp)
+    if (value.includes('T')) {
+      return value.split('T')[1].split('.')[0]
+    }
+    if (value.includes(' ')) {
+      return value.split(' ')[1].split('.')[0]
+    }
+    return value
+  } catch {
+    return String(timestamp)
   }
 }
 
-const formatTimestamp = (timestamp: string) => {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
-const getLevelClass = (level: string) => {
-  switch (level.toUpperCase()) {
+const getLevelClass = (level: LogLevel) => {
+  switch (level) {
     case 'ERROR':
-      return 'log-error'
+      return 'level-error'
     case 'WARN':
-      return 'log-warn'
+      return 'level-warn'
+    case 'INFO':
+      return 'level-info'
     default:
-      return 'log-info'
+      return 'level-default'
   }
 }
 
-onMounted(async () => {
-  loading.value = true
-  await loadLogs()
-  loading.value = false
+const toTerminalLine = (entry: ConsoleLog): TerminalLogLine | null => {
+  const raw = String(entry.level || '').toUpperCase()
+  const level: LogLevel = raw === 'ERROR' ? 'ERROR' : raw === 'WARN' ? 'WARN' : 'INFO'
+  return {
+    timestamp: entry.timestamp,
+    level,
+    message: String(entry.message || '').trimEnd(),
+  }
+}
 
-  // 每秒刷新一次日志
-  refreshInterval = window.setInterval(loadLogs, 1000)
+onMounted(() => {
+  const saved = localStorage.getItem(AUTO_SCROLL_STORAGE_KEY)
+  if (saved === 'false') {
+    autoScroll.value = false
+  }
+  window.addEventListener(AUTO_SCROLL_EVENT, onAutoScrollChanged)
+
+  loadLogs()
+  refreshInterval = window.setInterval(() => {
+    loadLogs()
+  }, 1000)
 })
 
 onUnmounted(() => {
-  if (refreshInterval) {
+  if (refreshInterval !== null) {
     clearInterval(refreshInterval)
   }
+  window.removeEventListener(AUTO_SCROLL_EVENT, onAutoScrollChanged)
 })
 </script>
 
 <style scoped>
-.console-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+.logs-page {
+  padding: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
-.auto-scroll-toggle {
+.logs-header {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.9rem;
-  color: var(--mac-text-secondary);
-  cursor: pointer;
-  user-select: none;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
 }
 
-.console-container {
-  flex: 1;
+.logs-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 0.25rem;
+}
+
+.logs-subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.logs-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.terminal-container {
+  background: #09090b;
+  border-radius: 0.75rem;
+  border: 1px solid #27272a;
   overflow: hidden;
-  background: var(--mac-surface);
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.terminal-header {
+  height: 2.25rem;
+  background: #18181b;
+  border-bottom: 1px solid #27272a;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+  flex-shrink: 0;
 }
 
-.console-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Consolas', monospace;
-  font-size: 0.85rem;
-  line-height: 1.6;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-html.dark .console-content {
-  background: #0d1117;
-  color: #e6edf3;
-}
-
-.log-entry {
+.terminal-buttons {
   display: flex;
-  gap: 12px;
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 0.375rem;
 }
 
-.log-entry:last-child {
-  border-bottom: none;
+.terminal-button {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
 }
 
-.log-timestamp {
-  flex-shrink: 0;
-  color: #858585;
-  font-weight: 500;
+.terminal-button-red {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
 }
 
-.log-level {
-  flex-shrink: 0;
-  min-width: 50px;
-  font-weight: 600;
+.terminal-button-yellow {
+  background: rgba(234, 179, 8, 0.2);
+  border: 1px solid rgba(234, 179, 8, 0.5);
 }
 
-.log-info .log-level {
-  color: #4ec9b0;
+.terminal-button-green {
+  background: rgba(34, 197, 94, 0.2);
+  border: 1px solid rgba(34, 197, 94, 0.5);
 }
 
-.log-warn .log-level {
-  color: #dcdcaa;
+.terminal-title {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 0.625rem;
+  color: #71717a;
 }
 
-.log-error .log-level {
-  color: #f48771;
+.terminal-auto-scroll {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
 }
 
-.log-message {
-  flex: 1;
-  white-space: pre-wrap;
-  word-break: break-word;
+.terminal-auto-scroll:hover {
+  opacity: 0.8;
 }
 
-.loading-state,
-.empty-state {
+.terminal-auto-scroll-text {
+  font-size: 0.625rem;
+  color: #71717a;
+}
+
+.terminal-auto-scroll-indicator {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #3f3f46;
+  transition: background 0.2s;
+}
+
+.terminal-auto-scroll-indicator.active {
+  background: #22c55e;
+}
+
+.terminal-content {
+  padding: 1rem;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #a1a1aa;
+}
+
+.terminal-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  color: var(--mac-text-secondary);
+  padding: 5rem 0;
+  color: #3f3f46;
+  opacity: 0.5;
 }
 
-.spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid rgba(0, 0, 0, 0.1);
-  border-top-color: var(--mac-accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-bottom: 12px;
+.log-line {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  transition: background 0.15s;
+  word-break: break-all;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.log-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.log-timestamp {
+  color: #52525b;
+  flex-shrink: 0;
+  user-select: none;
+  min-width: 130px;
+}
+
+.log-level {
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 60px;
+  text-transform: uppercase;
+}
+
+.level-error {
+  color: #ef4444;
+}
+
+.level-warn {
+  color: #eab308;
+}
+
+.level-info {
+  color: #3b82f6;
+}
+
+.level-default {
+  color: #71717a;
+}
+
+.log-message {
+  color: #d4d4d8;
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.terminal-container * {
+  color: inherit;
 }
 </style>
+

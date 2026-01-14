@@ -46,21 +46,21 @@ hosts 文件路径通常为：
 ### Windows（管理员）
 
 ```powershell
-certutil.exe -delstore "ROOT" "Simon Switch MITM CA"
+certutil.exe -delstore "ROOT" "Code-Switch MITM CA"
 ```
 
-注意：最终 Common Name 以本项目实现为准（落地时需要同步更新本回滚文档）。
+注意：证书 Common Name 以本项目实现为准（当前为 `Code-Switch MITM CA`）。
 
 ### macOS（管理员）
 
 ```bash
-sudo security delete-certificate -c "Simon Switch MITM CA" /Library/Keychains/System.keychain
+sudo security delete-certificate -c "Code-Switch MITM CA" /Library/Keychains/System.keychain
 ```
 
 ### Linux（管理员，Debian/Ubuntu）
 
 ```bash
-sudo rm -f /usr/local/share/ca-certificates/codeswitch-mitm-ca.crt
+sudo rm -f /usr/local/share/ca-certificates/code-switch-mitm.crt
 sudo update-ca-certificates --fresh
 ```
 
@@ -68,7 +68,8 @@ sudo update-ca-certificates --fresh
 
 ## 3. 端口转发关闭（若启用过）
 
-端口转发策略与命令因平台而异，最终以 ADR-0002 的实现为准。本节先作为占位：
+当前默认方案为“直接监听 443”（ADR-0002 方案 A），**不默认启用端口转发**。
+若未来引入“8443 + 端口转发”（方案 B），则端口转发策略与命令因平台而异，可参考本节占位：
 
 - Windows：`netsh interface portproxy` 相关规则删除
 - macOS：`pfctl` 相关规则回滚

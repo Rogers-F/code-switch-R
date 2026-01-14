@@ -1,14 +1,14 @@
 <template>
   <PageLayout
-    :title="t('terminal_logs')"
+    :title="t('sidebar.terminal_logs')"
     :sticky="true"
   >
     <div class="logs-page">
       <!-- Header Actions -->
       <div class="logs-header">
         <div>
-          <h2 class="logs-title">{{ t('terminal_logs') }}</h2>
-          <p class="logs-subtitle">{{ t('components.logs.subtitle', 'View application logs in real-time') }}</p>
+          <h2 class="logs-title">{{ t('sidebar.terminal_logs') }}</h2>
+          <p class="logs-subtitle">{{ t('components.terminalLogs.subtitle') }}</p>
         </div>
         <div class="logs-actions">
           <Button variant="outline" size="sm" @click="handleCopy">
@@ -16,13 +16,13 @@
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
-            {{ t('components.logs.actions.copy', 'Copy') }}
+            {{ t('components.terminalLogs.actions.copy') }}
           </Button>
           <Button variant="destructive" size="sm" @click="handleClear">
             <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z" />
             </svg>
-            {{ t('components.logs.actions.clear', 'Clear') }}
+            {{ t('components.terminalLogs.actions.clear') }}
           </Button>
         </div>
       </div>
@@ -36,7 +36,7 @@
             <div class="terminal-button terminal-button-yellow"></div>
             <div class="terminal-button terminal-button-green"></div>
           </div>
-          <div class="terminal-title">application.log</div>
+          <div class="terminal-title">{{ t('components.terminalLogs.filename') }}</div>
           <div
             class="terminal-auto-scroll"
             @click="toggleAutoScroll"
@@ -50,10 +50,10 @@
         </div>
 
         <!-- Log Content -->
-        <ScrollArea height="calc(100vh - 280px)">
-          <div class="terminal-content" ref="contentRef">
+        <ScrollArea ref="scrollAreaRef" height="calc(100vh - 280px)">
+          <div class="terminal-content">
             <div v-if="logs.length === 0" class="terminal-empty">
-              <p>{{ t('components.console.empty', 'No logs yet') }}</p>
+              <p>{{ t('components.terminalLogs.empty') }}</p>
             </div>
 
             <div
@@ -75,35 +75,45 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
 import Button from '../ui/Button.vue'
 import ScrollArea from '../ui/ScrollArea.vue'
+import { GetMITMLogs } from '../../../bindings/codeswitch/services/mitmservice'
+import type { MITMLogEntry } from '../../../bindings/codeswitch/services/models'
 
 const { t } = useI18n()
 
-interface ConsoleLog {
-  timestamp: string
-  level: string
+type LogLevel = 'INFO' | 'WARN' | 'ERROR'
+interface TerminalLogLine {
+  timestamp: MITMLogEntry['timestamp']
+  level: LogLevel
   message: string
 }
 
-const logs = ref<ConsoleLog[]>([])
+const AUTO_SCROLL_STORAGE_KEY = 'logs-auto-scroll'
+const AUTO_SCROLL_EVENT = 'logs-auto-scroll-change'
+const MAX_LOGS = 1000
+
+const logs = ref<TerminalLogLine[]>([])
 const autoScroll = ref(true)
-const contentRef = ref<HTMLElement>()
+const scrollAreaRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 let refreshInterval: number | null = null
+
+const onAutoScrollChanged = (event: Event) => {
+  autoScroll.value = Boolean((event as CustomEvent<boolean>).detail)
+}
 
 const loadLogs = async () => {
   try {
-    const result = await Call.ByName('codeswitch/services.ConsoleService.GetLogs')
-    const newLogs = result as ConsoleLog[]
+    const newLogs = await GetMITMLogs()
+    if (!newLogs.length) return
 
-    // Reverse to show newest first
-    logs.value = [...newLogs].reverse()
+    const newLines = newLogs.map(toTerminalLine).filter(Boolean) as TerminalLogLine[]
+    logs.value = [...logs.value, ...newLines].slice(-MAX_LOGS)
 
     if (autoScroll.value) {
       await nextTick()
-      scrollToTop()
+      scrollAreaRef.value?.scrollToBottom()
     }
   } catch (error) {
     console.error('Failed to load logs:', error)
@@ -111,61 +121,77 @@ const loadLogs = async () => {
 }
 
 const handleClear = async () => {
-  if (!confirm(t('components.console.clear_confirm', 'Are you sure you want to clear all logs?'))) {
+  if (!confirm(t('components.terminalLogs.clearConfirm'))) {
     return
   }
 
   try {
-    await Call.ByName('codeswitch/services.ConsoleService.ClearLogs')
     logs.value = []
+    // Drain remaining buffered logs (avoid re-appearing right after clear)
+    await GetMITMLogs()
   } catch (error) {
     console.error('Failed to clear logs:', error)
   }
 }
 
 const handleCopy = () => {
-  const text = logs.value
-    .map((l) => `[${l.timestamp}] [${l.level}] ${l.message}`)
-    .join('\n')
+  const text = logs.value.map((l) => `[${formatTime(l.timestamp)}] [${l.level}] ${l.message}`).join('\n')
   navigator.clipboard.writeText(text)
-  alert(t('components.logs.copied', 'Logs copied to clipboard'))
+  alert(t('components.logs.detail.copied', 'Copied'))
 }
 
 const toggleAutoScroll = () => {
-  autoScroll.value = !autoScroll.value
+  const nextValue = !autoScroll.value
+  autoScroll.value = nextValue
+  localStorage.setItem(AUTO_SCROLL_STORAGE_KEY, String(nextValue))
+  window.dispatchEvent(new CustomEvent(AUTO_SCROLL_EVENT, { detail: nextValue }))
 }
 
-const scrollToTop = () => {
-  if (contentRef.value) {
-    contentRef.value.scrollTop = 0
-  }
-}
-
-const formatTime = (timestamp: string) => {
+const formatTime = (timestamp: any) => {
   if (!timestamp) return '--:--:--'
   try {
+    const value = String(timestamp)
     // ISO format (2023-11-24T12:00:00)
-    if (timestamp.includes('T')) {
-      return timestamp.split('T')[1].split('.')[0]
+    if (value.includes('T')) {
+      return value.split('T')[1].split('.')[0]
     }
     // Normal format (2023-11-24 12:00:00)
-    if (timestamp.includes(' ')) {
-      return timestamp.split(' ')[1].split('.')[0]
+    if (value.includes(' ')) {
+      return value.split(' ')[1].split('.')[0]
     }
-    return timestamp
+    return value
   } catch {
-    return timestamp
+    return String(timestamp)
   }
 }
 
-const getLevelClass = (level: string) => {
-  const l = level ? level.toLowerCase() : 'info'
-  switch (l) {
-    case 'error':
+const toTerminalLine = (entry: MITMLogEntry): TerminalLogLine | null => {
+  const statusCode = entry.statusCode || 0
+  const hasError = Boolean(entry.error && String(entry.error).trim())
+  const level: LogLevel = hasError || statusCode >= 500 ? 'ERROR' : statusCode >= 400 ? 'WARN' : 'INFO'
+
+  const domain = entry.domain || ''
+  const path = entry.path || ''
+  const target = entry.target ? ` -> ${entry.target}` : ''
+  const status = statusCode ? ` ${statusCode}` : ''
+  const latency = entry.latency ? ` ${entry.latency}ms` : ''
+  const err = hasError ? ` | ${String(entry.error)}` : ''
+
+  const message = `${entry.method || '-'} ${domain}${path}${target}${status}${latency}${err}`.trim()
+  return {
+    timestamp: entry.timestamp,
+    level,
+    message,
+  }
+}
+
+const getLevelClass = (level: LogLevel) => {
+  switch (level) {
+    case 'ERROR':
       return 'level-error'
-    case 'warn':
+    case 'WARN':
       return 'level-warn'
-    case 'info':
+    case 'INFO':
       return 'level-info'
     default:
       return 'level-default'
@@ -173,6 +199,12 @@ const getLevelClass = (level: string) => {
 }
 
 onMounted(() => {
+  const saved = localStorage.getItem(AUTO_SCROLL_STORAGE_KEY)
+  if (saved === 'false') {
+    autoScroll.value = false
+  }
+  window.addEventListener(AUTO_SCROLL_EVENT, onAutoScrollChanged)
+
   loadLogs()
   refreshInterval = window.setInterval(() => {
     loadLogs()
@@ -183,6 +215,7 @@ onUnmounted(() => {
   if (refreshInterval !== null) {
     clearInterval(refreshInterval)
   }
+  window.removeEventListener(AUTO_SCROLL_EVENT, onAutoScrollChanged)
 })
 </script>
 
