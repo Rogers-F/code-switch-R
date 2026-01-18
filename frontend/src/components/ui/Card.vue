@@ -16,13 +16,11 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const cardClass = computed(() => {
-  const baseClass = 'rounded-lg transition-colors'
-
   const variantClasses = {
-    default: 'bg-white dark:bg-gray-900 shadow-sm',
-    outline: 'border border-gray-200 dark:border-gray-800'
+    default: 'mac-panel',
+    outline: 'mac-panel mac-panel-outline'
   }
 
-  return [baseClass, variantClasses[props.variant]].join(' ')
+  return variantClasses[props.variant]
 })
 </script>

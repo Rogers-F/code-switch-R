@@ -134,6 +134,7 @@ import PageLayout from '../common/PageLayout.vue'
 import Card from '../ui/Card.vue'
 import Badge from '../ui/Badge.vue'
 import Button from '../ui/Button.vue'
+import { showToast } from '../../utils/toast'
 
 // @ts-ignore
 import {
@@ -212,10 +213,10 @@ const toggleMITM = async () => {
     console.error('Failed to toggle MITM:', error)
     const message = String((error as any)?.message || error || '')
     if (message.includes('administrator privileges required')) {
-      alert(t('components.mitm.errors.adminPort', 'Listening on port 443 requires administrator privileges. Restart the app with elevated rights and try again.'))
+      showToast(t('components.mitm.errors.adminPort', 'Listening on port 443 requires administrator privileges. Restart the app with elevated rights and try again.'), 'warning')
       return
     }
-    alert(t('dashboard.mitm.error.toggle', 'Failed to toggle MITM proxy. Check console for details.'))
+    showToast(t('dashboard.mitm.error.toggle', 'Failed to toggle MITM proxy. Check console for details.'), 'error')
   } finally {
     mitmLoading.value = false
   }
@@ -237,7 +238,7 @@ const toggleRootCA = async () => {
     await refreshSystemStatus()
   } catch (error) {
     console.error('Failed to toggle Root CA:', error)
-    alert(t('dashboard.mitm.error.ca', 'Failed to install/uninstall Root CA. Administrator privileges may be required.'))
+    showToast(t('dashboard.mitm.error.ca', 'Failed to install/uninstall Root CA. Administrator privileges may be required.'), 'error')
   } finally {
     caLoading.value = false
   }
@@ -252,13 +253,13 @@ const toggleHosts = async () => {
     } else {
       const rules = await ListEnabledRules()
       if (!rules || rules.length === 0) {
-        alert(t('dashboard.mitm.error.noRules', 'No enabled rules found. Please create and enable rules first.'))
+        showToast(t('dashboard.mitm.error.noRules', 'No enabled rules found. Please create and enable rules first.'), 'warning')
         return
       }
 
       const domains = rules.map((rule: any) => rule.sourceHost).filter(Boolean)
       if (domains.length === 0) {
-        alert(t('dashboard.mitm.error.noDomains', 'No valid domains found in enabled rules.'))
+        showToast(t('dashboard.mitm.error.noDomains', 'No valid domains found in enabled rules.'), 'warning')
         return
       }
 
@@ -267,7 +268,7 @@ const toggleHosts = async () => {
     await refreshSystemStatus()
   } catch (error) {
     console.error('Failed to toggle Hosts:', error)
-    alert(t('dashboard.mitm.error.hosts', 'Failed to apply/cleanup hosts entries. Administrator privileges may be required.'))
+    showToast(t('dashboard.mitm.error.hosts', 'Failed to apply/cleanup hosts entries. Administrator privileges may be required.'), 'error')
   } finally {
     hostsLoading.value = false
   }
@@ -277,14 +278,14 @@ const showCACertPath = async () => {
   try {
     const certPath = await GetCACertPath()
     if (!certPath) {
-      alert(t('dashboard.mitm.error.noCert', 'CA certificate not found. Please start MITM proxy first.'))
+      showToast(t('dashboard.mitm.error.noCert', 'CA certificate not found. Please start MITM proxy first.'), 'warning')
       return
     }
     caCertPath.value = certPath
-    alert(t('dashboard.mitm.info.certPath', { path: certPath }, `Certificate path: ${certPath}`))
+    showToast(t('dashboard.mitm.info.certPath', { path: certPath }, `Certificate path: ${certPath}`), 'success')
   } catch (error) {
     console.error('Failed to get CA certificate path:', error)
-    alert(t('dashboard.mitm.error.openCert', 'Failed to open CA certificate.'))
+    showToast(t('dashboard.mitm.error.openCert', 'Failed to open CA certificate.'), 'error')
   }
 }
 

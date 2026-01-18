@@ -108,7 +108,18 @@
     <!-- 首次使用提示横幅 -->
     <div v-if="showFirstRunPrompt" class="first-run-banner">
       <div class="banner-content">
-        <span class="banner-icon">💡</span>
+        <span class="banner-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path
+              d="M9 18h6m-5 3h4M8 14a6 6 0 1110.5 4.2c-.7.8-1.2 1.6-1.4 2.8H8.9c-.2-1.2-.7-2-1.4-2.8A6 6 0 018 14z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
         <span class="banner-text">{{ t('components.main.firstRun.message') }}</span>
       </div>
       <div class="banner-actions">
@@ -372,7 +383,18 @@
                 :class="['blacklist-banner', { dark: resolvedTheme === 'dark' }]"
               >
                 <div class="blacklist-info">
-                  <span class="blacklist-icon">⛔</span>
+                  <span class="blacklist-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+                      <path
+                        d="M8 8l8 8"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </span>
                   <!-- 等级徽章（L1-L5，黑色/红色） -->
                   <span
                     v-if="getProviderBlacklistStatus(card.name)!.blacklistLevel > 0"
@@ -722,9 +744,15 @@
 
                 <!-- 高级配置提示 -->
                 <div v-if="modalState.form.availabilityMonitorEnabled" class="form-field">
-                  <span class="field-hint" style="color: #6b7280;">
-                    💡 {{ t('components.main.form.hints.availabilityAdvancedConfig') }}
-                  </span>
+                  <div class="field-hint hint-with-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.6" />
+                      <path d="M12 8h.01" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+                      <path d="M11 12h1v5h1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    </svg>
+                    <span>{{ t('components.main.form.hints.availabilityAdvancedConfig') }}</span>
+                  </div>
                 </div>
 
                 <footer class="form-actions">
@@ -3174,8 +3202,18 @@ const confirmDeleteCliTool = async () => {
 }
 
 .blacklist-icon {
-  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+}
+
+.blacklist-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .blacklist-text {
@@ -3428,7 +3466,19 @@ const confirmDeleteCliTool = async () => {
 }
 
 .banner-icon {
-  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.banner-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .banner-text {

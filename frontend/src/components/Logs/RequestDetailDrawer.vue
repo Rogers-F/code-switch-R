@@ -19,7 +19,25 @@
           <div class="drawer-body">
             <!-- 无数据提示 -->
             <div v-if="!detail" class="drawer-empty">
-              <div class="empty-icon">📭</div>
+              <div class="empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M22 12h-6l-2 3h-4l-2-3H2"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M5.45 5.11L2 12v7a2 2 0 002 2h16a2 2 0 002-2v-7l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </div>
               <p class="empty-title">{{ t('components.logs.detail.notFound') }}</p>
               <p class="empty-hint">{{ t('components.logs.detail.notFoundHint') }}</p>
             </div>
@@ -28,7 +46,25 @@
               <!-- 基本信息卡片 -->
               <section class="detail-section">
                 <div class="section-header" @click="toggleSection('basic')">
-                  <span class="section-icon">📋</span>
+                  <span class="section-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.8" />
+                      <path
+                        d="M12 16v-4"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                      />
+                      <path
+                        d="M12 8h.01"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.4"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </span>
                   <h3 class="section-title">{{ t('components.logs.detail.basicInfo') }}</h3>
                   <span class="section-toggle" :class="{ expanded: sections.basic }">▾</span>
                 </div>
@@ -65,7 +101,24 @@
               <!-- 请求头 -->
               <section class="detail-section">
                 <div class="section-header" @click="toggleSection('headers')">
-                  <span class="section-icon">🔑</span>
+                  <span class="section-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M15 7a5 5 0 11-9.9 1.2A5 5 0 0115 7z"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                      />
+                      <path
+                        d="M10 11l9 9m-3-3h-3v3h-3v-3H7v-3h3l2-2"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </span>
                   <h3 class="section-title">{{ t('components.logs.detail.headers') }}</h3>
                   <span class="section-toggle" :class="{ expanded: sections.headers }">▾</span>
                 </div>
@@ -85,7 +138,40 @@
               <!-- 响应头 -->
               <section class="detail-section">
                 <div class="section-header" @click="toggleSection('responseHeaders')">
-                  <span class="section-icon">📨</span>
+                  <span class="section-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M22 12h-6l-2 3h-4l-2-3H2"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M5.45 5.11L2 12v7a2 2 0 002 2h16a2 2 0 002-2v-7l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M12 8v6"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                      />
+                      <path
+                        d="M9 11l3 3 3-3"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </span>
                   <h3 class="section-title">{{ t('components.logs.detail.responseHeaders') }}</h3>
                   <span class="section-toggle" :class="{ expanded: sections.responseHeaders }">▾</span>
                 </div>
@@ -105,19 +191,98 @@
               <!-- 请求体 -->
               <section class="detail-section">
                 <div class="section-header" @click="toggleSection('request')">
-                  <span class="section-icon">📤</span>
+                  <span class="section-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M17 8l-5-5-5 5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M12 3v12"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </span>
                   <h3 class="section-title">
                     {{ t('components.logs.detail.requestBody') }}
                     <span class="size-badge">{{ formatSize(detail.request_size) }}</span>
                   </h3>
                   <div class="section-actions">
-                    <button class="action-btn-small" @click.stop="copyContent(detail.request_body)"
-                      :title="t('components.logs.detail.copy')">
-                      📋
+                    <button
+                      class="action-btn-small"
+                      type="button"
+                      @click.stop="copyContent(detail.request_body)"
+                      :title="t('components.logs.detail.copy')"
+                      :aria-label="t('components.logs.detail.copy')"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2" />
+                        <path
+                          d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
                     </button>
-                    <button class="action-btn-small" @click.stop="toggleFormat('request')"
-                      :title="t('components.logs.detail.format')">
-                      {{ formatModes.request ? '{ }' : '⟨/⟩' }}
+                    <button
+                      class="action-btn-small"
+                      type="button"
+                      @click.stop="toggleFormat('request')"
+                      :title="t('components.logs.detail.format')"
+                      :aria-label="t('components.logs.detail.format')"
+                    >
+                      <svg v-if="formatModes.request" viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M10 6c-2 1-3 2.5-3 6s1 5 3 6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                        />
+                        <path
+                          d="M14 6c2 1 3 2.5 3 6s-1 5-3 6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                      <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M16 18l6-6-6-6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M8 6l-6 6 6 6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
                     </button>
                   </div>
                   <span class="section-toggle" :class="{ expanded: sections.request }">▾</span>
@@ -126,7 +291,19 @@
                   <pre class="code-block"
                     :class="{ truncated: detail.truncated }"><code>{{ formatJson(detail.request_body, formatModes.request) }}</code></pre>
                   <div v-if="detail.truncated && detail.request_size > 307200" class="truncated-notice">
-                    ⚠️ {{ t('components.logs.detail.truncated', { size: formatSize(detail.request_size) }) }}
+                    <span class="truncated-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span>{{ t('components.logs.detail.truncated', { size: formatSize(detail.request_size) }) }}</span>
                   </div>
                 </div>
               </section>
@@ -134,19 +311,98 @@
               <!-- 响应体 -->
               <section class="detail-section">
                 <div class="section-header" @click="toggleSection('response')">
-                  <span class="section-icon">📥</span>
+                  <span class="section-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M7 10l5 5 5-5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M12 15V3"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </span>
                   <h3 class="section-title">
                     {{ t('components.logs.detail.responseBody') }}
                     <span class="size-badge">{{ formatSize(detail.response_size) }}</span>
                   </h3>
                   <div class="section-actions">
-                    <button class="action-btn-small" @click.stop="copyContent(detail.response_body)"
-                      :title="t('components.logs.detail.copy')">
-                      📋
+                    <button
+                      class="action-btn-small"
+                      type="button"
+                      @click.stop="copyContent(detail.response_body)"
+                      :title="t('components.logs.detail.copy')"
+                      :aria-label="t('components.logs.detail.copy')"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2" />
+                        <path
+                          d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
                     </button>
-                    <button class="action-btn-small" @click.stop="toggleFormat('response')"
-                      :title="t('components.logs.detail.format')">
-                      {{ formatModes.response ? '{ }' : '⟨/⟩' }}
+                    <button
+                      class="action-btn-small"
+                      type="button"
+                      @click.stop="toggleFormat('response')"
+                      :title="t('components.logs.detail.format')"
+                      :aria-label="t('components.logs.detail.format')"
+                    >
+                      <svg v-if="formatModes.response" viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M10 6c-2 1-3 2.5-3 6s1 5 3 6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                        />
+                        <path
+                          d="M14 6c2 1 3 2.5 3 6s-1 5-3 6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                      <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M16 18l6-6-6-6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M8 6l-6 6 6 6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
                     </button>
                   </div>
                   <span class="section-toggle" :class="{ expanded: sections.response }">▾</span>
@@ -155,7 +411,19 @@
                   <pre class="code-block response-block"
                     :class="{ truncated: detail.truncated }"><code>{{ formatJson(detail.response_body, formatModes.response) }}</code></pre>
                   <div v-if="detail.truncated && detail.response_size > 307200" class="truncated-notice">
-                    ⚠️ {{ t('components.logs.detail.truncated', { size: formatSize(detail.response_size) }) }}
+                    <span class="truncated-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span>{{ t('components.logs.detail.truncated', { size: formatSize(detail.response_size) }) }}</span>
                   </div>
                 </div>
               </section>
@@ -163,14 +431,51 @@
               <!-- URL -->
               <section class="detail-section">
                 <div class="section-header" @click="toggleSection('url')">
-                  <span class="section-icon">🔗</span>
+                  <span class="section-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M10 13a5 5 0 007.07 0l1.41-1.41a5 5 0 00-7.07-7.07L10 5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M14 11a5 5 0 00-7.07 0L5.52 12.4a5 5 0 007.07 7.07L14 19"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </span>
                   <h3 class="section-title">{{ t('components.logs.detail.requestUrl') }}</h3>
                   <span class="section-toggle" :class="{ expanded: sections.url }">▾</span>
                 </div>
                 <div v-show="sections.url" class="section-content">
                   <div class="url-display">
                     <code>{{ detail.request_url }}</code>
-                    <button class="action-btn-small" @click="copyContent(detail.request_url)">📋</button>
+                    <button
+                      class="action-btn-small"
+                      type="button"
+                      @click="copyContent(detail.request_url)"
+                      :title="t('components.logs.detail.copy')"
+                      :aria-label="t('components.logs.detail.copy')"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2" />
+                        <path
+                          d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </button>
                   </div>
                 </div>
               </section>
@@ -428,9 +733,20 @@ html.dark .drawer-close:hover {
 }
 
 .empty-icon {
-  font-size: 3rem;
+  width: 56px;
+  height: 56px;
   margin-bottom: 16px;
   opacity: 0.6;
+  color: var(--mac-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-icon svg {
+  width: 56px;
+  height: 56px;
+  display: block;
 }
 
 .empty-title {
@@ -475,7 +791,19 @@ html.dark .section-header:hover {
 }
 
 .section-icon {
-  font-size: 1rem;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mac-text-secondary);
+  flex-shrink: 0;
+}
+
+.section-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .section-title {
@@ -511,11 +839,21 @@ html.dark .section-header:hover {
   background: rgba(15, 23, 42, 0.06);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s ease;
+}
+
+.action-btn-small svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  color: var(--mac-text-secondary);
+}
+
+.action-btn-small:hover svg {
+  color: var(--mac-text);
 }
 
 .action-btn-small:hover {
@@ -679,11 +1017,29 @@ html.dark .code-block {
   font-size: 0.8rem;
   border-bottom-left-radius: 8px;
   border-bottom-right-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 html.dark .truncated-notice {
   background: rgba(251, 191, 36, 0.15);
   color: #fbbf24;
+}
+
+.truncated-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.truncated-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 /* URL 显示 */

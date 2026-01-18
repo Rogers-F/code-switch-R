@@ -288,9 +288,13 @@
 
         <ListItem :label="$t('components.general.label.lastCheck')">
           <span class="info-text">{{ formatLastCheckTime(updateState?.last_check_time) }}</span>
-          <span v-if="updateState && updateState.consecutive_failures > 0" class="warning-badge">
-            ⚠️ {{ $t('components.general.update.checkFailed', { count: updateState.consecutive_failures }) }}
-          </span>
+          <Badge
+            v-if="updateState && updateState.consecutive_failures > 0"
+            variant="warning"
+            size="sm"
+          >
+            {{ $t('components.general.update.checkFailed', { count: updateState.consecutive_failures }) }}
+          </Badge>
         </ListItem>
 
         <ListItem :label="$t('components.general.label.currentVersion')">
@@ -299,7 +303,10 @@
 
         <ListItem v-if="updateState?.latest_known_version && updateState.latest_known_version !== appVersion"
           :label="$t('components.general.label.latestVersion')">
-          <span class="version-text highlight">{{ updateState.latest_known_version }} 🆕</span>
+          <span class="version-text highlight">
+            {{ updateState.latest_known_version }}
+          </span>
+          <Badge variant="info" size="sm">NEW</Badge>
         </ListItem>
 
         <ListItem :label="$t('components.general.label.checkNow')">
@@ -327,6 +334,7 @@ import BaseButton from '../common/BaseButton.vue'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
+import Badge from '../ui/Badge.vue'
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
 import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
 import { fetchCurrentVersion } from '../../services/version'
@@ -335,6 +343,7 @@ import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from
 import { getDefaultExportPath, exportConfig as exportAppConfig, importConfig as importAppConfig } from '../../services/configBackup'
 import { useI18n } from 'vue-i18n'
 import { extractErrorMessage } from '../../utils/error'
+import { showToast } from '../../utils/toast'
 
 const { t } = useI18n()
 
@@ -507,7 +516,7 @@ const checkUpdateManually = async () => {
     await loadUpdateState()
 
     if (!info.available) {
-      alert('已是最新版本')
+      showToast('已是最新版本', 'success')
     } else {
       // 发现新版本，提示用户并开始下载
       const confirmed = confirm(`发现新版本 ${info.version}，是否立即下载？`)
@@ -525,7 +534,7 @@ const checkUpdateManually = async () => {
           }
         } catch (downloadError) {
           console.error('download failed', downloadError)
-          alert('下载失败，请稍后重试')
+          showToast('下载失败，请稍后重试', 'error')
         } finally {
           downloading.value = false
         }
@@ -533,7 +542,7 @@ const checkUpdateManually = async () => {
     }
   } catch (error) {
     console.error('check update failed', error)
-    alert('检查更新失败，请检查网络连接')
+    showToast('检查更新失败，请检查网络连接', 'error')
   } finally {
     checking.value = false
   }
@@ -552,7 +561,7 @@ const downloadAndInstall = async () => {
     }
   } catch (error) {
     console.error('download failed', error)
-    alert('下载失败，请稍后重试')
+    showToast('下载失败，请稍后重试', 'error')
   } finally {
     downloading.value = false
   }
@@ -566,7 +575,7 @@ const installAndRestart = async () => {
       await restartApp()
     } catch (error) {
       console.error('restart failed', error)
-      alert('重启失败，请手动重启应用')
+      showToast('重启失败，请手动重启应用', 'error')
     }
   }
 }
@@ -622,10 +631,10 @@ const saveBlacklistSettings = async () => {
   blacklistSaving.value = true
   try {
     await updateBlacklistSettings(blacklistThreshold.value, blacklistDuration.value)
-    alert('拉黑配置已保存')
+    showToast('拉黑配置已保存', 'success')
   } catch (error) {
     console.error('failed to save blacklist settings', error)
-    alert('保存失败：' + (error as Error).message)
+    showToast('保存失败：' + (error as Error).message, 'error')
   } finally {
     blacklistSaving.value = false
   }
@@ -641,7 +650,7 @@ const toggleBlacklist = async () => {
     console.error('failed to toggle blacklist', error)
     // 回滚状态
     blacklistEnabled.value = !blacklistEnabled.value
-    alert('切换失败：' + (error as Error).message)
+    showToast('切换失败：' + (error as Error).message, 'error')
   } finally {
     blacklistSaving.value = false
   }
@@ -657,7 +666,7 @@ const toggleLevelBlacklist = async () => {
     console.error('failed to toggle level blacklist', error)
     // 回滚状态
     levelBlacklistEnabled.value = !levelBlacklistEnabled.value
-    alert('切换失败：' + (error as Error).message)
+    showToast('切换失败：' + (error as Error).message, 'error')
   } finally {
     blacklistSaving.value = false
   }
@@ -692,21 +701,21 @@ const handleImport = async () => {
       importPath.value = result.status.config_path
     }
     if (!result.status.config_exists) {
-      alert(t('components.general.import.fileNotFound'))
+      showToast(t('components.general.import.fileNotFound'), 'error')
       return
     }
     const imported = result.imported_providers + result.imported_mcp
     if (imported > 0) {
-      alert(t('components.general.import.success', {
+      showToast(t('components.general.import.success', {
         providers: result.imported_providers,
         mcp: result.imported_mcp
-      }))
+      }), 'success')
     } else {
-      alert(t('components.general.import.nothingToImport'))
+      showToast(t('components.general.import.nothingToImport'), 'warning')
     }
   } catch (error) {
     console.error('import failed', error)
-    alert(t('components.general.import.failed') + ': ' + (error as Error).message)
+    showToast(t('components.general.import.failed') + ': ' + (error as Error).message, 'error')
   } finally {
     importing.value = false
   }
@@ -728,10 +737,10 @@ const handleExportBackup = async () => {
       include_secrets: backupIncludeSecrets.value,
       include_database: backupIncludeDatabase.value
     })
-    alert(t('components.general.backup.exportSuccess', { count: result.file_count, path: result.path }))
+    showToast(t('components.general.backup.exportSuccess', { count: result.file_count, path: result.path }), 'success')
   } catch (error) {
     console.error('export config failed', error)
-    alert(t('components.general.backup.exportFailed') + ': ' + extractErrorMessage(error))
+    showToast(t('components.general.backup.exportFailed') + ': ' + extractErrorMessage(error), 'error')
   } finally {
     exportingBackup.value = false
   }
@@ -749,15 +758,16 @@ const handleImportBackup = async () => {
       preserve_existing_secrets: backupPreserveSecrets.value
     })
 
-    let message = t('components.general.backup.importSuccess', {
+    showToast(t('components.general.backup.importSuccess', {
       imported: result.imported_files,
       skipped: result.skipped_files,
       backups: result.backups_created
-    })
+    }), 'success')
+
     if (result.warnings && result.warnings.length > 0) {
-      message += '\n\n' + t('components.general.backup.importWarnings', { warnings: result.warnings.join('\n') })
+      const sampleWarnings = result.warnings.slice(0, 3).join('\n') + (result.warnings.length > 3 ? '\n…' : '')
+      showToast(t('components.general.backup.importWarnings', { warnings: sampleWarnings }), 'warning')
     }
-    alert(message)
 
     // 刷新当前页面展示的配置
     await loadAppSettings()
@@ -765,7 +775,7 @@ const handleImportBackup = async () => {
     await loadImportStatus()
   } catch (error) {
     console.error('import config failed', error)
-    alert(t('components.general.backup.importFailed') + ': ' + extractErrorMessage(error))
+    showToast(t('components.general.backup.importFailed') + ': ' + extractErrorMessage(error), 'error')
   } finally {
     importingBackup.value = false
   }

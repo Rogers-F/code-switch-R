@@ -1,63 +1,57 @@
 <template>
   <PageLayout :title="t('sidebar.console')" :sticky="true">
-    <div class="logs-page">
-      <div class="logs-header">
-        <div>
-          <h2 class="logs-title">{{ t('sidebar.console') }}</h2>
-          <p class="logs-subtitle">{{ t('components.console.subtitle') }}</p>
-        </div>
-        <div class="logs-actions">
-          <Button variant="outline" size="sm" @click="handleCopy">
-            <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <template #actions>
+      <Button variant="outline" size="sm" type="button" @click="handleCopy">
+        <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
             {{ t('components.console.actions.copy') }}
-          </Button>
-          <Button variant="outline" size="sm" @click="handleOpenFolder">
-            <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      </Button>
+      <Button variant="outline" size="sm" type="button" @click="handleOpenFolder">
+        <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2z"></path>
             </svg>
             {{ t('components.console.actions.openFolder') }}
-          </Button>
-          <Button variant="destructive" size="sm" @click="handleClear">
-            <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      </Button>
+      <Button variant="destructive" size="sm" type="button" @click="handleClear">
+        <svg class="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M9 3h6m-7 4h8m-6 0v11m4-11v11M5 7h14l-.867 12.138A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.862L5 7z" />
             </svg>
             {{ t('components.console.actions.clear') }}
-          </Button>
+      </Button>
+    </template>
+
+    <p class="page-lead">{{ t('components.console.subtitle') }}</p>
+
+    <div class="terminal-container">
+      <div class="terminal-header">
+        <div class="terminal-buttons">
+          <div class="terminal-button terminal-button-red"></div>
+          <div class="terminal-button terminal-button-yellow"></div>
+          <div class="terminal-button terminal-button-green"></div>
+        </div>
+        <div class="terminal-title">{{ t('components.console.filename') }}</div>
+        <div class="terminal-auto-scroll" @click="toggleAutoScroll">
+          <span class="terminal-auto-scroll-text">{{ t('components.console.actions.autoScroll') }}</span>
+          <div class="terminal-auto-scroll-indicator" :class="{ active: autoScroll }" />
         </div>
       </div>
 
-      <div class="terminal-container">
-        <div class="terminal-header">
-          <div class="terminal-buttons">
-            <div class="terminal-button terminal-button-red"></div>
-            <div class="terminal-button terminal-button-yellow"></div>
-            <div class="terminal-button terminal-button-green"></div>
+      <ScrollArea ref="scrollAreaRef" height="calc(100vh - 240px)">
+        <div class="terminal-content">
+          <div v-if="logs.length === 0" class="terminal-empty">
+            <p>{{ t('components.console.empty') }}</p>
           </div>
-          <div class="terminal-title">{{ t('components.console.filename') }}</div>
-          <div class="terminal-auto-scroll" @click="toggleAutoScroll">
-            <span class="terminal-auto-scroll-text">{{ t('components.console.actions.autoScroll') }}</span>
-            <div class="terminal-auto-scroll-indicator" :class="{ active: autoScroll }" />
+
+          <div v-for="(log, index) in logs" :key="index" class="log-line">
+            <span class="log-timestamp">{{ formatTime(log.timestamp) }}</span>
+            <span class="log-level" :class="getLevelClass(log.level)">{{ log.level }}</span>
+            <span class="log-message">{{ log.message }}</span>
           </div>
         </div>
-
-        <ScrollArea ref="scrollAreaRef" height="calc(100vh - 280px)">
-          <div class="terminal-content">
-            <div v-if="logs.length === 0" class="terminal-empty">
-              <p>{{ t('components.console.empty') }}</p>
-            </div>
-
-            <div v-for="(log, index) in logs" :key="index" class="log-line">
-              <span class="log-timestamp">{{ formatTime(log.timestamp) }}</span>
-              <span class="log-level" :class="getLevelClass(log.level)">{{ log.level }}</span>
-              <span class="log-message">{{ log.message }}</span>
-            </div>
-          </div>
-        </ScrollArea>
+      </ScrollArea>
       </div>
-    </div>
   </PageLayout>
 </template>
 
@@ -68,6 +62,7 @@ import { Call } from '@wailsio/runtime'
 import PageLayout from '../common/PageLayout.vue'
 import Button from '../ui/Button.vue'
 import ScrollArea from '../ui/ScrollArea.vue'
+import { showToast } from '../../utils/toast'
 import { GetLogs, ClearLogs } from '../../../bindings/codeswitch/services/consoleservice'
 import type { ConsoleLog } from '../../../bindings/codeswitch/services/models'
 
@@ -116,10 +111,15 @@ const handleClear = async () => {
   }
 }
 
-const handleCopy = () => {
+const handleCopy = async () => {
   const text = logs.value.map((l) => `[${formatTime(l.timestamp)}] [${l.level}] ${l.message}`).join('\n')
-  navigator.clipboard.writeText(text)
-  alert(t('components.logs.detail.copied', 'Copied'))
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast(t('components.logs.detail.copied', 'Copied'), 'success')
+  } catch (error) {
+    console.error('Failed to copy console logs:', error)
+    showToast(t('components.logs.detail.copyFailed', 'Copy failed'), 'error')
+  }
 }
 
 const handleOpenFolder = async () => {
@@ -127,7 +127,7 @@ const handleOpenFolder = async () => {
     await Call.ByName('codeswitch/services.ConsoleService.OpenLogFolder')
   } catch (error) {
     console.error('Failed to open log folder:', error)
-    alert(t('components.console.openFolderFailed', 'Failed to open log folder'))
+    showToast(t('components.console.openFolderFailed', 'Failed to open log folder'), 'error')
   }
 }
 
@@ -199,36 +199,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.logs-page {
-  padding: 1.5rem;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.logs-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 1.5rem;
-}
-
-.logs-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-
-.logs-subtitle {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.logs-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
 .terminal-container {
   background: #09090b;
   border-radius: 0.75rem;

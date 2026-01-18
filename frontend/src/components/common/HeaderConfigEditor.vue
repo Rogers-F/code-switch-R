@@ -155,7 +155,19 @@
         
         <!-- 认证头警告 -->
         <p class="auth-warning">
-          ⚠️ {{ $t('components.provider.headerConfig.overrideHeaders.authWarning') }}
+          <span class="auth-warning-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+          <span>{{ $t('components.provider.headerConfig.overrideHeaders.authWarning') }}</span>
         </p>
       </div>
 
@@ -588,6 +600,25 @@ const removeStripHeader = (index: number) => {
   border-radius: 4px;
   font-size: 0.75rem;
   color: #d97706;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.auth-warning-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.auth-warning-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .help-text {

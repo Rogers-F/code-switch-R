@@ -22,12 +22,8 @@ const orientationClass = computed(() => {
 
 <style scoped>
 .separator {
-  background-color: rgb(229 231 235);
+  background-color: var(--mac-divider);
   flex-shrink: 0;
-}
-
-:root.dark .separator {
-  background-color: rgb(55 65 81);
 }
 
 .separator-horizontal {

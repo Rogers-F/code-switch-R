@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { Browser } from '@wailsio/runtime'
 import { fetchCurrentVersion } from '../services/version'
 import { getUpdateState, type UpdateState } from '../services/update'
+import Badge from './ui/Badge.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -353,7 +354,7 @@ const navigate = (path: string) => {
             </svg>
 
             <span class="nav-label" v-if="!isCollapsed">{{ t(item.labelKey) }}</span>
-            <span v-if="shouldShowNew(item) && !isCollapsed" class="new-badge">NEW</span>
+            <Badge v-if="shouldShowNew(item) && !isCollapsed" variant="success" size="sm">NEW</Badge>
           </button>
         </div>
       </div>
@@ -583,22 +584,6 @@ html.dark .nav-item:hover {
 
 .nav-label {
   flex: 1;
-}
-
-.new-badge {
-  font-size: 0.6rem;
-  font-weight: 700;
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.nav-item.active .new-badge {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
 }
 
 .sidebar-footer {

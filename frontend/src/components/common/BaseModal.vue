@@ -15,7 +15,22 @@
           <DialogPanel :class="['modal', variantClass]">
             <header class="modal-header">
               <DialogTitle class="modal-title">{{ title }}</DialogTitle>
-              <button class="ghost-icon" aria-label="Close" @click="$emit('close')">✕</button>
+              <button
+                class="ghost-icon"
+                type="button"
+                aria-label="Close"
+                @click="$emit('close')"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M6 6l12 12M6 18L18 6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
             </header>
             <div class="modal-body modal-scrollable">
               <slot />

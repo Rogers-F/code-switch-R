@@ -901,7 +901,7 @@
           "noPlatformSelected": "请至少勾选一个平台（Claude Code 或 Codex）"
         },
         "warnings": {
-          "savedWithPlaceholders": "✅ 配置已保存，但因包含占位符（{vars}），未同步到 Claude/Codex。请填写占位符后重新保存。"
+          "savedWithPlaceholders": "配置已保存，但因包含占位符（{vars}），未同步到 Claude/Codex。请填写占位符后重新保存。"
         },
         "deleteTitle": "删除 MCP 服务器",
         "deleteMessage": "确认删除 {name} 吗？操作不可撤销"
@@ -1038,6 +1038,7 @@
     },
     "themesetting": {
       "select": {
+        "opt_system": "跟随系统",
         "opt_light": "亮色模式",
         "opt_dark": "暗色模式"
       }

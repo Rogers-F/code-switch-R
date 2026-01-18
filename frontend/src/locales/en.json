@@ -900,7 +900,7 @@
           "noPlatformSelected": "Please select at least one platform (Claude Code or Codex)"
         },
         "warnings": {
-          "savedWithPlaceholders": "✅ Config saved, but not synced to Claude/Codex due to placeholders ({vars}). Please fill placeholders and save again."
+          "savedWithPlaceholders": "Config saved, but not synced to Claude/Codex due to placeholders ({vars}). Please fill placeholders and save again."
         },
         "deleteTitle": "Delete MCP server",
         "deleteMessage": "Are you sure you want to delete {name}? This action cannot be undone."
@@ -1037,6 +1037,7 @@
     },
     "themesetting": {
       "select": {
+        "opt_system": "System",
         "opt_dark": "Dark Mode",
         "opt_light": "Bright Mode"
       }

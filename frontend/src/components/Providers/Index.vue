@@ -1,65 +1,96 @@
 <template>
   <PageLayout :title="t('sidebar.providers')" :sticky="true">
-    <div class="providers-page">
-      <div class="page-header">
-        <div>
-          <h2 class="page-title">{{ t('sidebar.providers') }}</h2>
-          <p class="page-subtitle">{{ t('providers.subtitle') }}</p>
+    <p class="page-lead">{{ t('providers.subtitle') }}</p>
+
+    <div class="providers-grid">
+      <Card v-for="provider in providers" :key="provider.id" class="provider-card" variant="outline">
+        <div class="provider-header">
+          <div class="provider-icon" :class="`provider-icon--${provider.platform}`">
+            <svg v-if="provider.platform === 'claude'" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 2l1.2 3.7c.2.6.7 1 1.3 1.2L18 8l-3.5 1.1c-.6.2-1.1.7-1.3 1.3L12 14l-1.2-3.6c-.2-.6-.7-1.1-1.3-1.3L6 8l3.5-1.1c.6-.2 1.1-.7 1.3-1.3L12 2z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M5 14l.8 2.3c.2.6.6 1 1.2 1.2L9 18l-2 .6c-.6.2-1 .6-1.2 1.2L5 22l-.6-2.2c-.2-.6-.6-1-1.2-1.2L1 18l2.2-.7c.6-.2 1-.6 1.2-1.2L5 14z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+                opacity="0.75"
+              />
+            </svg>
+            <svg v-else-if="provider.platform === 'codex'" viewBox="0 0 24 24" aria-hidden="true">
+              <polyline points="4 17 10 11 4 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <line x1="12" y1="19" x2="20" y2="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <svg v-else-if="provider.platform === 'gemini'" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 2l7 10-7 10L5 12 12 2z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M9 12l3-4 3 4-3 4-3-4z"
+                fill="currentColor"
+                opacity="0.4"
+              />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8" />
+              <path d="M12 7v5l3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="provider-info">
+            <h3 class="provider-name">{{ provider.name }}</h3>
+            <p class="provider-platform">{{ provider.platform }}</p>
+          </div>
+          <Badge :variant="provider.enabled ? 'success' : 'default'">
+            {{ provider.enabled ? t('providers.status.enabled', 'Enabled') : t('providers.status.disabled', 'Disabled') }}
+          </Badge>
         </div>
-      </div>
 
-      <div class="providers-grid">
-        <Card v-for="provider in providers" :key="provider.id" class="provider-card" variant="outline">
-          <div class="provider-header">
-            <div class="provider-icon" :class="`provider-icon--${provider.platform}`">
-              {{ provider.icon }}
-            </div>
-            <div class="provider-info">
-              <h3 class="provider-name">{{ provider.name }}</h3>
-              <p class="provider-platform">{{ provider.platform }}</p>
-            </div>
-            <Badge :variant="provider.enabled ? 'success' : 'default'">
-              {{ provider.enabled ? t('providers.status.enabled', 'Enabled') : t('providers.status.disabled', 'Disabled') }}
-            </Badge>
+        <Separator class="my-3" />
+
+        <div class="provider-details">
+          <div class="detail-row">
+            <span class="detail-label">{{ t('providers.field.endpoint', 'Endpoint') }}</span>
+            <span class="detail-value">{{ provider.endpoint }}</span>
           </div>
-
-          <Separator class="my-3" />
-
-          <div class="provider-details">
-            <div class="detail-row">
-              <span class="detail-label">{{ t('providers.field.endpoint', 'Endpoint') }}</span>
-              <span class="detail-value">{{ provider.endpoint }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">{{ t('providers.field.model', 'Model') }}</span>
-              <span class="detail-value">{{ provider.model || t('providers.default', 'Default') }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">{{ t('providers.field.priority', 'Priority') }}</span>
-              <span class="detail-value">Level {{ provider.priority }}</span>
-            </div>
+          <div class="detail-row">
+            <span class="detail-label">{{ t('providers.field.model', 'Model') }}</span>
+            <span class="detail-value">{{ provider.model || t('providers.default', 'Default') }}</span>
           </div>
-
-          <div class="provider-actions">
-            <Button variant="outline" size="sm" class="flex-1">
-              {{ t('providers.actions.edit', 'Edit') }}
-            </Button>
-            <Button variant="ghost" size="sm">
-              {{ t('providers.actions.test', 'Test') }}
-            </Button>
+          <div class="detail-row">
+            <span class="detail-label">{{ t('providers.field.priority', 'Priority') }}</span>
+            <span class="detail-value">Level {{ provider.priority }}</span>
           </div>
-        </Card>
-      </div>
+        </div>
 
-      <div v-if="providers.length === 0" class="empty-state">
-        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-          <path d="M2 17l10 5 10-5"></path>
-          <path d="M2 12l10 5 10-5"></path>
-        </svg>
-        <h3>{{ t('providers.empty.title', 'No Providers') }}</h3>
-        <p>{{ t('providers.empty.desc', 'Add your first AI provider to get started') }}</p>
-      </div>
+        <div class="provider-actions">
+          <Button variant="outline" size="sm" class="flex-1">
+            {{ t('providers.actions.edit', 'Edit') }}
+          </Button>
+          <Button variant="ghost" size="sm">
+            {{ t('providers.actions.test', 'Test') }}
+          </Button>
+        </div>
+      </Card>
+    </div>
+
+    <div v-if="providers.length === 0" class="empty-state">
+      <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+        <path d="M2 17l10 5 10-5"></path>
+        <path d="M2 12l10 5 10-5"></path>
+      </svg>
+      <h3>{{ t('providers.empty.title', 'No Providers') }}</h3>
+      <p>{{ t('providers.empty.desc', 'Add your first AI provider to get started') }}</p>
     </div>
   </PageLayout>
 </template>
@@ -79,7 +110,6 @@ interface Provider {
   id: string
   name: string
   platform: string
-  icon: string
   endpoint: string
   model: string
   priority: number
@@ -91,7 +121,6 @@ const providers = ref<Provider[]>([
     id: '1',
     name: 'Claude (Anthropic)',
     platform: 'claude',
-    icon: '🤖',
     endpoint: 'https://api.anthropic.com',
     model: 'claude-sonnet-4',
     priority: 1,
@@ -101,7 +130,6 @@ const providers = ref<Provider[]>([
     id: '2',
     name: 'Codex CLI',
     platform: 'codex',
-    icon: '⚡',
     endpoint: 'Local MCP',
     model: 'gpt-5-codex',
     priority: 2,
@@ -111,7 +139,6 @@ const providers = ref<Provider[]>([
     id: '3',
     name: 'Gemini Pro',
     platform: 'gemini',
-    icon: '💎',
     endpoint: 'https://generativelanguage.googleapis.com',
     model: 'gemini-2.0-flash-exp',
     priority: 3,
@@ -121,32 +148,6 @@ const providers = ref<Provider[]>([
 </script>
 
 <style scoped>
-.providers-page {
-  padding: 1.5rem;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-}
-
-.page-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-
-.page-subtitle {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-  margin: 0;
-}
-
 .providers-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -176,24 +177,32 @@ const providers = ref<Provider[]>([
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
+}
+
+.provider-icon svg {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 .provider-icon--claude {
   background: linear-gradient(135deg, #d97706 0%, #ea580c 100%);
   border-color: #ea580c;
+  color: white;
 }
 
 .provider-icon--codex {
   background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
   border-color: #6366f1;
+  color: white;
 }
 
 .provider-icon--gemini {
   background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
   border-color: #3b82f6;
+  color: white;
 }
 
 .provider-info {

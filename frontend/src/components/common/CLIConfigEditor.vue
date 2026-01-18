@@ -51,7 +51,24 @@
         <!-- 锁定字段 -->
         <div class="cli-section">
           <div class="cli-section-header">
-            <span class="lock-icon">🔒</span>
+            <span class="lock-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M7 11V8a5 5 0 0110 0v3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M7 11h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
             <span>{{ t('components.cliConfig.lockedFields') }}</span>
           </div>
           <div class="cli-fields">
@@ -75,7 +92,24 @@
         <!-- 可编辑字段 -->
         <div class="cli-section">
           <div class="cli-section-header">
-            <span class="edit-icon">✏️</span>
+            <span class="edit-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M12 20h9"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
             <span>{{ t('components.cliConfig.editableFields') }}</span>
           </div>
           <div class="cli-fields">
@@ -124,7 +158,18 @@
         <!-- 自定义字段 -->
         <div class="cli-section">
           <div class="cli-section-header">
-            <span class="custom-icon">🔧</span>
+            <span class="custom-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.3-3.3a6 6 0 11-7.8 7.8l-6.9 6.9a2.1 2.1 0 01-3-3l6.9-6.9a6 6 0 017.5-3.5z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
             <span>{{ t('components.cliConfig.customFields') }}</span>
             <button
               type="button"
@@ -215,7 +260,18 @@
                 fill="none"
               />
             </svg>
-            <span class="preview-icon">👁️</span>
+            <span class="preview-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8" />
+              </svg>
+            </span>
             <span>{{ t('components.cliConfig.previewTitle') }}</span>
             <span class="cli-preview-count">{{ previewFiles.length }}</span>
             <button
@@ -224,8 +280,51 @@
               class="cli-action-btn cli-preview-lock"
               @click.stop="togglePreviewEditable"
             >
-              <span v-if="previewEditable">🔓 {{ t('components.cliConfig.previewEditUnlocked') }}</span>
-              <span v-else>🔒 {{ t('components.cliConfig.previewEditLocked') }}</span>
+              <span v-if="previewEditable" class="cli-lock-state">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M8 11V8a4 4 0 018 0"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M7 11h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M12 14v3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span>{{ t('components.cliConfig.previewEditUnlocked') }}</span>
+              </span>
+              <span v-else class="cli-lock-state">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M7 11V8a5 5 0 0110 0v3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M7 11h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span>{{ t('components.cliConfig.previewEditLocked') }}</span>
+              </span>
             </button>
             <!-- Current 标签页解锁按钮 -->
             <button
@@ -234,8 +333,51 @@
               class="cli-action-btn cli-preview-lock"
               @click.stop="toggleCurrentEditable"
             >
-              <span v-if="currentEditable">🔓 {{ t('components.cliConfig.previewEditUnlocked') }}</span>
-              <span v-else>🔒 {{ t('components.cliConfig.previewEditLocked') }}</span>
+              <span v-if="currentEditable" class="cli-lock-state">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M8 11V8a4 4 0 018 0"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M7 11h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M12 14v3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span>{{ t('components.cliConfig.previewEditUnlocked') }}</span>
+              </span>
+              <span v-else class="cli-lock-state">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M7 11V8a5 5 0 0110 0v3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M7 11h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span>{{ t('components.cliConfig.previewEditLocked') }}</span>
+              </span>
             </button>
           </div>
           <div v-if="previewExpanded" class="cli-preview-tabs-wrapper">
@@ -1531,7 +1673,19 @@ onMounted(() => {
 .lock-icon,
 .edit-icon,
 .custom-icon {
-  font-size: 14px;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+}
+
+.lock-icon svg,
+.edit-icon svg,
+.custom-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .cli-fields {
@@ -1759,7 +1913,23 @@ onMounted(() => {
 }
 
 .preview-icon {
-  font-size: 14px;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.cli-lock-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Tabs 样式 */

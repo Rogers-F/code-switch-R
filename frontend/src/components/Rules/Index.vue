@@ -1,129 +1,121 @@
 <template>
   <PageLayout :title="t('sidebar.rules')" :sticky="true">
-    <div class="rules-page">
-      <!-- Header -->
-      <div class="page-header">
-        <div>
-          <h2 class="page-title">{{ t('sidebar.rules') }}</h2>
-          <p class="page-subtitle">{{ t('rules.subtitle') }}</p>
-        </div>
-        <Button @click="showCreateDialog = true" class="create-button">
-          <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          {{ t('rules.actions.create') }}
-        </Button>
-      </div>
-
-      <!-- Rules List -->
-      <div v-if="rules.length > 0" class="rules-list">
-        <Card v-for="rule in rules" :key="rule.id" class="rule-card" variant="outline">
-          <div class="rule-header">
-            <div class="rule-info">
-              <div class="rule-title-row">
-                <h3 class="rule-name">{{ rule.name }}</h3>
-                <Badge :variant="rule.enabled ? 'success' : 'default'">
-                  {{ rule.enabled ? t('rules.status.enabled') : t('rules.status.disabled') }}
-                </Badge>
-              </div>
-              <p class="rule-route">{{ rule.sourceHost }} → {{ rule.targetProvider }}</p>
-            </div>
-            <div class="rule-actions">
-              <Button variant="ghost" size="sm" @click="toggleRule(rule)">
-                {{ rule.enabled ? t('rules.actions.disable') : t('rules.actions.enable') }}
-              </Button>
-              <Button variant="ghost" size="sm" @click="editRule(rule)">
-                {{ t('rules.actions.edit') }}
-              </Button>
-              <Button variant="ghost" size="sm" @click="deleteRule(rule)">
-                {{ t('rules.actions.delete') }}
-              </Button>
-            </div>
-          </div>
-
-          <Separator class="my-3" />
-
-          <div class="rule-details">
-            <div class="detail-row">
-              <span class="detail-label">{{ t('rules.fields.priority') }}</span>
-              <span class="detail-value">{{ rule.priority }}</span>
-            </div>
-            <div v-if="rule.pathRewrite" class="detail-row">
-              <span class="detail-label">{{ t('rules.fields.pathRewrite') }}</span>
-              <span class="detail-value">{{ rule.pathRewrite }}</span>
-            </div>
-            <div v-if="rule.modelMappings && rule.modelMappings.length > 0" class="detail-row">
-              <span class="detail-label">{{ t('rules.fields.modelMappings') }}</span>
-              <span class="detail-value">{{ rule.modelMappings.length }} {{ t('rules.fields.mappings') }}</span>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <!-- Empty State -->
-      <div v-else class="empty-state">
-        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+    <template #actions>
+      <Button type="button" @click="showCreateDialog = true">
+        <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
         </svg>
-        <h3>{{ t('rules.empty.title') }}</h3>
-        <p>{{ t('rules.empty.desc') }}</p>
-        <Button @click="showCreateDialog = true" class="empty-action">
-          {{ t('rules.actions.create') }}
-        </Button>
-      </div>
+        {{ t('rules.actions.create') }}
+      </Button>
+    </template>
 
-      <!-- Create/Edit Dialog -->
-      <div v-if="showCreateDialog || editingRule" class="dialog-overlay" @click.self="closeDialog">
-        <div class="dialog">
-          <div class="dialog-header">
-            <h3 class="dialog-title">
-              {{ editingRule ? t('rules.dialog.edit') : t('rules.dialog.create') }}
-            </h3>
-            <button class="dialog-close" @click="closeDialog">×</button>
+    <p class="page-lead">{{ t('rules.subtitle') }}</p>
+
+    <!-- Rules List -->
+    <div v-if="rules.length > 0" class="rules-list">
+      <Card v-for="rule in rules" :key="rule.id" class="rule-card" variant="outline">
+        <div class="rule-header">
+          <div class="rule-info">
+            <div class="rule-title-row">
+              <h3 class="rule-name">{{ rule.name }}</h3>
+              <Badge :variant="rule.enabled ? 'success' : 'default'">
+                {{ rule.enabled ? t('rules.status.enabled') : t('rules.status.disabled') }}
+              </Badge>
+            </div>
+            <p class="rule-route">{{ rule.sourceHost }} → {{ rule.targetProvider }}</p>
           </div>
-
-          <div class="dialog-body">
-            <div class="form-group">
-              <label class="form-label">{{ t('rules.fields.name') }}</label>
-              <input v-model="formData.name" type="text" class="form-input" :placeholder="t('rules.placeholders.name')" />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">{{ t('rules.fields.sourceHost') }}</label>
-              <input v-model="formData.sourceHost" type="text" class="form-input" :placeholder="t('rules.placeholders.sourceHost')" />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">{{ t('rules.fields.targetProvider') }}</label>
-              <input v-model="formData.targetProvider" type="text" class="form-input" :placeholder="t('rules.placeholders.targetProvider')" />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">{{ t('rules.fields.priority') }}</label>
-              <input v-model.number="formData.priority" type="number" class="form-input" min="0" max="100" />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">{{ t('rules.fields.pathRewrite') }} ({{ t('rules.optional') }})</label>
-              <input v-model="formData.pathRewrite" type="text" class="form-input" :placeholder="t('rules.placeholders.pathRewrite')" />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label-row">
-                <input v-model="formData.enabled" type="checkbox" class="form-checkbox" />
-                <span>{{ t('rules.fields.enabled') }}</span>
-              </label>
-            </div>
-          </div>
-
-          <div class="dialog-footer">
-            <Button variant="ghost" @click="closeDialog">{{ t('rules.actions.cancel') }}</Button>
-            <Button @click="saveRule">{{ t('rules.actions.save') }}</Button>
+          <div class="rule-actions">
+            <Button variant="ghost" size="sm" type="button" @click="toggleRule(rule)">
+              {{ rule.enabled ? t('rules.actions.disable') : t('rules.actions.enable') }}
+            </Button>
+            <Button variant="ghost" size="sm" type="button" @click="editRule(rule)">
+              {{ t('rules.actions.edit') }}
+            </Button>
+            <Button variant="ghost" size="sm" type="button" @click="deleteRule(rule)">
+              {{ t('rules.actions.delete') }}
+            </Button>
           </div>
         </div>
-      </div>
+
+        <Separator class="my-3" />
+
+        <div class="rule-details">
+          <div class="detail-row">
+            <span class="detail-label">{{ t('rules.fields.priority') }}</span>
+            <span class="detail-value">{{ rule.priority }}</span>
+          </div>
+          <div v-if="rule.pathRewrite" class="detail-row">
+            <span class="detail-label">{{ t('rules.fields.pathRewrite') }}</span>
+            <span class="detail-value">{{ rule.pathRewrite }}</span>
+          </div>
+          <div v-if="rule.modelMappings && rule.modelMappings.length > 0" class="detail-row">
+            <span class="detail-label">{{ t('rules.fields.modelMappings') }}</span>
+            <span class="detail-value">{{ rule.modelMappings.length }} {{ t('rules.fields.mappings') }}</span>
+          </div>
+        </div>
+      </Card>
     </div>
+
+    <!-- Empty State -->
+    <div v-else class="empty-state">
+      <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+      </svg>
+      <h3>{{ t('rules.empty.title') }}</h3>
+      <p>{{ t('rules.empty.desc') }}</p>
+      <Button type="button" @click="showCreateDialog = true" class="empty-action">
+        {{ t('rules.actions.create') }}
+      </Button>
+    </div>
+
+    <BaseModal
+      :open="showCreateDialog || Boolean(editingRule)"
+      :title="editingRule ? t('rules.dialog.edit') : t('rules.dialog.create')"
+      @close="closeDialog"
+    >
+      <form class="vendor-form" @submit.prevent="saveRule">
+        <div class="form-field">
+          <span>{{ t('rules.fields.name') }}</span>
+          <input v-model="formData.name" type="text" class="base-input" :placeholder="t('rules.placeholders.name')" />
+        </div>
+
+        <div class="form-field">
+          <span>{{ t('rules.fields.sourceHost') }}</span>
+          <input v-model="formData.sourceHost" type="text" class="base-input" :placeholder="t('rules.placeholders.sourceHost')" />
+        </div>
+
+        <div class="form-field">
+          <span>{{ t('rules.fields.targetProvider') }}</span>
+          <input v-model="formData.targetProvider" type="text" class="base-input" :placeholder="t('rules.placeholders.targetProvider')" />
+        </div>
+
+        <div class="form-field">
+          <span>{{ t('rules.fields.priority') }}</span>
+          <input v-model.number="formData.priority" type="number" class="base-input" min="0" max="100" />
+        </div>
+
+        <div class="form-field">
+          <span>{{ t('rules.fields.pathRewrite') }} ({{ t('rules.optional') }})</span>
+          <input v-model="formData.pathRewrite" type="text" class="base-input" :placeholder="t('rules.placeholders.pathRewrite')" />
+        </div>
+
+        <div class="form-field">
+          <div class="label-row">
+            <span>{{ t('rules.fields.enabled') }}</span>
+            <label class="mac-switch">
+              <input v-model="formData.enabled" type="checkbox" />
+              <span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <Button variant="ghost" type="button" @click="closeDialog">{{ t('rules.actions.cancel') }}</Button>
+          <Button type="submit">{{ t('rules.actions.save') }}</Button>
+        </div>
+      </form>
+    </BaseModal>
   </PageLayout>
 </template>
 
@@ -131,6 +123,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PageLayout from '../common/PageLayout.vue'
+import BaseModal from '../common/BaseModal.vue'
 import Card from '../ui/Card.vue'
 import Badge from '../ui/Badge.vue'
 import Button from '../ui/Button.vue'
@@ -263,38 +256,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.rules-page {
-  padding: 1.5rem;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-}
-
-.page-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-
-.page-subtitle {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-  margin: 0;
-}
-
-.create-button {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .button-icon {
   width: 16px;
   height: 16px;
@@ -414,119 +375,5 @@ onMounted(() => {
 
 .empty-action {
   margin-top: 0.5rem;
-}
-
-/* Dialog */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 1rem;
-}
-
-.dialog {
-  background: var(--color-surface);
-  border-radius: 12px;
-  width: 100%;
-  max-width: 600px;
-  max-height: 90vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-}
-
-.dialog-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.dialog-title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.dialog-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 1.5rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.dialog-close:hover {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
-}
-
-.dialog-body {
-  padding: 1.5rem;
-  overflow-y: auto;
-}
-
-.form-group {
-  margin-bottom: 1.25rem;
-}
-
-.form-label {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--color-text);
-  margin-bottom: 0.5rem;
-}
-
-.form-label-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.form-input {
-  width: 100%;
-  padding: 0.625rem 0.875rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-background);
-  color: var(--color-text);
-  font-size: 0.875rem;
-  transition: all 0.2s;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.form-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border-top: 1px solid var(--color-border);
 }
 </style>

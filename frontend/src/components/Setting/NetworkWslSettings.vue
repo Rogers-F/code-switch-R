@@ -133,14 +133,14 @@
 
       <!-- Configure Now Button -->
       <div v-if="wslAutoConfig && wslDetected" class="configure-action">
-        <button
-          class="mac-button primary"
+        <BaseButton
+          type="button"
           :disabled="configuring"
           @click="handleConfigureNow"
         >
-          <span v-if="configuring" class="button-spinner"></span>
+          <span v-if="configuring" class="button-spinner" aria-hidden="true"></span>
           <span v-else>{{ t('settings.network.configureNow') }}</span>
-        </button>
+        </BaseButton>
         <p v-if="lastConfigResult" class="config-result" :class="lastConfigResult.success ? 'success' : 'error'">
           {{ lastConfigResult.message }}
         </p>
@@ -155,6 +155,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 import ListItem from './ListRow.vue'
+import BaseButton from '../common/BaseButton.vue'
 import { showToast } from '../../utils/toast'
 
 const { t } = useI18n()
@@ -325,44 +326,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.mac-select {
-  padding: 6px 12px;
-  border: 1px solid var(--mac-border);
-  border-radius: 6px;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  font-size: 13px;
-  min-width: 140px;
-  cursor: pointer;
-  transition: border-color 0.2s;
-}
-
-.mac-select:hover {
-  border-color: var(--mac-border-hover, var(--mac-border));
-}
-
-.mac-select:focus {
-  outline: none;
-  border-color: var(--mac-accent);
-}
-
-.mac-input {
-  padding: 6px 12px;
-  border: 1px solid var(--mac-border);
-  border-radius: 6px;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  font-size: 13px;
-  font-family: monospace;
-  min-width: 160px;
-  transition: border-color 0.2s;
-}
-
-.mac-input:focus {
-  outline: none;
-  border-color: var(--mac-accent);
-}
-
 /* Toggle with hint - 与 General/Index.vue 保持一致 */
 .toggle-with-hint {
   display: flex;
@@ -527,35 +490,6 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.mac-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  min-width: 120px;
-}
-
-.mac-button.primary {
-  background: var(--mac-accent);
-  color: white;
-}
-
-.mac-button.primary:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.mac-button.primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .button-spinner {
   width: 14px;
   height: 14px;
@@ -582,12 +516,6 @@ onMounted(async () => {
 
 .config-result.error {
   color: #ef4444;
-}
-
-/* Dark mode */
-:global(.dark) .mac-select,
-:global(.dark) .mac-input {
-  background: var(--mac-surface-strong);
 }
 
 :global(.dark) .security-warning {

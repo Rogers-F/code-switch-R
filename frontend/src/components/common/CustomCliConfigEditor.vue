@@ -75,7 +75,14 @@
           >
             <span class="tab-label">{{ file.label || file.path }}</span>
             <span class="tab-format">{{ file.format.toUpperCase() }}</span>
-            <span v-if="file.isPrimary" class="tab-primary">★</span>
+            <span v-if="file.isPrimary" class="tab-primary" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M12 17.3l-5.3 2.8 1-5.9-4.3-4.2 6-.9L12 3.7l2.7 5.4 6 .9-4.3 4.2 1 5.9L12 17.3z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
             <span v-if="fileChanges[file.id]" class="tab-changed">●</span>
           </button>
         </div>
@@ -90,7 +97,24 @@
 
           <!-- 锁定字段提示 -->
           <div v-if="lockedFields.length > 0 && file.isPrimary" class="locked-fields-hint">
-            <span class="lock-icon">🔒</span>
+            <span class="lock-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M7 11V8a5 5 0 0110 0v3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M7 11h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
             <span>{{ t('components.cliConfig.lockedFields') }}: {{ lockedFields.join(', ') }}</span>
           </div>
 
@@ -549,8 +573,18 @@ onMounted(() => {
 }
 
 .tab-primary {
-  color: gold;
-  font-size: 12px;
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+}
+
+.tab-primary svg {
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .tab-changed {
@@ -618,7 +652,18 @@ onMounted(() => {
 }
 
 .lock-icon {
-  font-size: 14px;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  color: #f59e0b;
+}
+
+.lock-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .config-textarea {

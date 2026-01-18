@@ -4,25 +4,46 @@
 
 :root {
   color-scheme: light;
+
+  /* ===== shadcn/ui tokens (color-first, Vue/Tailwind v4 friendly) ===== */
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #09090b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #09090b;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #3b82f6;
+
+  --radius: 0.5rem;
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
   --mac-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
     system-ui, sans-serif;
-  --mac-surface: #ffffff;
-  --mac-surface-strong: #f5f5f7;
-  --mac-surface-hover: rgba(15, 23, 42, 0.06);
-  --mac-border: rgba(15, 23, 42, 0.12);
-  --mac-divider: rgba(15, 23, 42, 0.12);
-  --mac-bg: var(--mac-surface-strong);
-  --mac-sidebar: #f2f3f5;
-  --mac-sidebar-border: rgba(15, 23, 42, 0.08);
-  --mac-text: #1d1d1f;
-  --mac-text-secondary: #6e6e73;
-  --mac-accent: #0a84ff;
-  --app-background: linear-gradient(
-    180deg,
-    #f6f7fb 0%,
-    #eef1f7 50%,
-    #e7ebf5 100%
-  );
+  --mac-surface: var(--card);
+  --mac-surface-strong: var(--secondary);
+  --mac-surface-hover: var(--accent);
+  --mac-border: var(--border);
+  --mac-divider: var(--border);
+  --mac-bg: var(--background);
+  --mac-sidebar: var(--background);
+  --mac-sidebar-border: var(--border);
+  --mac-text: var(--foreground);
+  --mac-text-secondary: var(--muted-foreground);
+  --mac-accent: var(--primary);
+  --app-background: var(--background);
   --contrib-surface: #f6f8fa;
   --contrib-text: #0f1116;
   --contrib-muted: rgba(15, 23, 42, 0.6);
@@ -42,26 +63,70 @@
   --page-padding-y: 12px;
   --page-section-title-margin: 12px;
   --spacing-section: 18px;
+
+  /* ===== Compatibility tokens (历史代码兼容，逐步收敛) ===== */
+  --mac-border-hover: color-mix(in srgb, var(--border) 55%, var(--ring) 45%);
+  --mac-text-primary: var(--foreground);
+  --mac-text-tertiary: color-mix(in srgb, var(--muted-foreground) 72%, transparent);
+  --mac-text-warning: #f59e0b;
+  --mac-error: var(--destructive);
+  --mac-error-bg: color-mix(in srgb, var(--destructive) 12%, transparent);
+
+  --accent-primary: var(--primary);
+  --foreground-muted: var(--muted-foreground);
+  --background-secondary: var(--secondary);
+  --background-hover: var(--accent);
+  --error: var(--destructive);
+  --error-bg: var(--mac-error-bg);
+  --link-color: var(--primary);
+
+  --bg-primary: var(--background);
+  --bg-secondary: var(--secondary);
+  --bg-tertiary: color-mix(in srgb, var(--secondary) 82%, var(--background) 18%);
+  --border-color: var(--border);
+  --text-primary: var(--foreground);
+  --text-secondary: var(--muted-foreground);
+
+  --color-accent: var(--ring);
+  --color-primary: var(--primary);
+  --color-background: var(--background);
+  --color-bg-secondary: var(--secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-surface: var(--card);
+  --color-surface-hover: var(--accent);
+  --color-border: var(--border);
+  --color-border-hover: var(--mac-border-hover);
+  --color-text: var(--foreground);
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-success: #22c55e;
+  --color-error: var(--destructive);
+  --color-gray-400: #a1a1aa;
 }
 
 html.dark {
   color-scheme: dark;
-  --mac-surface: #1c1e24;
-  --mac-surface-strong: #21232c;
-  --mac-surface-hover: rgba(255, 255, 255, 0.12);
-  --mac-border: rgba(255, 255, 255, 0.06);
-  --mac-divider: rgba(255, 255, 255, 0.08);
-  --mac-sidebar: #181a20;
-  --mac-sidebar-border: rgba(255, 255, 255, 0.04);
-  --mac-text: #f5f5f7;
-  --mac-text-secondary: #b7bac7;
-  --mac-accent: #0a84ff;
-  --app-background: linear-gradient(
-    180deg,
-    #0f1116 0%,
-    #11131a 45%,
-    #0d0f15 100%
-  );
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #09090b;
+  --card-foreground: #fafafa;
+  --popover: #09090b;
+  --popover-foreground: #fafafa;
+  --primary: #60a5fa;
+  --primary-foreground: #0b1220;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #60a5fa;
+
+  --app-background: var(--background);
   --contrib-surface: #0d1117;
   --contrib-text: #ffffff;
   --contrib-muted: rgba(255, 255, 255, 0.7);
@@ -94,28 +159,62 @@ body {
 }
 
 .base-input,
-.base-textarea {
+.base-textarea,
+.mac-input,
+.mac-textarea {
   width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--mac-border);
-  background: color-mix(in srgb, var(--mac-surface) 50%, transparent);
-  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--input);
+  background: var(--background);
+  padding: 0.5rem 0.75rem;
   font: inherit;
-  color: var(--mac-text);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--foreground);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background 0.15s ease;
+  box-sizing: border-box;
 }
 
 .base-input:focus,
-.base-textarea:focus {
+.base-textarea:focus,
+.mac-input:focus,
+.mac-textarea:focus {
   outline: none;
-  border-color: var(--mac-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 25%, transparent);
-  background: var(--mac-surface);
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--background) 96%, transparent);
 }
 
-.base-textarea {
-  min-height: 110px;
+.base-textarea,
+.mac-textarea {
+  min-height: 96px;
   resize: vertical;
+}
+
+.base-input::placeholder,
+.base-textarea::placeholder,
+.mac-input::placeholder,
+.mac-textarea::placeholder {
+  color: var(--muted-foreground);
+}
+
+.base-input:disabled,
+.base-textarea:disabled,
+.mac-input:disabled,
+.mac-textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.base-input,
+.mac-input {
+  height: 36px;
+}
+
+.mac-input,
+.mac-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .mac-sidebar-subtitle {
@@ -164,11 +263,15 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .mac-panel {
-  background: var(--mac-surface);
-  border-radius: 20px;
-  border: 1px solid var(--mac-border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   overflow: hidden;
+}
+
+.mac-panel-outline {
+  box-shadow: none;
 }
 
 .mac-panel .mac-list-row + .mac-list-row {
@@ -176,49 +279,66 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .mac-section-title {
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: 0.875rem;
+  font-weight: 600;
   margin-bottom: 10px;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
 }
 
 .mac-section-description {
   margin: 0 0 18px;
-  font-size: 0.85rem;
-  color: var(--mac-text-secondary);
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
 }
 
 .mac-select {
   min-width: 150px;
   appearance: none;
-  border-radius: 12px;
-  border: 1px solid var(--mac-border);
-  background: var(--mac-surface-strong)
-    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8" fill="none"><path d="M1 1.5L6 6.5L11 1.5" stroke="%236e6e73" stroke-width="1.2" stroke-linecap="round"/></svg>')
+  border-radius: var(--radius-md);
+  border: 1px solid var(--input);
+  background: var(--background)
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8" fill="none"><path d="M1 1.5L6 6.5L11 1.5" stroke="%23a1a1aa" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>')
     no-repeat right 12px center;
-  padding: 10px 36px 10px 14px;
-  font-size: 0.9rem;
-  color: var(--mac-text);
-  transition: border-color 0.2s ease;
+  padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+  height: 36px;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--foreground);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background 0.15s ease;
+  box-sizing: border-box;
 }
 
 .mac-select:focus {
   outline: none;
-  border-color: var(--mac-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mac-accent) 25%, transparent);
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--background) 96%, transparent);
+}
+
+.mac-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .mac-switch {
+  position: relative;
   width: 44px;
   height: 24px;
   border-radius: 999px;
-  appearance: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
 }
 
 .mac-switch input {
-  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .mac-switch span {
@@ -226,7 +346,7 @@ html.dark .mac-sidebar-item:hover {
   width: 100%;
   height: 100%;
   border-radius: inherit;
-  background: rgba(110, 110, 115, 0.3);
+  background: var(--input);
   position: relative;
   transition: background 0.2s ease;
 }
@@ -234,22 +354,27 @@ html.dark .mac-sidebar-item:hover {
 .mac-switch span::after {
   content: "";
   position: absolute;
-  top: 3px;
-  left: 4px;
-  width: 18px;
-  height: 18px;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  background: var(--background);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   transition: transform 0.2s ease;
 }
 
 .mac-switch input:checked + span {
-  background: var(--mac-accent);
+  background: var(--primary);
 }
 
 .mac-switch input:checked + span::after {
-  transform: translateX(18px);
+  transform: translateX(20px);
+}
+
+.mac-switch input:focus-visible + span {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--background) 96%, transparent);
 }
 
 .mac-switch.sm {
@@ -259,10 +384,10 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .mac-switch.sm span::after {
-  width: 14px;
-  height: 14px;
-  top: 3px;
-  left: 3px;
+  width: 16px;
+  height: 16px;
+  top: 2px;
+  left: 2px;
 }
 
 .mac-switch.sm input:checked + span::after {
@@ -271,27 +396,51 @@ html.dark .mac-sidebar-item:hover {
 
 .mac-toast-container {
   position: fixed;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 16px;
+  right: 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  align-items: flex-end;
   z-index: 9999;
 }
 
 .mac-toast {
   min-width: 240px;
-  padding: 12px 18px;
-  border-radius: 14px;
-  border: 1px solid var(--mac-border);
-  background: var(--mac-surface-strong);
-  color: var(--mac-text);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
   opacity: 0;
   transform: translateY(10px) scale(0.98);
   transition: opacity 0.25s ease, transform 0.25s ease;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.mac-toast-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.mac-toast-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.mac-toast-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .mac-toast-visible {
@@ -305,15 +454,101 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .mac-toast-success {
-  border-color: rgba(10, 132, 255, 0.4);
+  border-left: 3px solid #22c55e;
 }
 
 .mac-toast-error {
-  border-color: rgba(255, 69, 58, 0.5);
+  border-left: 3px solid var(--destructive);
 }
 
 .mac-toast-warning {
-  border-color: rgba(245, 158, 11, 0.5);
+  border-left: 3px solid #f59e0b;
+}
+
+.mac-toast-success .mac-toast-icon {
+  color: #22c55e;
+}
+
+.mac-toast-error .mac-toast-icon {
+  color: var(--destructive);
+}
+
+.mac-toast-warning .mac-toast-icon {
+  color: #f59e0b;
+}
+
+.update-toast-wrap {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 9999;
+  max-width: min(480px, calc(100vw - 32px));
+}
+
+.update-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+}
+
+.update-toast-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.update-toast-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.update-toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.update-toast-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--foreground);
+}
+
+.update-toast-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-toast-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.update-toast-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--primary-foreground) 30%, transparent);
+  border-top-color: var(--primary-foreground);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 @media (max-width: 960px) {
@@ -580,13 +815,13 @@ html.dark .mac-sidebar-item:hover {
 
 .tab-group {
   display: inline-flex;
-  gap: 10px;
+  gap: 2px;
   align-items: center;
   flex-wrap: nowrap;
-  padding: 0;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--muted);
   width: auto;
   max-width: 100%;
   justify-content: flex-start;
@@ -1173,12 +1408,14 @@ html.dark .mac-sidebar-item:hover {
   position: relative;
   border: none;
   background: transparent;
-  color: var(--mac-text-secondary);
-  border-radius: 999px;
-  padding: 10px 22px;
+  color: var(--muted-foreground);
+  border-radius: var(--radius-md);
+  height: 32px;
+  padding: 0 12px;
   font-weight: 600;
+  font-size: 0.875rem;
   cursor: pointer;
-  transition: color 0.2s ease;
+  transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
   flex: 0 0 auto;
   display: inline-flex;
@@ -1190,28 +1427,21 @@ html.dark .mac-sidebar-item:hover {
   margin: 0;
 }
 
-.tab-pill::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: transparent;
-  transition: background 0.2s ease, box-shadow 0.2s ease;
-  z-index: -1;
+.tab-pill:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 70%, transparent);
 }
 
 .tab-pill.active {
-  color: var(--mac-text);
+  color: var(--foreground);
+  background: var(--background);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-.tab-pill.active::before {
-  background: color-mix(
-    in srgb,
-    var(--mac-accent) 6%,
-    var(--mac-surface-strong)
-  );
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--mac-accent) 25%, transparent);
+.tab-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--background) 96%, transparent);
 }
 
 .automation-section h2 {
@@ -1290,7 +1520,7 @@ html.dark .mac-sidebar-item:hover {
 .card-site {
   border: none;
   background: transparent;
-  color: #2563eb;
+  color: var(--primary);
   font-size: 0.8rem;
   padding: 0;
   cursor: pointer;
@@ -1304,20 +1534,20 @@ html.dark .mac-sidebar-item:hover {
 .card-subtitle {
   margin: 4px 0 0;
   font-size: 0.9rem;
-  color: var(--mac-text-secondary);
+  color: var(--muted-foreground);
   word-break: break-all;
 }
 
 .card-meta {
   margin: 2px 0 0;
   font-size: 0.8rem;
-  color: rgba(15, 23, 42, 0.55);
+  color: var(--muted-foreground);
 }
 
 .card-metrics {
   margin: 4px 0 0;
   font-size: 0.82rem;
-  color: rgba(15, 23, 42, 0.65);
+  color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1325,7 +1555,7 @@ html.dark .mac-sidebar-item:hover {
   display: inline-block;
   min-width: 16px;
   text-align: center;
-  color: rgba(15, 23, 42, 0.4);
+  color: color-mix(in srgb, var(--muted-foreground) 60%, transparent);
 }
 
 .card-success-rate {
@@ -1345,14 +1575,6 @@ html.dark .mac-sidebar-item:hover {
   color: #dc2626;
 }
 
-html.dark .card-metrics {
-  color: rgba(255, 255, 255, 0.75);
-}
-
-html.dark .card-metric-separator {
-  color: rgba(255, 255, 255, 0.45);
-}
-
 html.dark .card-success-rate.success-good {
   color: #34d399;
 }
@@ -1365,10 +1587,6 @@ html.dark .card-success-rate.success-bad {
   color: #f87171;
 }
 
-html.dark .card-meta {
-  color: rgba(255, 255, 255, 0.6);
-}
-
 .card-actions {
   display: flex;
   align-items: center;
@@ -1377,16 +1595,16 @@ html.dark .card-meta {
 
 .ghost-icon {
   border: none;
-  background: rgba(15, 23, 42, 0.08);
-  color: var(--mac-text);
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  background: transparent;
+  color: var(--muted-foreground);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .ghost-icon svg {
@@ -1396,9 +1614,9 @@ html.dark .card-meta {
 }
 
 .ghost-icon.sm {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
 }
 
 .ghost-icon.sm svg {
@@ -1407,19 +1625,18 @@ html.dark .card-meta {
 }
 
 .ghost-icon.danger {
-  color: #ff3b30;
-}
-
-html.dark .ghost-icon {
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--destructive);
 }
 
 .ghost-icon:hover {
-  background: rgba(15, 23, 42, 0.15);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
-html.dark .ghost-icon:hover {
-  background: rgba(255, 255, 255, 0.2);
+.ghost-icon:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--background) 96%, transparent);
 }
 
 .ghost-icon[data-tooltip] {
@@ -1432,15 +1649,17 @@ html.dark .ghost-icon:hover {
   bottom: calc(100% + 6px);
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.9);
-  color: #fff;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
   font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
   z-index: 10;
 }
 
@@ -1474,12 +1693,13 @@ html.dark .ghost-icon:hover {
   bottom: calc(100% + 8px);
   left: 0;
   transform: none;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
   font-size: 12px;
   font-weight: 400;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   width: 240px;
   min-width: 240px;
   max-width: 240px;
@@ -1541,15 +1761,13 @@ html.dark .help-icon[data-tooltip]::after {
 .modal-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .modal-overlay-noevent {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.55);
   pointer-events: none;
 }
 
@@ -1558,7 +1776,7 @@ html.dark .help-icon[data-tooltip]::after {
   z-index: 1;
   min-height: 100vh;
   width: 100%;
-  padding: 24px;
+  padding: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1567,17 +1785,17 @@ html.dark .help-icon[data-tooltip]::after {
 .modal {
   width: min(720px, 95vw);
   max-height: 90vh;
-  background: var(--mac-surface);
-  border-radius: 24px;
-  border: 1px solid var(--mac-border);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .modal-header {
-  padding: 24px 24px 12px;
+  padding: 16px 16px 10px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1585,7 +1803,7 @@ html.dark .help-icon[data-tooltip]::after {
 }
 
 .modal-body {
-  padding: 0 24px 24px;
+  padding: 0 16px 16px;
 }
 
 .modal-scrollable {
@@ -1594,9 +1812,9 @@ html.dark .help-icon[data-tooltip]::after {
 
 .modal-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
-  color: var(--mac-text);
+  color: var(--foreground);
 }
 
 .vendor-form {
@@ -1614,8 +1832,8 @@ html.dark .help-icon[data-tooltip]::after {
 }
 
 .form-field span {
-  font-size: 0.85rem;
-  color: var(--mac-text-secondary);
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
 }
 
 .label-row {
@@ -1625,23 +1843,36 @@ html.dark .help-icon[data-tooltip]::after {
 }
 
 .field-error {
-  color: #ff3b30;
-  font-size: 0.8rem;
+  color: var(--destructive);
+  font-size: 0.8125rem;
 }
 
 .has-error {
-  border-color: rgba(255, 59, 48, 0.8);
+  border-color: color-mix(in srgb, var(--destructive) 60%, var(--input));
 }
 
-.form-field input,
-.form-field textarea,
-.form-field select {
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  padding: 10px 14px;
+.form-field input:not(.base-input):not(.mac-input),
+.form-field textarea:not(.base-textarea):not(.mac-textarea),
+.form-field select:not(.base-input):not(.mac-select) {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--input);
+  background: var(--background);
+  padding: 0.5rem 0.75rem;
   font: inherit;
-  background: var(--mac-surface-strong);
-  color: var(--mac-text);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--foreground);
+  box-sizing: border-box;
+}
+
+.form-field input:not(.base-input):not(.mac-input):focus,
+.form-field textarea:not(.base-textarea):not(.mac-textarea):focus,
+.form-field select:not(.base-input):not(.mac-select):focus {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--background) 96%, transparent);
 }
 
 .form-field textarea {
@@ -1669,23 +1900,28 @@ html.dark .help-icon[data-tooltip]::after {
 
 .btn {
   border: none;
-  border-radius: 12px;
-  padding: 10px 22px;
+  border-radius: var(--radius-md);
+  height: 36px;
+  padding: 0 16px;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
+  line-height: 1;
   cursor: pointer;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  gap: 8px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
   margin: 0;
-  min-width: 88px;
+  user-select: none;
 }
 
 .btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--mac-accent) 45%, transparent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 85%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--background) 96%, transparent);
 }
 
 .btn:disabled {
@@ -1695,49 +1931,92 @@ html.dark .help-icon[data-tooltip]::after {
 }
 
 .btn-sm {
-  padding: 7px 14px;
-  font-size: 0.85rem;
-  min-width: 0;
-  border-radius: 10px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 0.8125rem;
+  border-radius: var(--radius-sm);
 }
 
 .btn-lg {
-  padding: 12px 26px;
-  font-size: 1rem;
+  height: 40px;
+  padding: 0 24px;
+  font-size: 0.9375rem;
 }
 
 .btn-outline {
-  border: 1px solid var(--mac-border);
-  background: transparent;
-  color: var(--mac-text-secondary);
+  border: 1px solid var(--input);
+  background: var(--background);
+  color: var(--foreground);
 }
 
 .btn-outline:hover,
 .btn-outline:focus-visible {
-  background: rgba(15, 23, 42, 0.06);
-}
-
-/* 深色模式下的 outline 按钮适配 */
-html.dark .btn-outline {
-  border-color: rgba(255, 255, 255, 0.25);
-  color: var(--mac-text);
-}
-
-html.dark .btn-outline:hover,
-html.dark .btn-outline:focus-visible {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.35);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .btn-primary {
-  background: var(--mac-accent);
-  color: #fff;
-  box-shadow: 0 6px 15px rgba(10, 132, 255, 0.35);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.btn-primary:hover,
+.btn-primary:focus-visible {
+  background: color-mix(in srgb, var(--primary) 90%, #000);
 }
 
 .btn-danger {
-  background: #ff3b30;
-  color: #fff;
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+
+.btn-danger:hover,
+.btn-danger:focus-visible {
+  background: color-mix(in srgb, var(--destructive) 90%, #000);
+}
+
+.btn-secondary {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border: 1px solid transparent;
+}
+
+.btn-secondary:hover,
+.btn-secondary:focus-visible {
+  background: color-mix(in srgb, var(--secondary) 88%, var(--foreground) 12%);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--foreground);
+}
+
+.btn-ghost:hover,
+.btn-ghost:focus-visible {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.btn-link {
+  background: transparent;
+  color: var(--primary);
+  padding: 0;
+  height: auto;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.btn-link:hover,
+.btn-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-md);
 }
 
 /* 次要按钮样式（用于控制台等页面） */
@@ -1762,6 +2041,57 @@ html.dark .btn-outline:focus-visible {
 .secondary-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.ui-badge-sm {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.ui-badge-md {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.ui-badge-default {
+  background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
+  color: var(--foreground-muted);
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.ui-badge-success {
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  color: color-mix(in srgb, var(--color-success) 78%, var(--foreground) 22%);
+  border-color: color-mix(in srgb, var(--color-success) 30%, var(--border));
+}
+
+.ui-badge-warning {
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  color: color-mix(in srgb, #f59e0b 78%, var(--foreground) 22%);
+  border-color: color-mix(in srgb, #f59e0b 30%, var(--border));
+}
+
+.ui-badge-error {
+  background: color-mix(in srgb, var(--color-error) 14%, transparent);
+  color: color-mix(in srgb, var(--color-error) 78%, var(--foreground) 22%);
+  border-color: color-mix(in srgb, var(--color-error) 30%, var(--border));
+}
+
+.ui-badge-info {
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: color-mix(in srgb, var(--accent-primary) 78%, var(--foreground) 22%);
+  border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border));
 }
 
 .secondary-btn:focus-visible:not(:disabled) {

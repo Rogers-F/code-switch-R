@@ -7,10 +7,22 @@
 <script setup lang="ts">
 import { computed, useAttrs } from 'vue'
 
+type Variant =
+  | 'default'
+  | 'primary'
+  | 'secondary'
+  | 'outline'
+  | 'ghost'
+  | 'link'
+  | 'destructive'
+  | 'danger'
+
+type Size = 'default' | 'sm' | 'md' | 'lg' | 'icon'
+
 const props = withDefaults(
   defineProps<{
-    variant?: 'primary' | 'outline' | 'danger'
-    size?: 'sm' | 'md' | 'lg'
+    variant?: Variant
+    size?: Size
     type?: 'button' | 'submit' | 'reset'
   }>(),
   {
@@ -22,6 +34,22 @@ const props = withDefaults(
 
 useAttrs()
 
-const variantClass = computed(() => `btn-${props.variant}`)
-const sizeClass = computed(() => (props.size === 'md' ? '' : `btn-${props.size}`))
+const normalizedVariant = computed((): Exclude<Variant, 'default' | 'destructive'> => {
+  switch (props.variant) {
+    case 'default':
+      return 'primary'
+    case 'destructive':
+      return 'danger'
+    default:
+      return props.variant
+  }
+})
+
+const normalizedSize = computed((): Exclude<Size, 'default'> => {
+  if (props.size === 'default') return 'md'
+  return props.size
+})
+
+const variantClass = computed(() => `btn-${normalizedVariant.value}`)
+const sizeClass = computed(() => (normalizedSize.value === 'md' ? '' : `btn-${normalizedSize.value}`))
 </script>

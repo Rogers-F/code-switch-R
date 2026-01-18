@@ -54,19 +54,11 @@ defineExpose({
 }
 
 .scroll-area-viewport::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.3);
+  background: color-mix(in srgb, var(--mac-text-secondary) 35%, transparent);
   border-radius: 4px;
 }
 
 .scroll-area-viewport::-webkit-scrollbar-thumb:hover {
-  background: rgba(156, 163, 175, 0.5);
-}
-
-:root.dark .scroll-area-viewport::-webkit-scrollbar-thumb {
-  background: rgba(107, 114, 128, 0.3);
-}
-
-:root.dark .scroll-area-viewport::-webkit-scrollbar-thumb:hover {
-  background: rgba(107, 114, 128, 0.5);
+  background: color-mix(in srgb, var(--mac-text-secondary) 55%, transparent);
 }
 </style>
