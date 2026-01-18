@@ -41,7 +41,7 @@ func (p *PrivilegeService) runWindowsElevated(command string, args []string) (st
 	psScript := fmt.Sprintf(`Start-Process -FilePath '%s' -ArgumentList '%s' -Verb RunAs -Wait -WindowStyle Hidden`,
 		command, strings.Join(args, "', '"))
 
-	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", psScript)
+	cmd := hideWindowCmd("powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", psScript)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("failed to run elevated command: %w", err)

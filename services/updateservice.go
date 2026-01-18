@@ -957,7 +957,7 @@ try {
 	log.Printf("[UpdateService] 已创建更新脚本: %s", scriptPath)
 
 	// 启动 PowerShell 执行脚本（-WindowStyle Hidden 隐藏窗口）
-	cmd := exec.Command("powershell.exe",
+	cmd := hideWindowCmd("powershell.exe",
 		"-ExecutionPolicy", "Bypass",
 		"-WindowStyle", "Hidden",
 		"-File", scriptPath,
@@ -2203,7 +2203,7 @@ func (us *UpdateService) applyInstalledUpdate(newExePath string) error {
 	// Start-Process -Verb RunAs 会触发 UAC 弹窗
 	// 注意：-ArgumentList 需要用双引号包裹路径，防止空格路径被拆分
 	log.Printf("[UpdateService] 使用 UAC 提权启动更新器: %s", updaterPath)
-	cmd := exec.Command("powershell.exe",
+	cmd := hideWindowCmd("powershell.exe",
 		"-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass",
 		"-WindowStyle", "Hidden",

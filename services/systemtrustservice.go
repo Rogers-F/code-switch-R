@@ -2,7 +2,6 @@ package services
 
 import (
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strings"
 )
@@ -95,25 +94,30 @@ func (s *SystemTrustService) Uninstall(certName string) error {
 
 // CheckInstalled checks if the CA certificate is installed
 func (s *SystemTrustService) CheckInstalled(certName string) (bool, error) {
-	var cmd *exec.Cmd
+	var cmdArgs []string
+	var cmdName string
 
 	switch runtime.GOOS {
 	case "windows":
 		// certutil -store "ROOT" | findstr "Code-Switch"
-		cmd = exec.Command("certutil.exe", "-store", "ROOT")
+		cmdName = "certutil.exe"
+		cmdArgs = []string{"-store", "ROOT"}
 
 	case "darwin":
 		// security find-certificate -c "Code-Switch MITM CA" /Library/Keychains/System.keychain
-		cmd = exec.Command("security", "find-certificate", "-c", certName, "/Library/Keychains/System.keychain")
+		cmdName = "security"
+		cmdArgs = []string{"find-certificate", "-c", certName, "/Library/Keychains/System.keychain"}
 
 	case "linux":
 		// Check if file exists
-		cmd = exec.Command("test", "-f", "/usr/local/share/ca-certificates/code-switch-mitm.crt")
+		cmdName = "test"
+		cmdArgs = []string{"-f", "/usr/local/share/ca-certificates/code-switch-mitm.crt"}
 
 	default:
 		return false, fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
+	cmd := hideWindowCmd(cmdName, cmdArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Command failed, likely not installed
