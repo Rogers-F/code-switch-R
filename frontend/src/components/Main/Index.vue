@@ -3026,7 +3026,7 @@ const openCliToolModal = () => {
     isPrimary: true,
   }]
   // 默认占位行保持全空，允许用户选择不配置代理注入
-  // auto-select 仅在用户点击"+"添加新规则时触发
+  // 保存时会自动补齐 targetFileId（如果用户填写了字段且只有一个配置文件）
   cliToolModalState.form.proxyInjection = [{
     targetFileId: '',
     baseUrlField: '',
@@ -3059,6 +3059,7 @@ const editCurrentCliTool = async () => {
         isPrimary: true,
       }]
   // 加载已有的代理注入配置，默认占位行保持全空
+  // 保存时会自动补齐 targetFileId（如果用户填写了字段且只有一个配置文件）
   cliToolModalState.form.proxyInjection = tool.proxyInjection && tool.proxyInjection.length > 0
     ? tool.proxyInjection.map(pi => ({
         targetFileId: pi.targetFileId ?? '',
@@ -3148,12 +3149,17 @@ const submitCliToolModal = async () => {
   }
 
   // 代理注入配置：允许全空（表示不使用），但不允许"半填"
+  // 单一配置文件时，自动选中作为代理注入目标（避免用户忘记选择）
+  const autoTargetFileId = validConfigFiles.length === 1 ? validConfigFiles[0].id : ''
+
   const proxyInjectionsToSave = cliToolModalState.form.proxyInjection
-    .map(pi => ({
-      targetFileId: pi.targetFileId.trim(),
-      baseUrlField: pi.baseUrlField.trim(),
-      authTokenField: pi.authTokenField.trim(),
-    }))
+    .map(pi => {
+      const baseUrlField = pi.baseUrlField.trim()
+      const authTokenField = pi.authTokenField.trim()
+      // 如果用户填写了字段但忘记选择目标文件，且只有一个配置文件，自动补充
+      const targetFileId = pi.targetFileId.trim() || ((baseUrlField || authTokenField) ? autoTargetFileId : '')
+      return { targetFileId, baseUrlField, authTokenField }
+    })
     .filter(pi => pi.targetFileId || pi.baseUrlField || pi.authTokenField)
 
   const hasIncompleteProxyInjection = proxyInjectionsToSave.some(
