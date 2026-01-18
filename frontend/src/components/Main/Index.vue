@@ -3007,6 +3007,13 @@ const onToolSelect = async () => {
   }
 }
 
+// 仅在只有一个配置文件时自动选中，避免多配置场景下造成"意外选择"
+const getAutoSelectedProxyTargetFileId = () => {
+  const files = cliToolModalState.form.configFiles
+  if (files.length === 1) return files[0].id
+  return ''
+}
+
 // 打开新建 CLI 工具模态框
 const openCliToolModal = () => {
   cliToolModalState.editingId = null
@@ -3018,6 +3025,8 @@ const openCliToolModal = () => {
     format: 'json',
     isPrimary: true,
   }]
+  // 默认占位行保持全空，允许用户选择不配置代理注入
+  // auto-select 仅在用户点击"+"添加新规则时触发
   cliToolModalState.form.proxyInjection = [{
     targetFileId: '',
     baseUrlField: '',
@@ -3049,10 +3058,11 @@ const editCurrentCliTool = async () => {
         format: 'json' as const,
         isPrimary: true,
       }]
+  // 加载已有的代理注入配置，默认占位行保持全空
   cliToolModalState.form.proxyInjection = tool.proxyInjection && tool.proxyInjection.length > 0
     ? tool.proxyInjection.map(pi => ({
-        targetFileId: pi.targetFileId,
-        baseUrlField: pi.baseUrlField,
+        targetFileId: pi.targetFileId ?? '',
+        baseUrlField: pi.baseUrlField ?? '',
         authTokenField: pi.authTokenField ?? '',
       }))
     : [{
@@ -3103,7 +3113,7 @@ const removeConfigFile = (index: number) => {
 // 添加代理注入配置
 const addProxyInjection = () => {
   cliToolModalState.form.proxyInjection.push({
-    targetFileId: '',
+    targetFileId: getAutoSelectedProxyTargetFileId(),
     baseUrlField: '',
     authTokenField: '',
   })
@@ -3137,16 +3147,36 @@ const submitCliToolModal = async () => {
     validConfigFiles[0].isPrimary = true
   }
 
-  // 过滤掉空的代理注入配置
-  const validProxyInjections = cliToolModalState.form.proxyInjection.filter(
-    pi => pi.targetFileId && pi.baseUrlField.trim()
-  )
+  // 代理注入配置：允许全空（表示不使用），但不允许"半填"
+  const proxyInjectionsToSave = cliToolModalState.form.proxyInjection
+    .map(pi => ({
+      targetFileId: pi.targetFileId.trim(),
+      baseUrlField: pi.baseUrlField.trim(),
+      authTokenField: pi.authTokenField.trim(),
+    }))
+    .filter(pi => pi.targetFileId || pi.baseUrlField || pi.authTokenField)
 
-  // 验证代理注入目标指向有效的配置文件 ID
+  const hasIncompleteProxyInjection = proxyInjectionsToSave.some(
+    pi => !pi.targetFileId || !pi.baseUrlField
+  )
+  if (hasIncompleteProxyInjection) {
+    showToast(t('components.main.customCli.proxyInjectionIncomplete'), 'error')
+    return
+  }
+
+  // 先校验"目标 ID 是否存在"，再校验"目标文件路径是否有效"，避免报错信息误导
+  const allFileIds = new Set(cliToolModalState.form.configFiles.map(cf => cf.id))
   const validFileIds = new Set(validConfigFiles.map(cf => cf.id))
-  const invalidInjections = validProxyInjections.filter(pi => !validFileIds.has(pi.targetFileId))
-  if (invalidInjections.length > 0) {
+
+  const hasInvalidProxyTarget = proxyInjectionsToSave.some(pi => !allFileIds.has(pi.targetFileId))
+  if (hasInvalidProxyTarget) {
     showToast(t('components.main.customCli.invalidProxyTarget'), 'error')
+    return
+  }
+
+  const hasProxyTargetPathMissing = proxyInjectionsToSave.some(pi => !validFileIds.has(pi.targetFileId))
+  if (hasProxyTargetPathMissing) {
+    showToast(t('components.main.customCli.proxyTargetPathRequired'), 'error')
     return
   }
 
@@ -3157,7 +3187,7 @@ const submitCliToolModal = async () => {
         id: cliToolModalState.editingId,
         name,
         configFiles: validConfigFiles,
-        proxyInjection: validProxyInjections,
+        proxyInjection: proxyInjectionsToSave,
       })
       showToast(t('components.main.customCli.updateSuccess'), 'success')
     } else {
@@ -3165,7 +3195,7 @@ const submitCliToolModal = async () => {
       const newTool = await createCustomCliTool({
         name,
         configFiles: validConfigFiles,
-        proxyInjection: validProxyInjections,
+        proxyInjection: proxyInjectionsToSave,
       })
       selectedToolId.value = newTool.id
       showToast(t('components.main.customCli.createSuccess'), 'success')
@@ -3176,6 +3206,16 @@ const submitCliToolModal = async () => {
     closeCliToolModal()
   } catch (error) {
     console.error('Failed to save CLI tool', error)
+    // 处理各种错误类型：Error 对象、字符串、其他
+    const msg = error instanceof Error ? error.message : String(error ?? '')
+    if (msg.includes('ERR_CUSTOM_CLI_PROXY_INJECTION_INCOMPLETE')) {
+      showToast(t('components.main.customCli.proxyInjectionIncomplete'), 'error')
+      return
+    }
+    if (msg.includes('ERR_CUSTOM_CLI_INVALID_PROXY_TARGET')) {
+      showToast(t('components.main.customCli.invalidProxyTarget'), 'error')
+      return
+    }
     showToast(t('components.main.customCli.saveFailed'), 'error')
   }
 }
@@ -3478,6 +3518,7 @@ const confirmDeleteCliTool = async () => {
 }
 
 .level-option.selected {
+  background: rgba(10, 132, 255, 0.12); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-accent) 12%, transparent);
   font-weight: 500;
 }

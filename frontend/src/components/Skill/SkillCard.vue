@@ -135,6 +135,7 @@ watch(() => props.expanded, async (isExpanded) => {
 
 <style scoped>
 .skill-card-installed {
+  background: var(--mac-surface-strong); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 90%, transparent);
   border: 1px solid var(--mac-border);
   border-radius: 16px;
@@ -238,11 +239,13 @@ watch(() => props.expanded, async (isExpanded) => {
 }
 
 .skill-badge.license {
+  background: rgba(245, 158, 11, 0.15); /* fallback for old WebKit */
   background: color-mix(in srgb, #f59e0b 15%, transparent);
   color: #f59e0b;
 }
 
 .skill-badge.project {
+  background: rgba(59, 130, 246, 0.15); /* fallback for old WebKit */
   background: color-mix(in srgb, #3b82f6 15%, transparent);
   color: #3b82f6;
 }
@@ -290,6 +293,7 @@ watch(() => props.expanded, async (isExpanded) => {
 /* Content Panel */
 .skill-card-content {
   border-top: 1px solid var(--mac-border);
+  background: var(--mac-surface-strong); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 50%, transparent);
   max-height: 400px;
   overflow: auto;
@@ -327,10 +331,12 @@ watch(() => props.expanded, async (isExpanded) => {
 
 /* Dark Mode */
 html.dark .skill-card-installed {
+  background: var(--mac-surface); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 70%, transparent);
 }
 
 html.dark .skill-card-content {
+  background: var(--mac-surface); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 30%, transparent);
 }
 

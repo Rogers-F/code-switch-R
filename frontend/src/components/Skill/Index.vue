@@ -728,6 +728,7 @@ onMounted(() => {
 
 /* Available Skill Card */
 .skill-card.available-card {
+  background: var(--mac-surface-strong); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 90%, transparent);
   border: 1px solid var(--mac-border);
   border-radius: 16px;
@@ -809,6 +810,7 @@ onMounted(() => {
 
 .install-option.selected .install-option-content {
   border-color: var(--mac-accent);
+  background: rgba(10, 132, 255, 0.1); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-accent) 10%, transparent);
 }
 
@@ -892,6 +894,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  background: var(--mac-surface-strong); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 90%, transparent);
 }
 
@@ -955,6 +958,7 @@ onMounted(() => {
   padding: 12px 18px;
   border: 1px solid var(--mac-border);
   border-radius: 12px;
+  background: var(--mac-surface-strong); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 80%, transparent);
   gap: 16px;
   margin: 0 0 8px;
@@ -1061,6 +1065,7 @@ onMounted(() => {
 }
 
 html.dark .skill-card.available-card {
+  background: var(--mac-surface); /* fallback for old WebKit */
   background: color-mix(in srgb, var(--mac-surface) 70%, transparent);
 }
 
