@@ -6,7 +6,7 @@
 name: "simonswitch"
 arch: ${GOARCH}
 platform: "linux"
-version: "2.7.2"
+version: "2.8.2"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>

@@ -20,3 +20,4 @@ CLAUDE.md
 *.db-shm
 *.sqlite
 *.sqlite3
+__pycache__/

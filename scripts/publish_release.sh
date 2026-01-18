@@ -13,6 +13,7 @@ fi
 
 TAG="$1"
 NOTES="${2:-RELEASE_NOTES.md}"
+VERSION="${TAG#v}"
 
 if [ ! -f "$NOTES" ]; then
   echo "Release notes file '$NOTES' not found" >&2
@@ -59,6 +60,9 @@ package_macos_arch() {
 }
 
 perl -0pi -e "s/const\\s+AppVersion\\s*=\\s*\"[^\"]*\"/const AppVersion = \"$TAG\"/" version_service.go
+perl -pi -e "s/^  version: \"[^\"]*\"/  version: \"$VERSION\"/" build/config.yml
+perl -0pi -e "s/\"file_version\": \"[^\"]*\"/\"file_version\": \"$VERSION\"/g; s/\"ProductVersion\": \"[^\"]*\"/\"ProductVersion\": \"$VERSION\"/g" build/windows/info.json
+perl -pi -e "s/^version: \"[^\"]*\"/version: \"$VERSION\"/" build/linux/nfpm/nfpm.yaml
 
 wails3 task common:update:build-assets
 for arch in "${MAC_ARCHS[@]}"; do

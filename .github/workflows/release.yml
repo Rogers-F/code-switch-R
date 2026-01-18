@@ -59,8 +59,11 @@ jobs:
           VERSION="${{ steps.ver.outputs.version }}"
           echo "Updating version to: $VERSION"
           sed -i '' "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          sed -i '' "s/^  version: \"[^\"]*\"/  version: \"$VERSION\"/" build/config.yml
           echo "Updated version_service.go:"
           grep "AppVersion" version_service.go
+          echo "Updated build/config.yml:"
+          grep -n "^  version:" build/config.yml
 
       - uses: actions/setup-go@v5
         with:
@@ -148,6 +151,13 @@ jobs:
           Set-Content version_service.go $content
           Write-Host "Updated version_service.go:"
           Select-String "AppVersion" version_service.go
+
+          # Update build/config.yml (Wails build assets)
+          $cfg = Get-Content build/config.yml -Raw
+          $cfg = $cfg -replace '(?m)^  version: \"[^\"]*\"', "  version: `"$VERSION`""
+          Set-Content build/config.yml $cfg
+          Write-Host "Updated build/config.yml:"
+          Select-String '^  version:' build/config.yml
 
           # Update build/windows/info.json
           $json = Get-Content build/windows/info.json -Raw | ConvertFrom-Json
@@ -270,8 +280,11 @@ jobs:
           VERSION="${{ steps.ver.outputs.version }}"
           echo "Updating version to: $VERSION"
           sed -i "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
+          sed -i "s/^  version: \"[^\"]*\"/  version: \"$VERSION\"/" build/config.yml
           echo "Updated version_service.go:"
           grep "AppVersion" version_service.go
+          echo "Updated build/config.yml:"
+          grep -n "^  version:" build/config.yml
 
       - uses: actions/setup-go@v5
         with:
