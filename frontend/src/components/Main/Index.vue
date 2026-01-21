@@ -1279,6 +1279,23 @@ const usageTooltip = reactive({
 
 const formatMetric = (value: number) => value.toLocaleString()
 
+/**
+ * 格式化 token 数值，支持 k/M/B 单位换算
+ * @author sm
+ */
+const formatTokenNumber = (value: number) => {
+  if (value >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(2)}B`
+  }
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)}M`
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(2)}k`
+  }
+  return value.toLocaleString()
+}
+
 const tooltipDateFormatter = computed(() =>
   new Intl.DateTimeFormat(locale.value || 'en', {
     month: 'short',
@@ -1324,17 +1341,17 @@ const usageTooltipMetrics = computed(() => [
   {
     key: 'inputTokens',
     label: t('components.main.heatmap.metrics.inputTokens'),
-    value: formatMetric(usageTooltip.inputTokens),
+    value: formatTokenNumber(usageTooltip.inputTokens),
   },
   {
     key: 'outputTokens',
     label: t('components.main.heatmap.metrics.outputTokens'),
-    value: formatMetric(usageTooltip.outputTokens),
+    value: formatTokenNumber(usageTooltip.outputTokens),
   },
   {
     key: 'reasoningTokens',
     label: t('components.main.heatmap.metrics.reasoningTokens'),
-    value: formatMetric(usageTooltip.reasoningTokens),
+    value: formatTokenNumber(usageTooltip.reasoningTokens),
   },
 ])
 
@@ -2096,7 +2113,7 @@ const providerStatDisplay = (providerName: string): ProviderStatDisplay => {
   return {
     state: 'ready',
     requests: `${t('components.main.providers.requests')}: ${formatMetric(stat.total_requests)}`,
-    tokens: `${t('components.main.providers.tokens')}: ${formatMetric(totalTokens)}`,
+    tokens: `${t('components.main.providers.tokens')}: ${formatTokenNumber(totalTokens)}`,
     cost: `${t('components.main.providers.cost')}: ${currencyFormatter.value.format(Math.max(stat.cost_total, 0))}`,
     successRateLabel,
     successRateClass,
