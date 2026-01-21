@@ -83,23 +83,23 @@
             <td class="token-cell">
               <div>
                 <span class="token-label">{{ t('components.logs.tokenLabels.input') }}</span>
-                <span class="token-value">{{ formatNumber(item.input_tokens) }}</span>
+                <span class="token-value">{{ formatTokenNumber(item.input_tokens) }}</span>
               </div>
               <div>
                 <span class="token-label">{{ t('components.logs.tokenLabels.output') }}</span>
-                <span class="token-value">{{ formatNumber(item.output_tokens) }}</span>
+                <span class="token-value">{{ formatTokenNumber(item.output_tokens) }}</span>
               </div>
               <div>
                 <span class="token-label">{{ t('components.logs.tokenLabels.reasoning') }}</span>
-                <span class="token-value">{{ formatNumber(item.reasoning_tokens) }}</span>
+                <span class="token-value">{{ formatTokenNumber(item.reasoning_tokens) }}</span>
               </div>
               <div>
                 <span class="token-label">{{ t('components.logs.tokenLabels.cacheWrite') }}</span>
-                <span class="token-value">{{ formatNumber(item.cache_create_tokens) }}</span>
+                <span class="token-value">{{ formatTokenNumber(item.cache_create_tokens) }}</span>
               </div>
               <div>
                 <span class="token-label">{{ t('components.logs.tokenLabels.cacheRead') }}</span>
-                <span class="token-value">{{ formatNumber(item.cache_read_tokens) }}</span>
+                <span class="token-value">{{ formatTokenNumber(item.cache_read_tokens) }}</span>
               </div>
             </td>
           </tr>
@@ -512,6 +512,26 @@ const formatNumber = (value?: number) => {
   return value.toLocaleString()
 }
 
+/**
+ * 格式化 token 数值，支持 k/M/B 单位换算
+ * @author sm
+ */
+const formatTokenNumber = (value?: number) => {
+  if (value === undefined || value === null) return '—'
+
+  if (value >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(2)}B`
+  }
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)}M`
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(2)}k`
+  }
+
+  return value.toLocaleString()
+}
+
 const formatCurrency = (value?: number) => {
   if (value === undefined || value === null || Number.isNaN(value)) {
     return '$0.0000'
@@ -547,13 +567,13 @@ const statsCards = computed(() => {
       key: 'tokens',
       label: t('components.logs.summary.tokens'),
       hint: t('components.logs.summary.tokenHint'),
-      value: data ? formatNumber(totalTokens) : '—',
+      value: data ? formatTokenNumber(totalTokens) : '—',
     },
     {
       key: 'cacheReads',
       label: t('components.logs.summary.cache'),
       hint: t('components.logs.summary.cacheHint'),
-      value: data ? formatNumber(data.cache_read_tokens) : '—',
+      value: data ? formatTokenNumber(data.cache_read_tokens) : '—',
     },
     {
       key: 'cost',
