@@ -35,7 +35,7 @@ func InitGlobalDBQueue() error {
 
 	// 队列 2：批量写入队列（启用批量，仅用于 request_log）
 	// 用途：高频 request_log INSERT（同表同操作，严格同构）
-	// 批量配置：50 条/批，100ms 超时提交
+	// 批量配置：50 条/批，最长等待 3 分钟提交（低频时减少写盘）
 	GlobalDBQueueLogs = NewDBWriteQueue(db, 5000, true)
 
 	return nil
@@ -173,11 +173,11 @@ func (q *DBWriteQueue) worker() {
 		if r := recover(); r != nil {
 			fmt.Printf("🚨 数据库写入队列 worker panic: %v\n", r)
 
-			// 关键修复：如果 panic 时正在处理任务，必须返回错误，否则调用方永久阻塞
-			if currentTask != nil {
-				currentTask.Result <- fmt.Errorf("数据库写入 panic: %v", r)
-				close(currentTask.Result)
-			}
+				// 关键修复：如果 panic 时正在处理任务，必须返回错误，否则调用方永久阻塞
+				if currentTask != nil && currentTask.Result != nil {
+					currentTask.Result <- fmt.Errorf("数据库写入 panic: %v", r)
+					close(currentTask.Result)
+				}
 
 			// 等待1秒后重启，避免快速循环（如果是系统性问题）
 			time.Sleep(1 * time.Second)
@@ -190,38 +190,42 @@ func (q *DBWriteQueue) worker() {
 
 	for {
 		select {
-		case task := <-q.queue:
-			currentTask = task // 记录当前任务，用于 panic 时返回错误
+			case task := <-q.queue:
+				currentTask = task // 记录当前任务，用于 panic 时返回错误
 
-			start := time.Now()
-			_, err := q.db.Exec(task.SQL, task.Args...)
+				start := time.Now()
+				_, err := q.db.Exec(task.SQL, task.Args...)
 
-			// 更新统计（单次写入，count=1）
-			q.updateStats(1, time.Since(start), err)
+				// 更新统计（单次写入，count=1）
+				q.updateStats(1, time.Since(start), err)
 
-			// 返回结果
-			task.Result <- err
-			close(task.Result)
+				// 返回结果（可选：支持异步入队）
+				if task.Result != nil {
+					task.Result <- err
+					close(task.Result)
+				}
 
-			currentTask = nil // 清空当前任务（防止下一次 panic 误用）
+				currentTask = nil // 清空当前任务（防止下一次 panic 误用）
 
-		case <-q.shutdownChan:
+			case <-q.shutdownChan:
 			// 排空 queue 中的所有剩余任务
 			for {
 				select {
-				case task := <-q.queue:
-					currentTask = task // shutdown 排空时也需要跟踪，防止 panic
+					case task := <-q.queue:
+						currentTask = task // shutdown 排空时也需要跟踪，防止 panic
 
-					start := time.Now()
-					_, err := q.db.Exec(task.SQL, task.Args...)
-					q.updateStats(1, time.Since(start), err)
-					task.Result <- err
-					close(task.Result)
+						start := time.Now()
+						_, err := q.db.Exec(task.SQL, task.Args...)
+						q.updateStats(1, time.Since(start), err)
+						if task.Result != nil {
+							task.Result <- err
+							close(task.Result)
+						}
 
-					currentTask = nil
-				default:
-					// queue 已空，安全退出
-					return
+						currentTask = nil
+					default:
+						// queue 已空，安全退出
+						return
 				}
 			}
 		}
@@ -236,17 +240,19 @@ func (q *DBWriteQueue) batchWorker() {
 
 	// panic 保护：确保 batchWorker 不会因未捕获的 panic 而崩溃
 	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("🚨 数据库批量写入队列 worker panic: %v\n", r)
+			if r := recover(); r != nil {
+				fmt.Printf("🚨 数据库批量写入队列 worker panic: %v\n", r)
 
-			// 关键修复：如果 panic 时正在处理批次，必须给所有任务返回错误
-			if len(currentBatch) > 0 {
-				panicErr := fmt.Errorf("批量写入 panic: %v", r)
-				for _, task := range currentBatch {
-					task.Result <- panicErr
-					close(task.Result)
+				// 关键修复：如果 panic 时正在处理批次，必须给所有任务返回错误
+				if len(currentBatch) > 0 {
+					panicErr := fmt.Errorf("批量写入 panic: %v", r)
+					for _, task := range currentBatch {
+						if task.Result != nil {
+							task.Result <- panicErr
+							close(task.Result)
+						}
+					}
 				}
-			}
 
 			// 等待1秒后重启，避免快速循环（如果是系统性问题）
 			time.Sleep(1 * time.Second)
@@ -257,40 +263,73 @@ func (q *DBWriteQueue) batchWorker() {
 		}
 	}()
 
-	ticker := time.NewTicker(100 * time.Millisecond) // 每100ms批量提交一次
-	defer ticker.Stop()
+		const (
+			batchFlushInterval = 3 * time.Minute
+			batchMaxSize       = 50
+		)
 
 	var batch []*WriteTask
+	var flushTimer *time.Timer
+	var flushC <-chan time.Time
+
+	stopFlushTimer := func() {
+		if flushTimer == nil {
+			return
+		}
+		if !flushTimer.Stop() {
+			// Timer 可能已触发但还没被消费，尝试 drain
+			select {
+			case <-flushTimer.C:
+			default:
+			}
+		}
+		flushTimer = nil
+		flushC = nil
+	}
+
+	startFlushTimer := func() {
+		// 仅在 batch 从空变为非空时启动，避免无任务时常驻唤醒
+		if flushTimer != nil {
+			return
+		}
+		flushTimer = time.NewTimer(batchFlushInterval)
+		flushC = flushTimer.C
+	}
+
+	commitAndReset := func() {
+		if len(batch) == 0 {
+			stopFlushTimer()
+			return
+		}
+		// 提交前先停止定时器，避免重复触发
+		stopFlushTimer()
+		currentBatch = batch // 记录当前批次，用于 panic 时返回错误
+		q.commitBatch(batch)
+		batch = nil
+		currentBatch = nil
+	}
 
 	for {
 		select {
 		case task := <-q.batchQueue:
 			batch = append(batch, task)
 
-			// 批次达到上限（50条）或超时，立即提交
-			if len(batch) >= 50 {
-				currentBatch = batch // 记录当前批次，用于 panic 时返回错误
-				q.commitBatch(batch)
-				batch = nil
-				currentBatch = nil
+			// 首次入队才启动 flush timer（按需唤醒）
+			if len(batch) == 1 {
+				startFlushTimer()
 			}
 
-		case <-ticker.C:
-			if len(batch) > 0 {
-				currentBatch = batch
-				q.commitBatch(batch)
-				batch = nil
-				currentBatch = nil
+			// 批次达到上限（50条），立即提交
+			if len(batch) >= batchMaxSize {
+				commitAndReset()
 			}
+
+		case <-flushC:
+			commitAndReset()
 
 		case <-q.shutdownChan:
-			// 1. 先提交当前批次
-			if len(batch) > 0 {
-				currentBatch = batch
-				q.commitBatch(batch)
-				batch = nil
-				currentBatch = nil
-			}
+			// 1. 先停止定时器并提交当前批次
+			commitAndReset()
 
 			// 2. 排空 batchQueue 中的所有剩余任务
 			for {
@@ -298,7 +337,7 @@ func (q *DBWriteQueue) batchWorker() {
 				case task := <-q.batchQueue:
 					batch = append(batch, task)
 					// 每收集50个或队列空了就提交一次
-					if len(batch) >= 50 {
+					if len(batch) >= batchMaxSize {
 						currentBatch = batch
 						q.commitBatch(batch)
 						batch = nil
@@ -325,8 +364,10 @@ func (q *DBWriteQueue) commitBatch(tasks []*WriteTask) {
 	// 辅助函数：给所有任务返回结果（成功或失败）
 	sendResultToAll := func(err error) {
 		for _, task := range tasks {
-			task.Result <- err
-			close(task.Result)
+			if task.Result != nil {
+				task.Result <- err
+				close(task.Result)
+			}
 		}
 		// 更新统计（批量提交，count=任务数）
 		q.updateStats(len(tasks), time.Since(start), err)
@@ -520,6 +561,34 @@ func (q *DBWriteQueue) ExecBatchCtx(ctx context.Context, sql string, args ...int
 
 	case <-q.shutdownChan:
 		return fmt.Errorf("写入队列已关闭")
+	}
+}
+
+// EnqueueBatch best-effort 批量入队（不等待落盘）
+// 用途：request_log 这类“丢了也不影响核心功能”的高频日志写入，避免阻塞请求路径。
+func (q *DBWriteQueue) EnqueueBatch(sql string, args ...interface{}) error {
+	// 先检查关闭状态
+	if q.closed.Load() {
+		return fmt.Errorf("写入队列已关闭")
+	}
+
+	if q.batchQueue == nil {
+		return fmt.Errorf("批量模式未启用")
+	}
+
+	task := &WriteTask{
+		SQL:  sql,
+		Args: args,
+		// Result=nil 表示异步入队：worker/commitBatch 不会尝试回写结果
+		Result: nil,
+	}
+
+	// 不阻塞主流程：队列满则直接丢弃
+	select {
+	case q.batchQueue <- task:
+		return nil
+	default:
+		return fmt.Errorf("批量队列已满，已丢弃")
 	}
 }
 

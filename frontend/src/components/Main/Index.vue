@@ -1597,9 +1597,59 @@ const loadBlacklistStatus = async (tab: ProviderTab) => {
       map[status.providerName] = status
     })
     blacklistStatusMap[tab] = map
+    ensureBlacklistCountdownTimer()
   } catch (err) {
     console.error(`加载 ${tab} 黑名单状态失败:`, err)
   }
+}
+
+const hasActiveBlacklistCountdown = (): boolean => {
+  return providerTabIds.some((tab) => {
+    if (tab === 'others') return false
+    return Object.values(blacklistStatusMap[tab]).some((status) => status?.isBlacklisted && status.remainingSeconds > 0)
+  })
+}
+
+const stopBlacklistCountdownTimer = () => {
+  if (!blacklistTimer) return
+  window.clearInterval(blacklistTimer)
+  blacklistTimer = undefined
+}
+
+const startBlacklistCountdownTimer = () => {
+  stopBlacklistCountdownTimer()
+  blacklistTimer = window.setInterval(() => {
+    const tabsToRefresh = new Set<ProviderTab>()
+    for (const tab of providerTabIds) {
+      if (tab === 'others') continue
+      const map = blacklistStatusMap[tab]
+      Object.keys(map).forEach(providerName => {
+        const status = map[providerName]
+        if (status && status.isBlacklisted && status.remainingSeconds > 0) {
+          status.remainingSeconds--
+          if (status.remainingSeconds <= 0) {
+            tabsToRefresh.add(tab)
+          }
+        }
+      })
+    }
+    tabsToRefresh.forEach((tab) => {
+      void loadBlacklistStatus(tab)
+    })
+    if (!hasActiveBlacklistCountdown()) {
+      stopBlacklistCountdownTimer()
+    }
+  }, 1000)
+}
+
+const ensureBlacklistCountdownTimer = () => {
+  if (hasActiveBlacklistCountdown()) {
+    if (!blacklistTimer) {
+      startBlacklistCountdownTimer()
+    }
+    return
+  }
+  stopBlacklistCountdownTimer()
 }
 
 // 手动解禁并重置（完全重置）
@@ -1954,27 +2004,16 @@ let unsubscribeBlacklisted: (() => void) | undefined
 	  // 加载初始黑名单状态
 	  await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
 
-  // 加载初始可用性监控结果（改用新服务）
-  await loadAvailabilityResults()
+	  // 加载初始可用性监控结果（改用新服务）
+	  await loadAvailabilityResults()
 
-  // 每秒更新黑名单倒计时
-  blacklistTimer = window.setInterval(() => {
-    const tab = activeTab.value
-    Object.keys(blacklistStatusMap[tab]).forEach(providerName => {
-      const status = blacklistStatusMap[tab][providerName]
-      if (status && status.isBlacklisted && status.remainingSeconds > 0) {
-        status.remainingSeconds--
-        if (status.remainingSeconds <= 0) {
-          loadBlacklistStatus(tab)
-        }
-      }
-    })
-  }, 1000)
+	  // 仅在存在倒计时任务时才启动每秒刷新（避免空闲时常驻唤醒）
+	  ensureBlacklistCountdownTimer()
 
-  // 窗口焦点事件：从最小化恢复时立即刷新黑名单状态
-  const handleWindowFocus = () => {
-    void loadBlacklistStatus(activeTab.value)
-  }
+	  // 窗口焦点事件：从最小化恢复时立即刷新黑名单状态
+	  const handleWindowFocus = () => {
+	    void loadBlacklistStatus(activeTab.value)
+	  }
   window.addEventListener('focus', handleWindowFocus)
 
   // 定期轮询黑名单状态（每 10 秒）
@@ -2004,13 +2043,11 @@ let unsubscribeBlacklisted: (() => void) | undefined
 	onUnmounted(() => {
 	  stopProviderStatsTimer()
 
-	  // 清理黑名单相关定时器和事件监听
-	  if (blacklistTimer) {
-	    window.clearInterval(blacklistTimer)
+		  // 清理黑名单相关定时器和事件监听
+		  stopBlacklistCountdownTimer()
+	  if ((window as any).__blacklistPollingTimer) {
+	    window.clearInterval((window as any).__blacklistPollingTimer)
 	  }
-  if ((window as any).__blacklistPollingTimer) {
-    window.clearInterval((window as any).__blacklistPollingTimer)
-  }
   if ((window as any).__handleWindowFocus) {
     window.removeEventListener('focus', (window as any).__handleWindowFocus)
   }

@@ -1102,37 +1102,29 @@ func (prs *ProviderRelayService) forwardRequest(
 			return
 		}
 
-		// 使用批量队列写入 request_log（高频同构操作，批量提交）
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+			// 使用批量队列写入 request_log（高频同构操作，批量提交）
+			_ = GlobalDBQueueLogs.EnqueueBatch(`
+				INSERT INTO request_log (
+					platform, model, provider, http_code,
+					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
+					reasoning_tokens, is_stream, duration_sec
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				requestLog.Platform,
+				requestLog.Model,
+				requestLog.Provider,
+				requestLog.HttpCode,
+				requestLog.InputTokens,
+				requestLog.OutputTokens,
+				requestLog.CacheCreateTokens,
+				requestLog.CacheReadTokens,
+				requestLog.ReasoningTokens,
+				boolToInt(requestLog.IsStream),
+				requestLog.DurationSec,
+			)
 
-		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-			INSERT INTO request_log (
-				platform, model, provider, http_code,
-				input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-				reasoning_tokens, is_stream, duration_sec
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
-			requestLog.Platform,
-			requestLog.Model,
-			requestLog.Provider,
-			requestLog.HttpCode,
-			requestLog.InputTokens,
-			requestLog.OutputTokens,
-			requestLog.CacheCreateTokens,
-			requestLog.CacheReadTokens,
-			requestLog.ReasoningTokens,
-			boolToInt(requestLog.IsStream),
-			requestLog.DurationSec,
-		)
-
-		if err != nil {
-			fmt.Printf("写入 request_log 失败: %v\n", err)
-			return
-		}
-
-		// 【请求详情缓存】获取刚插入的 ID 并存储详情
-		if shouldRecordDetail && GlobalRequestDetailCache.ShouldRecord(requestLog.HttpCode) {
+			// 【请求详情缓存】获取刚插入的 ID 并存储详情
+			if shouldRecordDetail && GlobalRequestDetailCache.ShouldRecord(requestLog.HttpCode) {
 			// 使用毫秒时间戳作为 ID（13位数字在 JavaScript 安全整数范围内）
 			// 注意：UnixNano 是 19 位，超出 JS Number.MAX_SAFE_INTEGER (16位)，会丢失精度
 			seqID := time.Now().UnixMilli()
@@ -2060,26 +2052,24 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		start := time.Now()
 
 		// 保存日志的 defer
-		defer func() {
-			requestLog.DurationSec = time.Since(start).Seconds()
-			if GlobalDBQueueLogs == nil {
-				return
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-				INSERT INTO request_log (
-					platform, model, provider, http_code,
-					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`,
-				requestLog.Platform, requestLog.Model, requestLog.Provider, requestLog.HttpCode,
-				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
-				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
-				boolToInt(requestLog.IsStream), requestLog.DurationSec,
-			)
-		}()
+			defer func() {
+				requestLog.DurationSec = time.Since(start).Seconds()
+				if GlobalDBQueueLogs == nil {
+					return
+				}
+				_ = GlobalDBQueueLogs.EnqueueBatch(`
+					INSERT INTO request_log (
+						platform, model, provider, http_code,
+						input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
+						reasoning_tokens, is_stream, duration_sec
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`,
+					requestLog.Platform, requestLog.Model, requestLog.Provider, requestLog.HttpCode,
+					requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
+					requestLog.CacheReadTokens, requestLog.ReasoningTokens,
+					boolToInt(requestLog.IsStream), requestLog.DurationSec,
+				)
+			}()
 
 		// 获取拉黑功能开关状态
 		blacklistEnabled := prs.blacklistService.ShouldUseFixedMode()
