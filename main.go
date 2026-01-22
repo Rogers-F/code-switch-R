@@ -300,7 +300,7 @@ func main() {
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "Code Switch R",
 		Width:     1400,
-		Height:    800,
+		Height:    1040,
 		MinWidth:  600,
 		MinHeight: 300,
 		Mac: application.MacWindow{

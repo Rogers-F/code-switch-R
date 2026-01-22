@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { Call } from '@wailsio/runtime'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings } from '../../services/appSettings'
+import { fetchProxyStatus } from '../../services/claudeSettings'
 
 const rootRef = ref<HTMLElement | null>(null)
 const used = ref(0)
@@ -16,6 +17,7 @@ const showCountdown = ref(false)
 const showForecast = ref(false)
 const countdownLabel = ref('')
 const forecastLabel = ref('')
+const hostingEnabled = ref(false)
 let ticker: number | undefined
 let cycleStart: Date | null = null
 let nextReset: Date | null = null
@@ -44,6 +46,7 @@ const progressPercentLabel = computed(() => {
   return `${percent}%`
 })
 const budgetTitle = computed(() => (cycleEnabled.value && cycleMode.value === 'weekly' ? '本周预算' : '今日预算'))
+const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
 
 const pad2 = (value: number) => String(value).padStart(2, '0')
 
@@ -174,6 +177,15 @@ const resizeToContent = async () => {
   }
 }
 
+const updateHostingState = async () => {
+  try {
+    const status = await fetchProxyStatus('claude')
+    hostingEnabled.value = Boolean(status?.enabled)
+  } catch (error) {
+    console.error('failed to load claude proxy status', error)
+  }
+}
+
 const refresh = async () => {
   loading.value = true
   try {
@@ -188,6 +200,7 @@ const refresh = async () => {
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
     updateCycleTimes()
+    await updateHostingState()
 
     if (cycleEnabled.value && cycleStart) {
       const startValue = formatLocalDateTime(cycleStart)
@@ -228,6 +241,16 @@ onUnmounted(() => {
 <template>
   <div ref="rootRef" class="tray-root">
     <div class="tray-panel">
+      <div class="tray-header">
+        <div class="tray-brand">
+          <div class="tray-brand__icon" aria-hidden="true">C</div>
+          <span class="tray-brand__name">Claude Code</span>
+        </div>
+        <div class="tray-status" :class="{ active: hostingEnabled }">
+          <span class="tray-status__dot"></span>
+          <span class="tray-status__text">{{ hostingLabel }}</span>
+        </div>
+      </div>
       <div class="tray-item">
         <div class="tray-item__header">
           <div class="tray-item__title">
@@ -272,6 +295,68 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.tray-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.tray-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tray-brand__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f2f2f;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.tray-brand__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2f2f2f;
+}
+
+.tray-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #7a7f86;
+}
+
+.tray-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  box-shadow: 0 0 0 2px rgba(203, 213, 225, 0.4);
+}
+
+.tray-status.active {
+  color: #2f2f2f;
+}
+
+.tray-status.active .tray-status__dot {
+  background: #5dbb63;
+  box-shadow: 0 0 0 2px rgba(93, 187, 99, 0.25);
 }
 
 .tray-item__header {
@@ -354,6 +439,39 @@ onUnmounted(() => {
   background: #2c2f35;
   border-color: rgba(255, 255, 255, 0.06);
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.4);
+}
+
+:global(.dark) .tray-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(.dark) .tray-brand__icon {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.35);
+}
+
+:global(.dark) .tray-brand__name {
+  color: #f1f5f9;
+}
+
+:global(.dark) .tray-status {
+  color: rgba(241, 245, 249, 0.6);
+}
+
+:global(.dark) .tray-status__dot {
+  background: rgba(148, 163, 184, 0.6);
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.3);
+}
+
+:global(.dark) .tray-status.active {
+  color: #f1f5f9;
+}
+
+:global(.dark) .tray-status.active .tray-status__dot {
+  background: #7ce07f;
+  box-shadow: 0 0 0 2px rgba(124, 224, 127, 0.3);
 }
 
 :global(.dark) .tray-item__title {
