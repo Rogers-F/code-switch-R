@@ -443,8 +443,8 @@ func getTrayUsage(logService *services.LogService, appSettings *services.AppSett
 
 func buildUsageTrayMenu(used float64, total float64, onShow func(), onQuit func()) *application.Menu {
 	menu := application.NewMenu()
-	menu.Add(trayUsageLabel(used, total)).SetDisabled(true)
-	menu.Add(trayProgressLabel(used, total)).SetDisabled(true)
+	menu.Add(trayUsageLabel(used, total)).SetEnabled(false)
+	menu.Add(trayProgressLabel(used, total)).SetEnabled(false)
 	menu.AddSeparator()
 	menu.Add("显示主窗口").OnClick(func(ctx *application.Context) {
 		onShow()
