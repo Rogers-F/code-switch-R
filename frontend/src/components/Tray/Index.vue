@@ -39,6 +39,10 @@ const progressRatio = computed(() => {
   if (total.value <= 0) return 0
   return Math.min(Math.max(used.value / total.value, 0), 1)
 })
+const progressPercentLabel = computed(() => {
+  const percent = Math.round(progressRatio.value * 100)
+  return `${percent}%`
+})
 
 const formatLocalDateTime = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -227,10 +231,13 @@ onUnmounted(() => {
             <span class="tray-dot"></span>
             <span>今日预算</span>
           </div>
-          <div class="tray-item__value" :class="{ loading }">
-            <span>已用 {{ usedLabel }}</span>
-            <span class="tray-divider">/</span>
-            <span>{{ totalLabel }}</span>
+          <div class="tray-item__summary">
+            <div class="tray-item__value" :class="{ loading }">
+              <span>已用 {{ usedLabel }}</span>
+              <span class="tray-divider">/</span>
+              <span>{{ totalLabel }}</span>
+            </div>
+            <span class="tray-item__percent">{{ progressPercentLabel }}</span>
           </div>
         </div>
         <div class="tray-progress">
@@ -271,6 +278,12 @@ onUnmounted(() => {
   gap: 12px;
 }
 
+.tray-item__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .tray-item__title {
   display: flex;
   align-items: center;
@@ -302,6 +315,14 @@ onUnmounted(() => {
 
 .tray-divider {
   opacity: 0.5;
+}
+
+.tray-item__percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5dbb63;
+  min-width: 36px;
+  text-align: right;
 }
 
 .tray-progress {
@@ -338,6 +359,10 @@ onUnmounted(() => {
 
 :global(.dark) .tray-item__value {
   color: rgba(241, 245, 249, 0.7);
+}
+
+:global(.dark) .tray-item__percent {
+  color: #7ce07f;
 }
 
 :global(.dark) .tray-progress {

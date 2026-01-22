@@ -516,8 +516,11 @@ onMounted(async () => {
             </div>
           </ListItem>
         </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.trayPanel') }}</h2>
         <div class="mac-panel">
-          <div class="panel-title">{{ $t('components.general.title.trayPanel') }}</div>
           <ListItem :label="$t('components.general.label.budgetTotal')">
             <div class="toggle-with-hint">
               <div class="budget-input">

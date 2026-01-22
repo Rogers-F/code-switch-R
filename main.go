@@ -347,11 +347,17 @@ func main() {
 		e.Cancel()
 	})
 
+	var trayWindow application.Window
+
 	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
 		showMainWindow(true)
 	})
 
 	app.Event.OnApplicationEvent(events.Mac.ApplicationDidBecomeActive, func(event *application.ApplicationEvent) {
+		if trayWindow != nil {
+			// Tray exists on macOS; avoid auto-opening the main window on activation.
+			return
+		}
 		if mainWindow.IsVisible() {
 			mainWindow.Focus()
 			return
@@ -359,7 +365,6 @@ func main() {
 		showMainWindow(true)
 	})
 
-	var trayWindow application.Window
 	if runtime.GOOS == "darwin" {
 		trayWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 			Title:       "Code Switch Tray",
