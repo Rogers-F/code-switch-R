@@ -1,6 +1,7 @@
 package services
 
 import (
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -483,6 +484,12 @@ func (us *UpdateService) DownloadUpdate(progressCallback func(float64)) error {
 		return fmt.Errorf("下载链接为空，请先检查更新")
 	}
 
+	// P1-1 修复：强制要求 SHA256 校验，禁止无哈希降级
+	if snapshotSHA == "" {
+		log.Printf("[UpdateService] ❌ 缺少 SHA256 校验信息，拒绝下载")
+		return fmt.Errorf("缺少 SHA256 校验信息，无法安全下载更新（请确保发布包含 .sha256 文件）")
+	}
+
 	log.Printf("[UpdateService] 下载 URL: %s", url)
 
 	filePath := filepath.Join(us.updateDir, filepath.Base(url))
@@ -589,6 +596,15 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 		return fmt.Errorf("下载失败，HTTP 状态码: %d", resp.StatusCode)
 	}
 
+	// P1-4 修复：服务器忽略 Range 请求返回 200 时，必须重新下载而非追加
+	// 否则会把完整文件追加到半文件末尾，导致数据损坏
+	if start > 0 && resp.StatusCode == http.StatusOK {
+		log.Printf("[UpdateService] 服务器忽略 Range 请求（返回 200），从头开始下载")
+		start = 0
+		total = 0
+		_ = os.Remove(dest)
+	}
+
 	if total == 0 {
 		total = resp.ContentLength
 		if total > 0 && start > 0 {
@@ -597,7 +613,7 @@ func (us *UpdateService) downloadWithResume(url, dest string, progressCallback f
 	}
 
 	var out *os.File
-	if start > 0 {
+	if start > 0 && resp.StatusCode == http.StatusPartialContent {
 		out, err = os.OpenFile(dest, os.O_WRONLY|os.O_APPEND, 0o644)
 	} else {
 		out, err = os.Create(dest)
@@ -760,16 +776,22 @@ func (us *UpdateService) ApplyUpdate() error {
 	}
 	us.mu.Unlock()
 
-	// SHA256 校验（如果有）
-	if expectedHash != "" {
-		if err := us.verifyDownload(downloadPath, expectedHash); err != nil {
-			log.Printf("[UpdateService] SHA256 校验失败: %v", err)
-			us.clearPendingState()
-			_ = os.Remove(downloadPath) // 删除损坏的文件
-			return fmt.Errorf("更新文件校验失败: %w", err)
-		}
-		log.Println("[UpdateService] SHA256 校验通过")
+	// P1-1 修复：强制要求 SHA256 校验，禁止无哈希降级
+	if expectedHash == "" {
+		log.Printf("[UpdateService] ❌ pending 文件缺少 SHA256 校验信息，拒绝安装")
+		us.clearPendingState()
+		_ = os.Remove(downloadPath)
+		return fmt.Errorf("pending 文件缺少 SHA256 校验信息，无法安全安装更新")
 	}
+
+	// SHA256 校验
+	if err := us.verifyDownload(downloadPath, expectedHash); err != nil {
+		log.Printf("[UpdateService] SHA256 校验失败: %v", err)
+		us.clearPendingState()
+		_ = os.Remove(downloadPath) // 删除损坏的文件
+		return fmt.Errorf("更新文件校验失败: %w", err)
+	}
+	log.Println("[UpdateService] SHA256 校验通过")
 
 	// 根据平台执行安装
 	var installErr error
@@ -965,11 +987,9 @@ try {
 	}
 
 	// P1-5: 不再在此处调用 clearPendingState()，由脚本负责
+	// P1-2 修复：不再提前释放更新锁，由脚本在成功/失败时统一清理
 
 	log.Printf("[UpdateService] 更新脚本已启动 (PID=%d)，准备退出主程序...", cmd.Process.Pid)
-
-	// 释放更新锁（脚本也会清理，这里提前释放避免文件句柄问题）
-	us.releaseUpdateLock()
 
 	// 退出当前进程，让 PowerShell 脚本完成替换
 	os.Exit(0)
@@ -1023,12 +1043,11 @@ func (us *UpdateService) applyUpdateDarwin(zipPath string) error {
 		return fmt.Errorf("创建临时解压目录失败: %w", err)
 	}
 
+	// P1-6 修复：使用安全解压函数替代系统 unzip 命令（防止 Zip-Slip 攻击）
 	log.Printf("[UpdateService] 解压更新包: %s -> %s", zipPath, extractDir)
-	unzipCmd := exec.Command("unzip", "-q", "-o", zipPath, "-d", extractDir)
-	unzipOut, err := unzipCmd.CombinedOutput()
-	if err != nil {
+	if err := safeUnzip(zipPath, extractDir); err != nil {
 		_ = os.RemoveAll(extractDir)
-		return fmt.Errorf("解压更新包失败: %w, 输出: %s", err, strings.TrimSpace(string(unzipOut)))
+		return fmt.Errorf("解压更新包失败: %w", err)
 	}
 
 	// 查找新 .app 包：优先同名、浅层优先、必要时递归
@@ -1210,7 +1229,7 @@ exit 0
 	log.Printf("[UpdateService] 更新脚本已启动 (PID=%d)，准备退出主程序...", cmd.Process.Pid)
 
 	// P1-5: 不再在此处调用 clearPendingState()，由脚本负责
-	us.releaseUpdateLock()
+	// P1-2 修复：不再提前释放更新锁，由脚本在成功/失败时统一清理
 
 	os.Exit(0)
 	return nil
@@ -1291,6 +1310,90 @@ func findNewAppBundle(extractDir, preferredName string) (string, error) {
 
 	log.Printf("[UpdateService] 从 %d 个候选中选择: %s (深度=%d)", len(candidates), selected, minDepth)
 	return selected, nil
+}
+
+// safeUnzip 安全解压 ZIP 文件（防止 Zip-Slip 路径穿越攻击）
+// P1-6 修复：用 Go archive/zip 替代系统 unzip 命令
+func safeUnzip(zipPath, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("打开 ZIP 文件失败: %w", err)
+	}
+	defer r.Close()
+
+	// 确保目标目录是绝对路径并以路径分隔符结尾
+	destDir, err = filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("解析目标目录失败: %w", err)
+	}
+	destDir = filepath.Clean(destDir) + string(os.PathSeparator)
+
+	for _, f := range r.File {
+		// 清理文件名，防止路径穿越
+		name := filepath.FromSlash(f.Name)
+		name = filepath.Clean(name)
+
+		// 拒绝绝对路径
+		if filepath.IsAbs(name) {
+			log.Printf("[UpdateService] ⚠️ 跳过绝对路径: %s", f.Name)
+			continue
+		}
+
+		// 拒绝 .. 开头的路径（路径穿越）
+		if strings.HasPrefix(name, ".."+string(os.PathSeparator)) || name == ".." {
+			log.Printf("[UpdateService] ⚠️ 跳过路径穿越: %s", f.Name)
+			continue
+		}
+
+		targetPath := filepath.Join(destDir, name)
+
+		// 二次校验：确保目标路径在 destDir 内
+		if !strings.HasPrefix(targetPath, destDir) {
+			log.Printf("[UpdateService] ⚠️ 跳过逃逸路径: %s -> %s", f.Name, targetPath)
+			continue
+		}
+
+		// 拒绝符号链接
+		if f.Mode()&os.ModeSymlink != 0 {
+			log.Printf("[UpdateService] ⚠️ 跳过符号链接: %s", f.Name)
+			continue
+		}
+
+		if f.FileInfo().IsDir() {
+			// 创建目录
+			if err := os.MkdirAll(targetPath, f.Mode()|0o755); err != nil {
+				return fmt.Errorf("创建目录失败 %s: %w", targetPath, err)
+			}
+			continue
+		}
+
+		// 确保父目录存在
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return fmt.Errorf("创建父目录失败 %s: %w", filepath.Dir(targetPath), err)
+		}
+
+		// 解压文件
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("打开 ZIP 条目失败 %s: %w", f.Name, err)
+		}
+
+		outFile, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			rc.Close()
+			return fmt.Errorf("创建文件失败 %s: %w", targetPath, err)
+		}
+
+		_, err = io.Copy(outFile, rc)
+		rc.Close()
+		outFile.Close()
+
+		if err != nil {
+			return fmt.Errorf("写入文件失败 %s: %w", targetPath, err)
+		}
+	}
+
+	return nil
 }
 
 // applyUpdateLinux Linux 平台更新（脚本方式，避免 ETXTBSY）
@@ -1546,7 +1649,7 @@ exit 0
 	log.Printf("[UpdateService] 更新脚本已启动 (PID=%d)，准备退出主程序...", cmd.Process.Pid)
 
 	// P1-5: 不再在此处调用 clearPendingState()，由脚本负责
-	us.releaseUpdateLock()
+	// P1-2 修复：不再提前释放更新锁，由脚本在成功/失败时统一清理
 
 	os.Exit(0)
 	return nil
@@ -1599,14 +1702,51 @@ func (us *UpdateService) RestartApp() error {
 		os.Exit(0)
 
 	case "darwin":
-		cmd := exec.Command("open", "-n", executable)
+		// P1-8 修复：macOS 重启应定位 .app 并使用 open -n -a
+		appPath := executable
+		for i := 0; i < 6; i++ {
+			if strings.HasSuffix(strings.ToLower(appPath), ".app") {
+				break
+			}
+			parent := filepath.Dir(appPath)
+			if parent == appPath {
+				break
+			}
+			appPath = parent
+		}
+
+		var cmd *exec.Cmd
+		if strings.HasSuffix(strings.ToLower(appPath), ".app") {
+			// 使用 open -n -a 启动 .app 包
+			cmd = exec.Command("/usr/bin/open", "-n", "-a", appPath)
+			log.Printf("[UpdateService] macOS 重启: open -n -a %s", appPath)
+		} else {
+			// 回退到直接启动可执行文件
+			cmd = exec.Command("/usr/bin/open", "-n", executable)
+			log.Printf("[UpdateService] macOS 重启: open -n %s", executable)
+		}
+
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("启动新进程失败: %w", err)
 		}
 		os.Exit(0)
 
 	case "linux":
-		cmd := exec.Command(executable)
+		// P1-8 修复：Linux AppImage 重启应使用 APPIMAGE 外层路径
+		restartPath := executable
+		appimageEnv := strings.TrimSpace(os.Getenv("APPIMAGE"))
+		isAppImageMount := strings.Contains(executable, "/.mount_")
+
+		if isAppImageMount && appimageEnv != "" && filepath.IsAbs(appimageEnv) {
+			if !strings.Contains(appimageEnv, "/.mount_") {
+				if fi, err := os.Stat(appimageEnv); err == nil && !fi.IsDir() {
+					restartPath = appimageEnv
+					log.Printf("[UpdateService] Linux 重启: 使用 APPIMAGE 路径 %s", restartPath)
+				}
+			}
+		}
+
+		cmd := exec.Command(restartPath)
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("启动新进程失败: %w", err)
 		}
@@ -2144,6 +2284,68 @@ func (us *UpdateService) downloadUpdater(targetPath string) error {
 	return nil
 }
 
+// downloadUpdaterToTempAndVerify 每次使用前下载 updater.exe 到随机路径并校验 SHA256
+// P0-1 修复：不信任本地已存在的 updater.exe，降低本地投毒风险
+func (us *UpdateService) downloadUpdaterToTempAndVerify() (string, error) {
+	us.mu.Lock()
+	version := strings.TrimSpace(us.latestVersion)
+	us.mu.Unlock()
+	if version == "" {
+		return "", fmt.Errorf("latestVersion 未设置，无法下载 updater.exe")
+	}
+
+	releaseBaseURL := "https://github.com/Rogers-F/code-switch-R/releases/download"
+	mainURL := fmt.Sprintf("%s/%s/%s", releaseBaseURL, version, "updater.exe")
+	hashURL := mainURL + ".sha256"
+
+	// 1) 下载并解析 updater.exe.sha256（仅取第一个字段作为 hash）
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(hashURL)
+	if err != nil {
+		return "", fmt.Errorf("下载 updater.exe.sha256 失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("下载 updater.exe.sha256 失败，HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取 updater.exe.sha256 失败: %w", err)
+	}
+	fields := strings.Fields(strings.TrimSpace(string(body)))
+	if len(fields) < 1 {
+		return "", fmt.Errorf("updater.exe.sha256 文件格式错误")
+	}
+	expectedHash := fields[0]
+	if len(expectedHash) != 64 {
+		return "", fmt.Errorf("updater.exe.sha256 哈希长度异常: %s", expectedHash)
+	}
+
+	// 2) 生成随机临时路径（同目录，减少跨盘/权限问题）
+	tmp, err := os.CreateTemp(us.updateDir, "updater-*.exe")
+	if err != nil {
+		return "", fmt.Errorf("创建 updater 临时文件失败: %w", err)
+	}
+	tmpPath := tmp.Name()
+	_ = tmp.Close()
+
+	// 3) 下载 updater.exe 到临时路径
+	log.Printf("[UpdateService] 下载 updater.exe 到临时路径: %s", tmpPath)
+	if err := us.downloadFile(mainURL, tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("下载 updater.exe 失败: %w", err)
+	}
+
+	// 4) SHA256 校验
+	if err := us.verifyDownload(tmpPath, expectedHash); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("updater.exe SHA256 校验失败: %w", err)
+	}
+
+	log.Printf("[UpdateService] updater.exe SHA256 校验通过")
+	return tmpPath, nil
+}
+
 // calculateTimeout 根据文件大小动态计算超时时间
 func calculateTimeout(fileSize int64) int {
 	base := 30 // 基础 30 秒
@@ -2161,14 +2363,13 @@ func (us *UpdateService) applyInstalledUpdate(newExePath string) error {
 	}
 	currentExe, _ = filepath.EvalSymlinks(currentExe)
 
-	// 1. 获取或下载 updater.exe
-	updaterPath := filepath.Join(us.updateDir, "updater.exe")
-	if _, err := os.Stat(updaterPath); os.IsNotExist(err) {
-		log.Printf("[UpdateService] updater.exe 不存在，开始下载...")
-		if err := us.downloadUpdater(updaterPath); err != nil {
-			return fmt.Errorf("下载更新器失败: %w", err)
-		}
+	// 1. 每次使用前强制重新下载 updater.exe（随机路径 + SHA256 校验）
+	// P0-1 修复：不信任本地已存在的 updater.exe，避免本地投毒
+	updaterPath, err := us.downloadUpdaterToTempAndVerify()
+	if err != nil {
+		return fmt.Errorf("下载更新器失败: %w", err)
 	}
+	// 注意：updaterPath 是临时路径（如 updater-123456.exe），使用后由 updater 自清理或下次覆盖
 
 	// 2. 计算超时时间
 	fileInfo, err := os.Stat(newExePath)
@@ -2236,12 +2437,10 @@ func (us *UpdateService) applyInstalledUpdate(newExePath string) error {
 	}
 
 	// P1-5: 不再在此处调用 clearPendingState()，由 updater.exe 成功后通过 cleanup_paths 清理
+	// P1-2 修复：不再提前释放更新锁，由 updater.exe 在成功/失败时统一清理
 	log.Printf("[UpdateService] UAC 提权请求已确认，准备退出主程序...")
 
-	// 5. 释放更新锁
-	us.releaseUpdateLock()
-
-	// 6. 退出主程序
+	// 退出主程序
 	os.Exit(0)
 	return nil
 }

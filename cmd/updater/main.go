@@ -21,8 +21,66 @@ type UpdateTask struct {
 	TargetExe    string   `json:"target_exe"`     // 目标可执行文件路径
 	NewExePath   string   `json:"new_exe_path"`   // 新版本文件路径
 	BackupPath   string   `json:"backup_path"`    // 备份路径
-	CleanupPaths []string `json:"cleanup_paths"`  // 需要清理的临时文件
+	CleanupPaths []string `json:"cleanup_paths"`  // 忽略：不再信任来自任务文件的清理指令
 	TimeoutSec   int      `json:"timeout_sec"`    // 必填：等待超时（秒），由主程序动态计算
+}
+
+// validateTask 校验任务配置，阻断 task 文件被篡改后的提权风险
+func validateTask(task UpdateTask, updateDir string) error {
+	updateDir = filepath.Clean(updateDir)
+
+	// 基本字段检查
+	if task.MainPID <= 0 {
+		return fmt.Errorf("MainPID 不合法: %d", task.MainPID)
+	}
+	if task.TimeoutSec <= 0 || task.TimeoutSec > 21600 {
+		return fmt.Errorf("TimeoutSec 不合法: %d", task.TimeoutSec)
+	}
+
+	targetExe := filepath.Clean(task.TargetExe)
+	newExe := filepath.Clean(task.NewExePath)
+	backup := filepath.Clean(task.BackupPath)
+
+	if !filepath.IsAbs(targetExe) || !filepath.IsAbs(newExe) || !filepath.IsAbs(backup) {
+		return fmt.Errorf("TargetExe/NewExePath/BackupPath 必须是绝对路径")
+	}
+
+	// 只允许更新 CodeSwitch.exe，避免任意文件替换
+	if !strings.EqualFold(filepath.Base(targetExe), "CodeSwitch.exe") {
+		return fmt.Errorf("TargetExe 文件名必须是 CodeSwitch.exe: %s", targetExe)
+	}
+	if !strings.EqualFold(filepath.Base(newExe), "CodeSwitch.exe") {
+		return fmt.Errorf("NewExePath 文件名必须是 CodeSwitch.exe: %s", newExe)
+	}
+
+	// NewExePath 必须在 updateDir 内（严格到"同一目录"）
+	if !strings.EqualFold(filepath.Clean(filepath.Dir(newExe)), updateDir) {
+		return fmt.Errorf("NewExePath 必须位于更新目录: %s", updateDir)
+	}
+
+	// 备份路径必须固定为 TargetExe + ".old"
+	if !strings.EqualFold(backup, filepath.Clean(targetExe+".old")) {
+		return fmt.Errorf("BackupPath 必须等于 TargetExe+.old")
+	}
+
+	// 防止目标就在更新目录里（减少奇怪路径/自更新死循环）
+	if strings.EqualFold(filepath.Clean(filepath.Dir(targetExe)), updateDir) {
+		return fmt.Errorf("TargetExe 不允许位于更新目录: %s", updateDir)
+	}
+
+	// NewExePath 必须是普通文件，且禁止符号链接
+	fi, err := os.Lstat(newExe)
+	if err != nil {
+		return fmt.Errorf("NewExePath 不存在或不可访问: %w", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("NewExePath 不允许为符号链接: %s", newExe)
+	}
+	if fi.IsDir() || fi.Size() <= 0 {
+		return fmt.Errorf("NewExePath 必须是非空文件: %s", newExe)
+	}
+
+	return nil
 }
 
 // isElevated 检查当前进程是否具有管理员权限
@@ -83,10 +141,35 @@ func main() {
 		log.Fatal("Usage: updater.exe <task-file>")
 	}
 
-	taskFile := os.Args[1]
+	rawTaskFile := os.Args[1]
 
-	// 设置日志文件
-	logPath := filepath.Join(filepath.Dir(taskFile), "update.log")
+	// 先做 taskFile 路径约束（在任何"写文件/删文件/提权操作"之前）
+	// 防止攻击者通过传入任意 taskFile 路径，引导 updater（管理员）写入/覆盖任意目录
+	taskFile, err := filepath.Abs(rawTaskFile)
+	if err != nil {
+		log.Fatalf("解析任务文件绝对路径失败: %v", err)
+	}
+	if !strings.EqualFold(filepath.Base(taskFile), "update-task.json") {
+		log.Fatalf("任务文件名不安全，拒绝执行: %s", taskFile)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("获取用户目录失败: %v", err)
+	}
+	expectedUpdateDir := filepath.Join(home, ".code-switch", "updates")
+	expectedUpdateDir, err = filepath.Abs(expectedUpdateDir)
+	if err != nil {
+		log.Fatalf("解析更新目录绝对路径失败: %v", err)
+	}
+	updateDir := filepath.Clean(filepath.Dir(taskFile))
+	if !strings.EqualFold(updateDir, filepath.Clean(expectedUpdateDir)) {
+		log.Fatalf("任务文件目录不安全，拒绝执行: task=%s dir=%s expected=%s", taskFile, updateDir, expectedUpdateDir)
+	}
+	codeSwitchDir := filepath.Clean(filepath.Dir(updateDir))
+
+	// 设置日志文件（现在可以安全创建，因为 updateDir 已校验）
+	logPath := filepath.Join(updateDir, "update.log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		// 无法创建日志文件时使用标准输出
@@ -99,6 +182,7 @@ func main() {
 	log.Println("========================================")
 	log.Printf("CodeSwitch Updater 启动")
 	log.Printf("任务文件: %s", taskFile)
+	log.Printf("更新目录: %s", updateDir)
 
 	// UAC 自检：确保以管理员权限运行
 	if isElevated() {
@@ -123,13 +207,18 @@ func main() {
 		log.Fatalf("解析任务配置失败: %v", err)
 	}
 
+	// 严格校验任务字段，阻断 task 文件被篡改后的提权利用
+	if err := validateTask(task, updateDir); err != nil {
+		log.Fatalf("任务配置不安全，拒绝执行: %v", err)
+	}
+
 	log.Printf("任务配置:")
 	log.Printf("  - MainPID: %d", task.MainPID)
 	log.Printf("  - TargetExe: %s", task.TargetExe)
 	log.Printf("  - NewExePath: %s", task.NewExePath)
 	log.Printf("  - BackupPath: %s", task.BackupPath)
 	log.Printf("  - TimeoutSec: %d", task.TimeoutSec)
-	log.Printf("  - CleanupPaths: %v", task.CleanupPaths)
+	log.Printf("  - CleanupPaths (ignored): %v", task.CleanupPaths)
 
 	// 等待主程序退出（使用任务配置的超时值，禁止硬编码）
 	timeout := time.Duration(task.TimeoutSec) * time.Second
@@ -172,12 +261,26 @@ func main() {
 	log.Println("等待 3 秒后清理临时文件...")
 	time.Sleep(3 * time.Second)
 
-	for _, path := range task.CleanupPaths {
-		if err := os.RemoveAll(path); err != nil {
-			log.Printf("[警告] 清理失败: %s - %v", path, err)
-		} else {
-			log.Printf("已清理: %s", path)
+	// 安全清理：忽略 task.CleanupPaths（不信任来自任务文件的清理指令）
+	// 仅清理我们自己计算出的安全路径（更新目录内文件 + .code-switch 下的 pending 标记）
+	safeCleanupFiles := []string{
+		filepath.Clean(task.NewExePath),
+		filepath.Clean(task.NewExePath + ".sha256"),
+		filepath.Join(updateDir, "update.lock"),
+		filepath.Join(codeSwitchDir, ".pending-update"),
+	}
+	for _, p := range safeCleanupFiles {
+		if p == "" {
+			continue
 		}
+		if err := os.Remove(p); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			log.Printf("[警告] 清理失败: %s - %v", p, err)
+			continue
+		}
+		log.Printf("已清理: %s", p)
 	}
 
 	// 删除任务文件
