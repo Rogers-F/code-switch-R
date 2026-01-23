@@ -7,7 +7,9 @@ import { fetchProxyStatus } from '../../services/claudeSettings'
 
 const rootRef = ref<HTMLElement | null>(null)
 const used = ref(0)
+const usedRaw = ref(0)
 const total = ref(0)
+const usedAdjustment = ref(0)
 const loading = ref(false)
 const cycleEnabled = ref(false)
 const cycleMode = ref<'daily' | 'weekly'>('daily')
@@ -15,6 +17,8 @@ const refreshTime = ref('00:00')
 const refreshDay = ref(1)
 const showCountdown = ref(false)
 const showForecast = ref(false)
+const forecastMethod = ref<'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'>('cycle')
+const forecastRate = ref(0)
 const countdownLabel = ref('')
 const forecastLabel = ref('')
 const hostingEnabled = ref(false)
@@ -52,6 +56,10 @@ const pad2 = (value: number) => String(value).padStart(2, '0')
 
 const formatLocalDateTime = (date: Date) => {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+}
+
+const formatLocalDateTimeLabel = (date: Date) => {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
 const startOfDay = (date: Date) => {
@@ -116,12 +124,65 @@ const updateCycleTimes = () => {
 }
 
 const formatCountdown = (remainingMs: number) => {
-  const totalSeconds = Math.max(Math.floor(remainingMs / 1000), 0)
-  const days = Math.floor(totalSeconds / 86400)
-  const hours = Math.floor((totalSeconds % 86400) / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  return `${pad2(days)}天 ${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`
+  const totalMinutes = Math.max(Math.floor(remainingMs / 60000), 0)
+  const days = Math.floor(totalMinutes / (24 * 60))
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
+  const minutes = totalMinutes % 60
+  return `${pad2(days)}天 ${pad2(hours)}:${pad2(minutes)}`
+}
+
+const applyUsedAdjustment = (rawUsed: number) => {
+  const adjusted = rawUsed + usedAdjustment.value
+  if (!Number.isFinite(adjusted)) return 0
+  return Math.max(adjusted, 0)
+}
+
+const clampStartToCycle = (start: Date) => {
+  if (cycleEnabled.value && cycleStart && start < cycleStart) {
+    return cycleStart
+  }
+  return start
+}
+
+const calculateRate = (cost: number, seconds: number) => {
+  if (!Number.isFinite(cost) || !Number.isFinite(seconds) || seconds <= 0) return 0
+  return Math.max(cost, 0) / seconds
+}
+
+const computeForecastRate = async (now: Date) => {
+  const method = forecastMethod.value
+  if (method === 'cycle') {
+    const start = cycleStart ?? startOfDay(now)
+    const elapsedSeconds = Math.max((now.getTime() - start.getTime()) / 1000, 1)
+    return calculateRate(usedRaw.value, elapsedSeconds)
+  }
+  if (method === '10m') {
+    const windowStart = new Date(now.getTime() - 10 * 60 * 1000)
+    const start = clampStartToCycle(windowStart)
+    const cost = Number(await fetchCostSince(formatLocalDateTime(start), ''))
+    const seconds = (now.getTime() - start.getTime()) / 1000
+    return calculateRate(cost, seconds)
+  }
+  if (method === '1h') {
+    const windowStart = new Date(now.getTime() - 60 * 60 * 1000)
+    const start = clampStartToCycle(windowStart)
+    const cost = Number(await fetchCostSince(formatLocalDateTime(start), ''))
+    const seconds = (now.getTime() - start.getTime()) / 1000
+    return calculateRate(cost, seconds)
+  }
+  if (method === 'yesterday') {
+    const todayStart = startOfDay(now)
+    const yesterdayStart = new Date(todayStart)
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1)
+    const costSinceYesterday = Number(await fetchCostSince(formatLocalDateTime(yesterdayStart), ''))
+    const costSinceToday = Number(await fetchCostSince(formatLocalDateTime(todayStart), ''))
+    const yesterdayCost = Math.max(costSinceYesterday - costSinceToday, 0)
+    return calculateRate(yesterdayCost, 24 * 60 * 60)
+  }
+  const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const cost = Number(await fetchCostSince(formatLocalDateTime(windowStart), ''))
+  const seconds = (now.getTime() - windowStart.getTime()) / 1000
+  return calculateRate(cost, seconds)
 }
 
 const updateDerivedLabels = () => {
@@ -139,13 +200,11 @@ const updateDerivedLabels = () => {
   }
 
   if (showForecast.value && total.value > 0) {
-    const start = cycleStart ?? startOfDay(now)
-    const elapsedSeconds = Math.max((now.getTime() - start.getTime()) / 1000, 1)
-    const rate = used.value / elapsedSeconds
+    const rate = forecastRate.value
     if (rate > 0 && used.value < total.value) {
       const secondsToBudget = (total.value - used.value) / rate
       const forecastTime = new Date(now.getTime() + secondsToBudget * 1000)
-      forecastLabel.value = `预计耗尽 ${formatLocalDateTime(forecastTime)}`
+      forecastLabel.value = `预计耗尽 ${formatLocalDateTimeLabel(forecastTime)}`
     } else if (used.value >= total.value && total.value > 0) {
       forecastLabel.value = '已达预算'
     } else {
@@ -161,7 +220,7 @@ const setupTicker = () => {
     window.clearInterval(ticker)
   }
   if (showCountdown.value || showForecast.value) {
-    ticker = window.setInterval(updateDerivedLabels, 1000)
+    ticker = window.setInterval(updateDerivedLabels, 60_000)
   }
 }
 
@@ -199,16 +258,26 @@ const refresh = async () => {
       : 1
     showCountdown.value = settings?.budget_show_countdown ?? false
     showForecast.value = settings?.budget_show_forecast ?? false
+    const rawForecastMethod = String(settings?.budget_forecast_method ?? 'cycle')
+    forecastMethod.value = rawForecastMethod === '10m' || rawForecastMethod === '1h' || rawForecastMethod === 'yesterday' || rawForecastMethod === 'last24h'
+      ? rawForecastMethod
+      : 'cycle'
+    const rawAdjustment = Number(settings?.budget_used_adjustment ?? 0)
+    usedAdjustment.value = Number.isFinite(rawAdjustment) ? rawAdjustment : 0
     updateCycleTimes()
     await updateHostingState()
 
+    let rawUsed = 0
     if (cycleEnabled.value && cycleStart) {
       const startValue = formatLocalDateTime(cycleStart)
-      used.value = Number(await fetchCostSince(startValue, ''))
+      rawUsed = Number(await fetchCostSince(startValue, ''))
     } else {
       const stats = await fetchLogStats('')
-      used.value = Number(stats?.cost_total ?? 0)
+      rawUsed = Number(stats?.cost_total ?? 0)
     }
+    usedRaw.value = Number.isFinite(rawUsed) ? rawUsed : 0
+    used.value = applyUsedAdjustment(usedRaw.value)
+    forecastRate.value = showForecast.value ? await computeForecastRate(new Date()) : 0
   } catch (error) {
     console.error('failed to load tray stats', error)
   } finally {

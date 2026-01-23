@@ -496,6 +496,7 @@ const (
 func getTrayUsage(logService *services.LogService, appSettings *services.AppSettingsService) (float64, float64) {
 	used := 0.0
 	total := 0.0
+	adjustment := 0.0
 	if logService != nil {
 		stats, err := logService.StatsSince("")
 		if err == nil {
@@ -506,8 +507,10 @@ func getTrayUsage(logService *services.LogService, appSettings *services.AppSett
 		settings, err := appSettings.GetAppSettings()
 		if err == nil {
 			total = settings.BudgetTotal
+			adjustment = settings.BudgetUsedAdjustment
 		}
 	}
+	used += adjustment
 	if used < 0 {
 		used = 0
 	}

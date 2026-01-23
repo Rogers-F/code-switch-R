@@ -4,12 +4,14 @@ export type AppSettings = {
   show_heatmap: boolean
   show_home_title: boolean
   budget_total: number
+  budget_used_adjustment: number
   budget_cycle_enabled: boolean
   budget_cycle_mode: string
   budget_refresh_time: string
   budget_refresh_day: number
   budget_show_countdown: boolean
   budget_show_forecast: boolean
+  budget_forecast_method: string
   auto_start: boolean
   auto_update: boolean
   auto_connectivity_test: boolean
@@ -21,12 +23,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   show_heatmap: true,
   show_home_title: true,
   budget_total: 0,
+  budget_used_adjustment: 0,
   budget_cycle_enabled: false,
   budget_cycle_mode: 'daily',
   budget_refresh_time: '00:00',
   budget_refresh_day: 1,
   budget_show_countdown: false,
   budget_show_forecast: false,
+  budget_forecast_method: 'cycle',
   auto_start: false,
   auto_update: true,
   auto_connectivity_test: false,
