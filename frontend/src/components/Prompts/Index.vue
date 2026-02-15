@@ -10,7 +10,7 @@ import {
   ImportFromFile,
   GetCurrentFileContent
 } from '../../../bindings/codeswitch/services/promptservice'
-import type { Prompt } from '../../../bindings/codeswitch/services/models'
+import { Prompt } from '../../../bindings/codeswitch/services/models'
 
 const { t } = useI18n()
 
@@ -23,7 +23,7 @@ const platforms: { id: Platform; name: string }[] = [
 ]
 
 const activePlatform = ref<Platform>('claude')
-const prompts = ref<Record<string, Prompt>>({})
+const prompts = ref<Record<string, Prompt | undefined>>({})
 const loading = ref(false)
 const showModal = ref(false)
 const editingPrompt = ref<Prompt | null>(null)
@@ -39,7 +39,7 @@ const formData = ref({
   enabled: false
 })
 
-const promptList = computed(() => Object.values(prompts.value))
+const promptList = computed(() => Object.values(prompts.value).filter((p): p is Prompt => !!p))
 const enabledPrompt = computed(() => promptList.value.find(p => p.enabled))
 const promptCount = computed(() => promptList.value.length)
 
@@ -61,7 +61,7 @@ async function handleToggleEnabled(prompt: Prompt) {
       await EnablePrompt(activePlatform.value, prompt.id)
     } else {
       // 禁用：将 enabled 设为 false
-      await UpsertPrompt(activePlatform.value, prompt.id, { ...prompt, enabled: false })
+      await UpsertPrompt(activePlatform.value, prompt.id, new Prompt({ ...prompt, enabled: false }))
     }
     await loadPrompts()
   } catch (e) {
@@ -117,13 +117,13 @@ async function openEditModal(prompt: Prompt) {
 
 async function savePrompt() {
   try {
-    const prompt: Prompt = {
+    const prompt = new Prompt({
       id: formData.value.id,
       name: formData.value.name,
       content: formData.value.content,
       description: formData.value.description || undefined,
       enabled: formData.value.enabled
-    }
+    })
     await UpsertPrompt(activePlatform.value, prompt.id, prompt)
     showModal.value = false
     await loadPrompts()

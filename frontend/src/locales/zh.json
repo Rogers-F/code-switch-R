@@ -606,6 +606,8 @@
         "next_up": "下次启动自动检查更新",
         "autoConnectivityTest": "自动可用性监控",
         "autoConnectivityTestHint": "启用后会每分钟自动检测已启用监控的供应商可用性",
+        "insecureSkipVerify": "跳过 TLS 证书验证",
+        "insecureSkipVerifyHint": "关闭后将严格验证上游供应商的 TLS 证书",
         "blacklistThreshold": "失败次数阈值",
         "blacklistDuration": "拉黑时长",
         "saveBlacklist": "保存配置",
