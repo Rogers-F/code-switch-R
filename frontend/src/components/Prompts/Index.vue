@@ -10,7 +10,7 @@ import {
   ImportFromFile,
   GetCurrentFileContent
 } from '../../../bindings/codeswitch/services/promptservice'
-import type { Prompt } from '../../../bindings/codeswitch/services/models'
+import { Prompt } from '../../../bindings/codeswitch/services/models'
 
 const { t } = useI18n()
 
@@ -61,7 +61,7 @@ async function handleToggleEnabled(prompt: Prompt) {
       await EnablePrompt(activePlatform.value, prompt.id)
     } else {
       // 禁用：将 enabled 设为 false
-      await UpsertPrompt(activePlatform.value, prompt.id, { ...prompt, enabled: false })
+      await UpsertPrompt(activePlatform.value, prompt.id, new Prompt({ ...prompt, enabled: false }))
     }
     await loadPrompts()
   } catch (e) {
@@ -117,13 +117,13 @@ async function openEditModal(prompt: Prompt) {
 
 async function savePrompt() {
   try {
-    const prompt: Prompt = {
+    const prompt = new Prompt({
       id: formData.value.id,
       name: formData.value.name,
       content: formData.value.content,
       description: formData.value.description || undefined,
       enabled: formData.value.enabled
-    }
+    })
     await UpsertPrompt(activePlatform.value, prompt.id, prompt)
     showModal.value = false
     await loadPrompts()

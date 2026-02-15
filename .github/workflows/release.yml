@@ -9,71 +9,6 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    name: Build macOS
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [arm64, amd64]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Update version from tag
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Updating version to: $VERSION"
-          sed -i '' "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
-          echo "Updated version_service.go:"
-          grep "AppVersion" version_service.go
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
-
-      - name: Install frontend dependencies
-        run: cd frontend && npm install
-
-      - name: Update build assets
-        run: wails3 task common:update:build-assets
-
-      - name: Generate bindings
-        run: wails3 task common:generate:bindings
-
-      - name: Build macOS ${{ matrix.arch }}
-        run: env ARCH=${{ matrix.arch }} wails3 task package
-
-      - name: Find app bundle
-        id: find-app
-        run: |
-          if [ -d "bin/codeswitch.app" ]; then
-            echo "app_path=bin/codeswitch.app" >> $GITHUB_OUTPUT
-          elif [ -d "bin/CodeSwitch.app" ]; then
-            echo "app_path=bin/CodeSwitch.app" >> $GITHUB_OUTPUT
-          else
-            echo "App bundle not found" >&2
-            exit 1
-          fi
-
-      - name: Archive macOS app
-        run: |
-          cd bin
-          ditto -c -k --sequesterRsrc --keepParent "$(basename ${{ steps.find-app.outputs.app_path }})" CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}
-          path: bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
-
   build-windows:
     name: Build Windows
     runs-on: windows-latest
@@ -190,120 +125,9 @@ jobs:
             bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.exe
             bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.exe.sha256
 
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Update version from tag
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Updating version to: $VERSION"
-          sed -i "s/const AppVersion = \"v[^\"]*\"/const AppVersion = \"v$VERSION\"/" version_service.go
-          echo "Updated version_service.go:"
-          grep "AppVersion" version_service.go
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install Linux Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            pkg-config \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev
-
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
-
-      - name: Install frontend dependencies
-        run: cd frontend && npm install
-
-      - name: Update build assets
-        run: wails3 task common:update:build-assets
-
-      - name: Generate bindings
-        run: wails3 task common:generate:bindings
-
-      - name: Build Linux Binary
-        run: wails3 task linux:build
-        env:
-          PRODUCTION: "true"
-
-      - name: Generate Desktop File
-        run: wails3 task linux:generate:dotdesktop
-
-      - name: Create AppImage
-        run: wails3 task linux:create:appimage
-
-      - name: Rename AppImage
-        run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          cd bin
-          echo "Files in bin/:"
-          ls -la
-          # linuxdeploy creates AppImage with lowercase name and arch suffix
-          for f in *-x86_64.AppImage *-aarch64.AppImage; do
-            if [ -f "$f" ]; then
-              mv "$f" "CodeSwitch-v${VERSION}.AppImage"
-              echo "Renamed $f -> CodeSwitch-v${VERSION}.AppImage"
-              break
-            fi
-          done
-          ls -la "CodeSwitch-v${VERSION}.AppImage"
-
-      - name: Set nfpm script permissions
-        run: |
-          chmod +x build/linux/nfpm/scripts/postinstall.sh
-          chmod +x build/linux/nfpm/scripts/postremove.sh
-
-      - name: Update nfpm version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          sed -i "s/^version:.*/version: \"$VERSION\"/" build/linux/nfpm/nfpm.yaml
-          echo "Updated nfpm version to: $VERSION"
-
-      - name: Create DEB Package
-        run: wails3 task linux:create:deb
-
-      - name: Create RPM Package
-        run: wails3 task linux:create:rpm
-
-      - name: Generate SHA256 Checksums
-        run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          cd bin
-          sha256sum "CodeSwitch-v${VERSION}.AppImage" > "CodeSwitch-v${VERSION}.AppImage.sha256"
-          for f in codeswitch_*.deb; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
-          for f in codeswitch-*.rpm; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
-          echo "SHA256 checksums:"
-          cat *.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-amd64
-          path: |
-            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.AppImage
-            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.AppImage.sha256
-            bin/codeswitch_*.deb
-            bin/codeswitch_*.deb.sha256
-            bin/codeswitch-*.rpm
-            bin/codeswitch-*.rpm.sha256
-
   create-release:
     name: Create Release
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -316,32 +140,15 @@ jobs:
       - name: Display structure
         run: ls -R artifacts
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Prepare release assets
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           mkdir -p release-assets
 
-          # macOS
-          cp artifacts/macos-arm64/CodeSwitch-v${VERSION}-macos-arm64.zip release-assets/
-          cp artifacts/macos-amd64/CodeSwitch-v${VERSION}-macos-amd64.zip release-assets/
-
           # Windows
           cp artifacts/windows-amd64/CodeSwitch-v${VERSION}-amd64-installer.exe release-assets/
           cp artifacts/windows-amd64/CodeSwitch-v${VERSION}.exe release-assets/
           cp artifacts/windows-amd64/CodeSwitch-v${VERSION}.exe.sha256 release-assets/
-
-          # Linux
-          cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage release-assets/
-          cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage.sha256 release-assets/
-          cp artifacts/linux-amd64/codeswitch_*.deb release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch_*.deb.sha256 release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm.sha256 release-assets/ 2>/dev/null || true
 
           ls -lh release-assets/
 
@@ -380,41 +187,9 @@ jobs:
           |------|------|------|
           | **Windows (首次)** | \`CodeSwitch-v${VERSION}-amd64-installer.exe\` | NSIS 安装器 |
           | **Windows (便携)** | \`CodeSwitch-v${VERSION}.exe\` | 直接运行 |
-          | **macOS (ARM)** | \`CodeSwitch-v${VERSION}-macos-arm64.zip\` | Apple Silicon |
-          | **macOS (Intel)** | \`CodeSwitch-v${VERSION}-macos-amd64.zip\` | Intel 芯片 |
-          | **Linux (通用)** | \`CodeSwitch-v${VERSION}.AppImage\` | 跨发行版便携 |
-          | **Linux (Debian/Ubuntu)** | \`codeswitch_*.deb\` | apt 安装 |
-          | **Linux (RHEL/Fedora)** | \`codeswitch-*.rpm\` | dnf/yum 安装 |
-
-          ## Linux 安装
-
-          ### AppImage (推荐)
-          \`\`\`bash
-          chmod +x CodeSwitch-v${VERSION}.AppImage
-          ./CodeSwitch-v${VERSION}.AppImage
-          \`\`\`
-          如遇 FUSE 问题：\`./CodeSwitch-v${VERSION}.AppImage --appimage-extract-and-run\`
-
-          ### Debian/Ubuntu
-          \`\`\`bash
-          sudo dpkg -i codeswitch_*.deb
-          sudo apt-get install -f  # 安装依赖
-          \`\`\`
-
-          ### RHEL/Fedora
-          \`\`\`bash
-          sudo rpm -i codeswitch-*.rpm
-          # 或
-          sudo dnf install codeswitch-*.rpm
-          \`\`\`
 
           ## 文件校验
-          所有平台均提供 SHA256 校验文件（\`.sha256\`），下载后可验证完整性：
-          \`\`\`bash
-          # Linux/macOS
-          sha256sum -c CodeSwitch-v${VERSION}.AppImage.sha256
-
-          # Windows PowerShell
+          \`\`\`powershell
           Get-FileHash CodeSwitch-v${VERSION}.exe | Format-List
           \`\`\`
           EOF
