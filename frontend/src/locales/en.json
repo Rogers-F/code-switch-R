@@ -600,6 +600,8 @@
         "autoUpdate": "Automatic update",
         "autoConnectivityTest": "Auto Availability Monitoring",
         "autoConnectivityTestHint": "Automatically check availability of monitored providers every minute",
+        "insecureSkipVerify": "Skip TLS Certificate Verification",
+        "insecureSkipVerifyHint": "When disabled, upstream provider TLS certificates will be strictly verified",
         "lastCheck": "Last check",
         "currentVersion": "Current version",
         "latestVersion": "Latest version",

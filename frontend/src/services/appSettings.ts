@@ -26,6 +26,7 @@ export type AppSettings = {
   auto_connectivity_test: boolean
   enable_switch_notify: boolean // 供应商切换通知开关
   enable_round_robin: boolean   // 同 Level 轮询负载均衡开关
+  insecure_skip_verify: boolean // 跳过上游 TLS 证书验证
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_connectivity_test: false,
   enable_switch_notify: true,  // 默认开启
   enable_round_robin: false,   // 默认关闭轮询
+  insecure_skip_verify: true,  // 默认跳过 TLS 验证
 }
 
 export const fetchAppSettings = async (): Promise<AppSettings> => {
