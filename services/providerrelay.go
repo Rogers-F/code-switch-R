@@ -101,15 +101,9 @@ func (prs *ProviderRelayService) GetAllLastUsedProviders() map[string]*LastUsedP
 	return result
 }
 
-// isRoundRobinEnabled 检查轮询功能是否启用
-// 条件：1. 应用设置开关启用 2. 拉黑模式关闭（Fixed Mode 跳过轮询）
-func (prs *ProviderRelayService) isRoundRobinEnabled() bool {
-	// 检查拉黑模式是否启用（Fixed Mode 优先级高于轮询）
-	if prs.blacklistService.ShouldUseFixedMode() {
-		return false
-	}
-
-	// 检查应用设置开关
+// isRoundRobinSettingEnabled 检查轮询设置是否启用（纯读取 AppSettings，不受 Fixed Mode 影响）
+// 用于在 Fixed Mode 分支内也支持轮询排序
+func (prs *ProviderRelayService) isRoundRobinSettingEnabled() bool {
 	if prs.appSettings == nil {
 		return false
 	}
@@ -118,6 +112,16 @@ func (prs *ProviderRelayService) isRoundRobinEnabled() bool {
 		return false
 	}
 	return settings.EnableRoundRobin
+}
+
+// isRoundRobinEnabled 检查轮询功能是否启用（仅在降级模式下使用）
+// 条件：1. 应用设置开关启用 2. 拉黑模式关闭（Fixed Mode 走单独分支处理轮询）
+func (prs *ProviderRelayService) isRoundRobinEnabled() bool {
+	// Fixed Mode 分支内有独立的轮询处理逻辑，此处返回 false 走降级模式
+	if prs.blacklistService.ShouldUseFixedMode() {
+		return false
+	}
+	return prs.isRoundRobinSettingEnabled()
 }
 
 // roundRobinOrder 对同 Level 的 providers 进行轮询排序
@@ -441,7 +445,13 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		// 设计目标：Claude Code 单次请求最多重试 3 次，但拉黑阈值可能是 5
 		// 通过内部重试机制，在单次请求中累积足够失败次数触发拉黑
 		if blacklistEnabled {
-			fmt.Printf("[INFO] 🔒 拉黑模式已开启（同 Provider 重试到拉黑再切换）\n")
+			// 缓存轮询设置（单次请求级别，避免重复读取配置文件）
+			roundRobinSettingEnabled := prs.isRoundRobinSettingEnabled()
+			if roundRobinSettingEnabled {
+				fmt.Printf("[INFO] 🔒 拉黑模式 + 轮询负载均衡\n")
+			} else {
+				fmt.Printf("[INFO] 🔒 拉黑模式（顺序调度）\n")
+			}
 
 			// 获取重试配置
 			retryConfig := prs.blacklistService.GetRetryConfig()
@@ -457,6 +467,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			// 遍历所有 Level 和 Provider
 			for _, level := range levels {
 				providersInLevel := levelGroups[level]
+
+				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+				if roundRobinSettingEnabled {
+					providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+				}
+
 				fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 				for _, provider := range providersInLevel {
@@ -519,6 +535,17 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 						}
 						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+
+						// 客户端请求被拒绝（不支持的格式/功能）：直接返回 400，不重试不拉黑
+						if errors.Is(err, ErrClientRequestRejected) {
+							fmt.Printf("[INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+							c.JSON(http.StatusBadRequest, gin.H{
+								"type":    "error",
+								"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+								"message": errorMsg,
+							})
+							return
+						}
 
 						// 客户端中断不计入失败次数，直接返回
 						if errors.Is(err, errClientAbort) {
@@ -641,6 +668,17 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
 					level, provider.Name, errorMsg, duration.Seconds())
 
+				// 客户端请求被拒绝（不支持的格式/功能）：直接返回 400，不重试不拉黑
+				if errors.Is(err, ErrClientRequestRejected) {
+					fmt.Printf("[INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+					c.JSON(http.StatusBadRequest, gin.H{
+						"type":    "error",
+						"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+						"message": errorMsg,
+					})
+					return
+				}
+
 				// 客户端中断不计入失败次数
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
@@ -708,13 +746,51 @@ func (prs *ProviderRelayService) forwardRequest(
 	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
 
+	// ========== 协议转换检测 ==========
+	upstreamProtocol := provider.ResolveUpstreamProtocol(endpoint)
+	var sseConverter *OpenAIToAnthropicSSEConverter
+	var convertInfo ConvertInfo
+
+	// 如果上游是 OpenAI Chat，需要转换请求体
+	if upstreamProtocol == UpstreamProtocolOpenAIChat {
+		fmt.Printf("[协议转换] Provider %s 使用 OpenAI Chat 协议\n", provider.Name)
+
+		// 转换请求体
+		opts := DefaultConvertOptions()
+		convertedBody, info, err := ConvertAnthropicToOpenAI(bodyBytes, opts)
+		if err != nil {
+			// 客户端请求被拒绝（不支持的功能）
+			return false, err
+		}
+		bodyBytes = convertedBody
+		convertInfo = info
+
+		// 打印转换信息
+		if len(info.DroppedMetadataKeys) > 0 {
+			fmt.Printf("[协议转换] 丢弃 metadata keys: %v\n", info.DroppedMetadataKeys)
+		}
+		if len(info.DroppedFields) > 0 {
+			fmt.Printf("[协议转换] 丢弃顶层字段: %v\n", info.DroppedFields)
+		}
+		if info.MappedUser != "" {
+			fmt.Printf("[协议转换] metadata.user_id -> user: %s\n", info.MappedUser)
+		}
+
+		// 创建 SSE 转换器（用于响应处理）
+		sseConverter = NewOpenAIToAnthropicSSEConverter(model)
+	}
+	_ = convertInfo // 避免未使用警告
+
 	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
 	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
 	switch authType {
 	case "x-api-key":
 		// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
 		headers["x-api-key"] = provider.APIKey
-		headers["anthropic-version"] = "2023-06-01"
+		// 只有 Anthropic 协议才注入 anthropic-version
+		if upstreamProtocol == UpstreamProtocolAnthropic {
+			headers["anthropic-version"] = "2023-06-01"
+		}
 	case "", "bearer":
 		// 默认使用 Bearer token（兼容所有第三方中转）
 		headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
@@ -725,6 +801,17 @@ func (prs *ProviderRelayService) forwardRequest(
 			headerName = "Authorization"
 		}
 		headers[headerName] = provider.APIKey
+	}
+
+	// OpenAI 协议时移除 Anthropic 专用头
+	if upstreamProtocol == UpstreamProtocolOpenAIChat {
+		delete(headers, "anthropic-version")
+		delete(headers, "anthropic-beta")
+		delete(headers, "x-api-key")
+		// 确保使用 Bearer 认证
+		if headers["Authorization"] == "" {
+			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+		}
 	}
 
 	if _, ok := headers["Accept"]; !ok {
@@ -819,7 +906,13 @@ func (prs *ProviderRelayService) forwardRequest(
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		var copyErr error
+		if sseConverter != nil && isStream {
+			// 使用协议转换 Hook
+			_, copyErr = resp.ToHttpResponseWriter(c.Writer, protocolConvertHook(sseConverter, kind, requestLog))
+		} else {
+			_, copyErr = resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		}
 		if copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
@@ -827,7 +920,13 @@ func (prs *ProviderRelayService) forwardRequest(
 	}
 
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		_, copyErr := resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		var copyErr error
+		if sseConverter != nil && isStream {
+			// 使用协议转换 Hook
+			_, copyErr = resp.ToHttpResponseWriter(c.Writer, protocolConvertHook(sseConverter, kind, requestLog))
+		} else {
+			_, copyErr = resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		}
 		if copyErr != nil {
 			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
 		}
@@ -934,6 +1033,27 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// protocolConvertHook 协议转换 Hook：将 OpenAI SSE 转换为 Anthropic SSE，并提取 usage
+// 注意：xrequest 的 hook 是逐行回调（每次收到一行 SSE 数据）
+func protocolConvertHook(converter *OpenAIToAnthropicSSEConverter, kind string, usage *ReqeustLog) func(data []byte) (bool, []byte) {
+	return func(data []byte) (bool, []byte) {
+		// xrequest 逐行回调，直接传给 ProcessLine
+		line := string(data)
+		converted := converter.ProcessLine(line)
+
+		// 如果没有输出，返回 flush=false 丢弃该行（避免写出空行）
+		if converted == "" {
+			return false, nil
+		}
+
+		// 从转换后的 Anthropic SSE 中提取 usage（使用现有解析器）
+		parseEventPayload(converted, ClaudeCodeParseTokenUsageFromResponse, usage)
+
+		// 返回转换后的数据
+		return true, []byte(converted)
+	}
 }
 
 func ReqeustLogHook(c *gin.Context, kind string, usage *ReqeustLog) func(data []byte) (bool, []byte) { // SSE 钩子：累计字节和解析 token 用量
@@ -1269,7 +1389,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
 		if blacklistEnabled {
-			fmt.Printf("[Gemini] 🔒 拉黑模式已开启（同 Provider 重试到拉黑再切换）\n")
+			// 缓存轮询设置（单次请求级别，避免重复读取配置文件）
+			roundRobinSettingEnabled := prs.isRoundRobinSettingEnabled()
+			if roundRobinSettingEnabled {
+				fmt.Printf("[Gemini] 🔒 拉黑模式 + 轮询负载均衡\n")
+			} else {
+				fmt.Printf("[Gemini] 🔒 拉黑模式（顺序调度）\n")
+			}
 
 			// 获取重试配置
 			retryConfig := prs.blacklistService.GetRetryConfig()
@@ -1285,6 +1411,12 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			// 遍历所有 Level 和 Provider
 			for _, level := range sortedLevels {
 				providersInLevel := levelGroups[level]
+
+				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+				if roundRobinSettingEnabled {
+					providersInLevel = prs.roundRobinOrderGemini(level, providersInLevel)
+				}
+
 				fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 				for _, provider := range providersInLevel {
@@ -1692,7 +1824,13 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 		// 【拉黑模式】：同 Provider 重试直到被拉黑，然后切换到下一个 Provider
 		if blacklistEnabled {
-			fmt.Printf("[CustomCLI][INFO] 🔒 拉黑模式已开启（同 Provider 重试到拉黑再切换）\n")
+			// 缓存轮询设置（单次请求级别，避免重复读取配置文件）
+			roundRobinSettingEnabled := prs.isRoundRobinSettingEnabled()
+			if roundRobinSettingEnabled {
+				fmt.Printf("[CustomCLI][INFO] 🔒 拉黑模式 + 轮询负载均衡\n")
+			} else {
+				fmt.Printf("[CustomCLI][INFO] 🔒 拉黑模式（顺序调度）\n")
+			}
 
 			// 获取重试配置
 			retryConfig := prs.blacklistService.GetRetryConfig()
@@ -1708,6 +1846,12 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			// 遍历所有 Level 和 Provider
 			for _, level := range levels {
 				providersInLevel := levelGroups[level]
+
+				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+				if roundRobinSettingEnabled {
+					providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+				}
+
 				fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
 				for _, provider := range providersInLevel {

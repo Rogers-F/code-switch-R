@@ -675,7 +675,7 @@ func (hcs *HealthCheckService) getEffectiveModel(provider *Provider, platform st
 	// 平台默认模型
 	switch strings.ToLower(platform) {
 	case "claude":
-		return "claude-3-5-haiku-20241022"
+		return "claude-haiku-4-5-20251001"
 	case "codex":
 		return "gpt-4o-mini"
 	case "gemini":

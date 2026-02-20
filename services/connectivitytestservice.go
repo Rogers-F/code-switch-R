@@ -107,8 +107,8 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	// 构建测试请求
 	reqBody, contentField := cts.buildTestRequest(platform, &provider)
 	if reqBody == nil {
-		result.Message = "无法构建测试请求"
-		result.SubStatus = SubStatusClientError
+		result.Status = StatusMissing
+		result.Message = "未配置测试模型，请在供应商设置中配置 ConnectivityTestModel"
 		return result
 	}
 
@@ -231,20 +231,14 @@ func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, pla
 
 // buildTestRequest 根据端点构建测试请求体
 func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *Provider) ([]byte, string) {
-	// 平台默认模型
-	platformKey := strings.ToLower(platform)
-	defaults := map[string]string{
-		"claude": "claude-haiku-4-5-20251001",
-		"codex":  "gpt-5.1",
-		"gemini": "gemini-2.5-flash",
-	}
-
 	model := strings.TrimSpace(provider.ConnectivityTestModel)
 	if model == "" {
-		model = defaults[platformKey]
-	}
-	if model == "" {
-		model = "gpt-3.5-turbo"
+		// 仅 Claude 平台提供默认模型，其他平台需用户自行配置
+		if strings.ToLower(platform) == "claude" {
+			model = "claude-haiku-4-5-20251001"
+		} else {
+			return nil, ""
+		}
 	}
 
 	// 获取有效端点（含平台默认值）

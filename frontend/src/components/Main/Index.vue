@@ -4,10 +4,6 @@
       <p class="global-eyebrow">{{ t('components.main.hero.eyebrow') }}</p>
       <button
         class="ghost-icon github-icon"
-        :class="{
-          'github-upgrade': hasUpdateAvailable && !updateReady,
-          'update-ready': updateReady
-        }"
         :data-tooltip="getGithubTooltip()"
         @click="handleGithubClick"
       >
@@ -21,12 +17,6 @@
             stroke-linejoin="round"
           />
         </svg>
-        <!-- 更新徽章 -->
-        <span v-if="updateReady" class="update-badge pulse">Ready</span>
-        <span v-else-if="downloadProgress > 0 && downloadProgress < 100" class="update-badge downloading">
-          {{ Math.round(downloadProgress) }}%
-        </span>
-        <span v-else-if="hasUpdateAvailable" class="update-badge">New</span>
       </button>
       <button
         class="ghost-icon"
@@ -619,6 +609,37 @@
                   <span class="field-hint">{{ t('components.main.form.hints.apiEndpoint') }}</span>
                 </label>
 
+                <!-- 上游协议类型 -->
+                <div class="form-field">
+                  <span>{{ t('components.main.form.labels.upstreamProtocol') }}</span>
+                  <Listbox v-model="modalState.form.upstreamProtocol" v-slot="{ open }">
+                    <div class="level-select">
+                      <ListboxButton class="level-select-button">
+                        <span class="level-label">
+                          {{ upstreamProtocolOptions.find((item) => item.value === modalState.form.upstreamProtocol)?.label || modalState.form.upstreamProtocol }}
+                        </span>
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                          <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                        </svg>
+                      </ListboxButton>
+                      <ListboxOptions v-if="open" class="level-select-options">
+                        <ListboxOption
+                          v-for="option in upstreamProtocolOptions"
+                          :key="option.value"
+                          :value="option.value"
+                          v-slot="{ active, selected }"
+                        >
+                          <div :class="['level-option', { active, selected }]">
+                            <span class="level-name">{{ option.label }}</span>
+                            <span class="level-desc">{{ option.desc }}</span>
+                          </div>
+                        </ListboxOption>
+                      </ListboxOptions>
+                    </div>
+                  </Listbox>
+                  <span class="field-hint">{{ t('components.main.form.hints.upstreamProtocol') }}</span>
+                </div>
+
                 <!-- 认证方式 -->
                 <div class="form-field">
                   <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
@@ -1018,7 +1039,6 @@ import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '.
 import { fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
 import { fetchCurrentVersion } from '../../services/version'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
-import { getUpdateState, restartApp, type UpdateState } from '../../services/update'
 import { getCurrentTheme, setTheme, type ThemeMode } from '../../utils/ThemeManager'
 import { useRouter } from 'vue-router'
 import { fetchConfigImportStatus, importFromCcSwitch, isFirstRun, markFirstRunDone, type ConfigImportStatus } from '../../services/configImport'
@@ -1168,14 +1188,10 @@ const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
   others: false,
 })
 let providerStatsTimer: number | undefined
-let updateTimer: number | undefined
 const showHeatmap = ref(true)
 const showHomeTitle = ref(true)
 const mcpIcon = lobeIcons['mcp'] ?? ''
 const appVersion = ref('')
-const hasUpdateAvailable = ref(false)
-const updateReady = ref(false)
-const downloadProgress = ref(0)
 const importStatus = ref<ConfigImportStatus | null>(null)
 const importBusy = ref(false)
 const showFirstRunPrompt = ref(false)
@@ -1440,65 +1456,17 @@ const loadAppSettings = async () => {
   }
 }
 
-const checkForUpdates = async () => {
+const loadAppVersion = async () => {
   try {
     const version = await fetchCurrentVersion()
     appVersion.value = version || ''
   } catch (error) {
     console.error('failed to load app version', error)
   }
-
-  try {
-    const resp = await fetch(releaseApiUrl, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-      },
-    })
-    if (!resp.ok) {
-      return
-    }
-    const data = await resp.json()
-    const latestTag = data?.tag_name ?? ''
-    if (latestTag && compareVersions(appVersion.value || '0.0.0', latestTag) < 0) {
-      hasUpdateAvailable.value = true
-    }
-  } catch (error) {
-    console.error('failed to fetch release info', error)
-  }
-}
-
-// 轮询更新状态
-const pollUpdateState = async () => {
-  try {
-    const state = await getUpdateState()
-    updateReady.value = state.update_ready
-    downloadProgress.value = state.download_progress
-    // 更新 hasUpdateAvailable（如果有新版本且不同于当前版本）
-    if (state.latest_known_version && state.latest_known_version !== appVersion.value) {
-      hasUpdateAvailable.value = true
-    }
-  } catch (error) {
-    console.error('failed to poll update state', error)
-  }
 }
 
 const handleAppSettingsUpdated = () => {
   void loadAppSettings()
-}
-
-const startUpdateTimer = () => {
-  stopUpdateTimer()
-  updateTimer = window.setInterval(() => {
-    void checkForUpdates()
-    void pollUpdateState()
-  }, 30 * 1000) // 每30秒检查一次更新状态
-}
-
-const stopUpdateTimer = () => {
-  if (updateTimer) {
-    clearInterval(updateTimer)
-    updateTimer = undefined
-  }
 }
 
 const normalizeProviderKey = (value: string) => value?.trim().toLowerCase() ?? ''
@@ -1610,13 +1578,13 @@ const getCustomProviderKind = (toolId: string): string => `custom:${toolId}`
 // 存储 Gemini 原始数据，用于转换回去
 const geminiProvidersCache = ref<GeminiProvider[]>([])
 
-const persistProviders = async (tabId: ProviderTab) => {
+const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; error?: string }> => {
   try {
     if (tabId === 'others') {
       // 'others' Tab 需要使用 "custom:{toolId}" 格式
       if (!selectedToolId.value) {
         showToast(t('components.main.customCli.selectToolFirst'), 'error')
-        return
+        return { ok: false, error: t('components.main.customCli.selectToolFirst') }
       }
       await SaveProviders(getCustomProviderKind(selectedToolId.value), serializeProviders(cards.others))
     } else if (tabId === 'gemini') {
@@ -1672,9 +1640,12 @@ const persistProviders = async (tabId: ProviderTab) => {
     } else {
       await SaveProviders(tabId, serializeProviders(cards[tabId]))
     }
+    return { ok: true }
   } catch (error) {
     console.error('Failed to save providers', error)
-    showToast(t('components.main.form.saveFailed'), 'error')
+    const errorMsg = extractErrorMessage(error)
+    showToast(t('components.main.form.saveFailed') + ': ' + errorMsg, 'error')
+    return { ok: false, error: errorMsg }
   }
 }
 
@@ -2054,8 +2025,7 @@ const refreshAllData = async () => {
       ...providerTabIds.map((tab) => loadProviderStats(tab)),
       ...providerTabIds.map((tab) => loadBlacklistStatus(tab)), // 同步刷新黑名单状态
       loadAvailabilityResults(), // 同步刷新可用性监控状态（改用新服务）
-      refreshImportStatus(),
-      pollUpdateState()
+      refreshImportStatus()
     ])
   } catch (error) {
     console.error('Failed to refresh data', error)
@@ -2257,12 +2227,10 @@ onMounted(async () => {
   await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
   await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
   await loadAppSettings()
-  await checkForUpdates()
-  await pollUpdateState() // 首次加载更新状态
+  await loadAppVersion()
   await refreshImportStatus()
   await checkFirstRun()  // 检查是否首次使用
   startProviderStatsTimer()
-  startUpdateTimer()
 
   // 加载初始黑名单状态
   await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
@@ -2320,7 +2288,6 @@ onUnmounted(() => {
   cleanupHeatmap()
   stopProviderStatsTimer()
   window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)
-  stopUpdateTimer()
 
   // 清理黑名单相关定时器和事件监听
   if (blacklistTimer) {
@@ -2465,35 +2432,15 @@ const toggleTheme = () => {
   setTheme(next)
 }
 
-const handleGithubClick = async () => {
-  if (updateReady.value) {
-    // 更新已准备好，提示重启
-    const confirmed = confirm(`新版本已准备好，是否立即重启应用？`)
-    if (confirmed) {
-      try {
-        await restartApp()
-      } catch (error) {
-        console.error('failed to restart app', error)
-        alert('重启失败，请手动重启应用')
-      }
-    }
-  } else {
-    // 打开 GitHub
-    Browser.OpenURL(releasePageUrl).catch(() => {
-      console.error('failed to open github')
-    })
-  }
+const handleGithubClick = () => {
+  Browser.OpenURL(releasePageUrl).catch(() => {
+    console.error('failed to open github')
+  })
 }
 
 // 获取 GitHub 图标的 tooltip
 const getGithubTooltip = () => {
-  if (updateReady.value) {
-    return t('components.main.controls.updateReady')
-  } else if (hasUpdateAvailable.value) {
-    return t('components.main.controls.githubUpdate')
-  } else {
-    return t('components.main.controls.github')
-  }
+  return t('components.main.controls.github')
 }
 
 type VendorForm = {
@@ -2550,6 +2497,7 @@ const defaultFormValues = (platform?: string): VendorForm => ({
   modelMapping: {},
   cliConfig: {},
   apiEndpoint: '', // API 端点（可选）
+  upstreamProtocol: 'auto', // 上游协议类型（anthropic/openai_chat/auto）
   // 可用性监控配置（新）
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
@@ -2620,6 +2568,14 @@ const authTypeOptions = computed(() => [
   { value: 'bearer', label: 'Bearer' },
   { value: 'x-api-key', label: 'X-API-Key' },
 ])
+
+// 上游协议类型选项
+const upstreamProtocolOptions = computed(() => [
+  { value: 'auto', label: t('components.main.form.upstreamProtocol.auto'), desc: t('components.main.form.upstreamProtocol.autoDesc') },
+  { value: 'anthropic', label: t('components.main.form.upstreamProtocol.anthropic'), desc: t('components.main.form.upstreamProtocol.anthropicDesc') },
+  { value: 'openai_chat', label: t('components.main.form.upstreamProtocol.openaiChat'), desc: t('components.main.form.upstreamProtocol.openaiChatDesc') },
+])
+
 const resolveEffectiveAuthType = () =>
   customAuthHeader.value.trim() || selectedAuthType.value || getDefaultAuthType(modalState.tabId)
 
@@ -2655,6 +2611,7 @@ const openEditModal = (card: AutomationCard) => {
     modelMapping: card.modelMapping || {},
     cliConfig: card.cliConfig || {},
     apiEndpoint: card.apiEndpoint || '',
+    upstreamProtocol: card.upstreamProtocol || 'auto',
     // 可用性监控配置（新）- 兼容从旧字段迁移
     availabilityMonitorEnabled:
       card.availabilityMonitorEnabled ?? card.connectivityCheck ?? false,
@@ -2702,9 +2659,9 @@ const closeConfirm = () => {
   confirmState.card = null
 }
 
-const submitModal = async () => {
+const submitModal = async (): Promise<boolean> => {
   const list = cards[modalState.tabId]
-  if (!list) return
+  if (!list) return false
   const name = modalState.form.name.trim()
   const apiUrl = modalState.form.apiUrl.trim()
   const apiKey = modalState.form.apiKey.trim()
@@ -2716,7 +2673,7 @@ const submitModal = async () => {
     if (!/^https?:/.test(parsed.protocol)) throw new Error('protocol')
   } catch {
     modalState.errors.apiUrl = t('components.main.form.errors.invalidUrl')
-    return
+    return false
   }
 
   if (editingCard.value) {
@@ -2734,6 +2691,7 @@ const submitModal = async () => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
+      upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
@@ -2753,7 +2711,11 @@ const submitModal = async () => {
     if (prevLevel !== nextLevel) {
       sortProvidersByLevel(list)
     }
-    await persistProviders(modalState.tabId)
+    const saveResult = await persistProviders(modalState.tabId)
+    if (!saveResult.ok) {
+      // 保存失败，不关闭弹窗，让用户修正配置
+      return false
+    }
   } else {
     const newCard: AutomationCard = {
       id: Date.now(),
@@ -2770,6 +2732,7 @@ const submitModal = async () => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
+      upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
@@ -2788,7 +2751,13 @@ const submitModal = async () => {
     }
     list.push(newCard)
     sortProvidersByLevel(list)
-    await persistProviders(modalState.tabId)
+    const saveResult = await persistProviders(modalState.tabId)
+    if (!saveResult.ok) {
+      // 保存失败，从列表中移除刚添加的卡片，不关闭弹窗
+      const idx = list.indexOf(newCard)
+      if (idx !== -1) list.splice(idx, 1)
+      return false
+    }
   }
 
   // 保存 CLI 配置（仅支持 claude/codex/gemini 平台）
@@ -2806,6 +2775,7 @@ const submitModal = async () => {
 
   // 通知可用性页面刷新
   window.dispatchEvent(new CustomEvent('providers-updated'))
+  return true
 }
 
 // 保存并应用：先保存供应商配置，再直连应用到 CLI
@@ -2820,7 +2790,11 @@ const submitAndApplyModal = async () => {
   if (!editingCard) return
 
   // 调用标准保存流程
-  await submitModal()
+  const saved = await submitModal()
+  if (!saved) {
+    // 保存失败，不继续应用
+    return
+  }
 
   // 2. 保存成功后，应用到 CLI（直连模式）
   try {

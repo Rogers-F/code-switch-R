@@ -64,6 +64,12 @@ type Provider struct {
 	// 空值时使用平台默认（claude: x-api-key, codex: bearer）
 	ConnectivityAuthType string `json:"connectivityAuthType,omitempty"`
 
+	// 上游协议类型 - anthropic / openai_chat / auto
+	// anthropic: 上游使用 Anthropic Messages API（默认）
+	// openai_chat: 上游使用 OpenAI Chat Completions API，自动转换请求/响应格式
+	// auto: 根据 APIEndpoint 自动检测（包含 /chat/completions 则为 openai_chat）
+	UpstreamProtocol string `json:"upstreamProtocol,omitempty"`
+
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段
 
@@ -400,7 +406,9 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		Accent:  source.Accent,
 		Enabled: false, // 默认禁用，避免与源供应商冲突
 		Level:   source.Level,
-	APIEndpoint: source.APIEndpoint, // 复制端点配置
+		APIEndpoint:          source.APIEndpoint,          // 复制端点配置
+		UpstreamProtocol:      source.UpstreamProtocol,      // 复制上游协议配置
+		ConnectivityAuthType:  source.ConnectivityAuthType,  // 复制认证方式
 		// 可用性监控配置
 		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
 		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑
@@ -524,6 +532,54 @@ func (p *Provider) GetEffectiveEndpoint(defaultEndpoint string) string {
 	}
 
 	return ep
+}
+
+// UpstreamProtocolType 上游协议类型
+type UpstreamProtocolType string
+
+const (
+	// UpstreamProtocolAnthropic Anthropic Messages API（默认）
+	UpstreamProtocolAnthropic UpstreamProtocolType = "anthropic"
+	// UpstreamProtocolOpenAIChat OpenAI Chat Completions API
+	UpstreamProtocolOpenAIChat UpstreamProtocolType = "openai_chat"
+	// UpstreamProtocolAuto 自动检测
+	UpstreamProtocolAuto UpstreamProtocolType = "auto"
+)
+
+// GetUpstreamProtocol 获取上游协议类型
+// 空值或无效值默认返回 anthropic
+func (p *Provider) GetUpstreamProtocol() UpstreamProtocolType {
+	protocol := strings.TrimSpace(strings.ToLower(p.UpstreamProtocol))
+	switch protocol {
+	case "openai_chat", "openai-chat", "openai":
+		return UpstreamProtocolOpenAIChat
+	case "auto":
+		return UpstreamProtocolAuto
+	default:
+		return UpstreamProtocolAnthropic
+	}
+}
+
+// DetectUpstreamProtocol 根据端点自动检测上游协议
+// 用于 auto 模式的启发式判断
+func DetectUpstreamProtocol(endpoint string) UpstreamProtocolType {
+	ep := strings.ToLower(endpoint)
+	// 检测 OpenAI Chat Completions 端点
+	if strings.Contains(ep, "/chat/completions") {
+		return UpstreamProtocolOpenAIChat
+	}
+	// 默认 Anthropic
+	return UpstreamProtocolAnthropic
+}
+
+// ResolveUpstreamProtocol 解析最终的上游协议
+// 如果是 auto 模式，根据端点自动检测
+func (p *Provider) ResolveUpstreamProtocol(effectiveEndpoint string) UpstreamProtocolType {
+	protocol := p.GetUpstreamProtocol()
+	if protocol == UpstreamProtocolAuto {
+		return DetectUpstreamProtocol(effectiveEndpoint)
+	}
+	return protocol
 }
 
 // ValidateConfiguration 验证 provider 的模型配置

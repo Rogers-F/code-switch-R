@@ -7,8 +7,6 @@ import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
 import NetworkWslSettings from '../Setting/NetworkWslSettings.vue'
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../../services/appSettings'
-import { checkUpdate, downloadUpdate, restartApp, getUpdateState, setAutoCheckEnabled, type UpdateState } from '../../services/update'
-import { fetchCurrentVersion } from '../../services/version'
 import { getBlacklistSettings, updateBlacklistSettings, getLevelBlacklistEnabled, setLevelBlacklistEnabled, getBlacklistEnabled, setBlacklistEnabled, type BlacklistSettings } from '../../services/settings'
 import { fetchConfigImportStatus, importFromPath, type ConfigImportStatus } from '../../services/configImport'
 import { useI18n } from 'vue-i18n'
@@ -35,7 +33,6 @@ const getCachedString = (key: string, defaultValue: string): string => {
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
-const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
@@ -60,14 +57,8 @@ const budgetShowForecastCodex = ref(getCachedValue('budgetShowForecastCodex', fa
 const settingsLoading = ref(true)
 const saveBusy = ref(false)
 
-// 更新相关状态
-const updateState = ref<UpdateState | null>(null)
-const checking = ref(false)
-const downloading = ref(false)
-const appVersion = ref('')
-
 // 拉黑配置相关状态
-const blacklistEnabled = ref(true)  // 拉黑功能总开关
+const blacklistEnabled = ref(false)  // 拉黑功能总开关
 const blacklistThreshold = ref(3)
 const blacklistDuration = ref(30)
 const levelBlacklistEnabled = ref(false)
@@ -117,7 +108,6 @@ const loadAppSettings = async () => {
     budgetShowCountdownCodex.value = data?.budget_show_countdown_codex ?? false
     budgetShowForecastCodex.value = data?.budget_show_forecast_codex ?? false
     autoStartEnabled.value = data?.auto_start ?? false
-    autoUpdateEnabled.value = data?.auto_update ?? true
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
@@ -144,7 +134,6 @@ const loadAppSettings = async () => {
     localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
     localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
     localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
     localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
     localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
     localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
@@ -171,7 +160,6 @@ const loadAppSettings = async () => {
     budgetShowCountdownCodex.value = false
     budgetShowForecastCodex.value = false
     autoStartEnabled.value = false
-    autoUpdateEnabled.value = true
     autoConnectivityTestEnabled.value = false
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
@@ -236,15 +224,11 @@ const persistAppSettings = async () => {
       budget_show_countdown_codex: budgetShowCountdownCodex.value,
       budget_show_forecast_codex: budgetShowForecastCodex.value,
       auto_start: autoStartEnabled.value,
-      auto_update: autoUpdateEnabled.value,
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
     }
     await saveAppSettings(payload)
-
-    // 同步自动更新设置到 UpdateService
-    await setAutoCheckEnabled(autoUpdateEnabled.value)
 
     // 同步自动可用性监控设置到 HealthCheckService（复用旧字段名）
     await Call.ByName(
@@ -274,7 +258,6 @@ const persistAppSettings = async () => {
     localStorage.setItem('app-settings-budgetShowCountdownCodex', String(budgetShowCountdownCodex.value))
     localStorage.setItem('app-settings-budgetShowForecastCodex', String(budgetShowForecastCodex.value))
     localStorage.setItem('app-settings-autoStart', String(autoStartEnabled.value))
-    localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
     localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
     localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
     localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
@@ -284,103 +267,6 @@ const persistAppSettings = async () => {
     console.error('failed to save app settings', error)
   } finally {
     saveBusy.value = false
-  }
-}
-
-const loadUpdateState = async () => {
-  try {
-    updateState.value = await getUpdateState()
-  } catch (error) {
-    console.error('failed to load update state', error)
-  }
-}
-
-const checkUpdateManually = async () => {
-  checking.value = true
-  try {
-    const info = await checkUpdate()
-    await loadUpdateState()
-
-    if (!info.available) {
-      alert('已是最新版本')
-    } else {
-      // 发现新版本，提示用户并开始下载
-      const confirmed = confirm(`发现新版本 ${info.version}，是否立即下载？`)
-      if (confirmed) {
-        downloading.value = true
-        checking.value = false
-        try {
-          await downloadUpdate()
-          await loadUpdateState()
-
-          // 下载完成，提示重启
-          const restart = confirm('新版本已下载完成，是否立即重启应用？')
-          if (restart) {
-            await restartApp()
-          }
-        } catch (downloadError) {
-          console.error('download failed', downloadError)
-          alert('下载失败: ' + extractErrorMessage(downloadError))
-        } finally {
-          downloading.value = false
-        }
-      }
-    }
-  } catch (error) {
-    console.error('check update failed', error)
-    alert('检查更新失败，请检查网络连接')
-  } finally {
-    checking.value = false
-  }
-}
-
-const downloadAndInstall = async () => {
-  downloading.value = true
-  try {
-    await downloadUpdate()
-    await loadUpdateState()
-
-    // 弹窗确认重启
-    const confirmed = confirm('新版本已下载完成，是否立即重启应用？')
-    if (confirmed) {
-      await restartApp()
-    }
-  } catch (error) {
-    console.error('download failed', error)
-    alert('下载失败: ' + extractErrorMessage(error))
-  } finally {
-    downloading.value = false
-  }
-}
-
-// 当更新已下载完成时，直接安装并重启（无需再次下载）
-const installAndRestart = async () => {
-  const confirmed = confirm('是否立即安装更新并重启应用？')
-  if (confirmed) {
-    try {
-      await restartApp()
-    } catch (error) {
-      console.error('restart failed', error)
-      alert('重启失败，请手动重启应用')
-    }
-  }
-}
-
-const formatLastCheckTime = (timeStr?: string) => {
-  if (!timeStr) return '从未检查'
-
-  const checkTime = new Date(timeStr)
-  const now = new Date()
-  const diffMs = now.getTime() - checkTime.getTime()
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-
-  if (diffHours < 1) {
-    return '刚刚'
-  } else if (diffHours < 24) {
-    return `${diffHours} 小时前`
-  } else {
-    const diffDays = Math.floor(diffHours / 24)
-    return `${diffDays} 天前`
   }
 }
 
@@ -402,7 +288,7 @@ const loadBlacklistSettings = async () => {
   } catch (error) {
     console.error('failed to load blacklist settings', error)
     // 使用默认值
-    blacklistEnabled.value = true
+    blacklistEnabled.value = false
     blacklistThreshold.value = 3
     blacklistDuration.value = 30
     levelBlacklistEnabled.value = false
@@ -509,16 +395,6 @@ const handleImport = async () => {
 
 onMounted(async () => {
   await loadAppSettings()
-
-  // 加载当前版本号
-  try {
-    appVersion.value = await fetchCurrentVersion()
-  } catch (error) {
-    console.error('failed to load app version', error)
-  }
-
-  // 加载更新状态
-  await loadUpdateState()
 
   // 加载拉黑配置
   await loadBlacklistSettings()
@@ -1009,59 +885,6 @@ onMounted(async () => {
           </ListItem>
           <ListItem :label="$t('components.general.label.theme')">
             <ThemeSetting />
-          </ListItem>
-        </div>
-      </section>
-
-      <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.update') }}</h2>
-        <div class="mac-panel">
-          <ListItem :label="$t('components.general.label.autoUpdate')">
-            <label class="mac-switch">
-              <input
-                type="checkbox"
-                :disabled="settingsLoading || saveBusy"
-                v-model="autoUpdateEnabled"
-                @change="persistAppSettings"
-              />
-              <span></span>
-            </label>
-          </ListItem>
-
-          <ListItem :label="$t('components.general.label.lastCheck')">
-            <span class="info-text">{{ formatLastCheckTime(updateState?.last_check_time) }}</span>
-            <span v-if="updateState && updateState.consecutive_failures > 0" class="warning-badge">
-              ⚠️ {{ $t('components.general.update.checkFailed', { count: updateState.consecutive_failures }) }}
-            </span>
-          </ListItem>
-
-          <ListItem :label="$t('components.general.label.currentVersion')">
-            <span class="version-text">{{ appVersion }}</span>
-          </ListItem>
-
-          <ListItem
-            v-if="updateState?.latest_known_version && updateState.latest_known_version !== appVersion"
-            :label="$t('components.general.label.latestVersion')">
-            <span class="version-text highlight">{{ updateState.latest_known_version }} 🆕</span>
-          </ListItem>
-
-          <ListItem :label="$t('components.general.label.checkNow')">
-            <button
-              @click="checkUpdateManually"
-              :disabled="checking"
-              class="action-btn">
-              {{ checking ? $t('components.general.update.checking') : $t('components.general.update.checkNow') }}
-            </button>
-          </ListItem>
-
-          <ListItem
-            v-if="updateState?.update_ready"
-            :label="$t('components.general.label.manualUpdate')">
-            <button
-              @click="installAndRestart"
-              class="primary-btn">
-              {{ $t('components.general.update.installAndRestart') }}
-            </button>
           </ListItem>
         </div>
       </section>
