@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -44,6 +45,30 @@ type ProviderRelayService struct {
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
+
+// getInsecureSkipVerify 从 appSettings 读取 InsecureSkipVerify 开关状态
+func (prs *ProviderRelayService) getInsecureSkipVerify() bool {
+	if prs.appSettings == nil {
+		return true // 默认跳过验证
+	}
+	settings, err := prs.appSettings.GetAppSettings()
+	if err != nil {
+		return true
+	}
+	return settings.InsecureSkipVerify
+}
+
+// newTLSHTTPClient 创建带 TLS 配置的 http.Client
+func (prs *ProviderRelayService) newTLSHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: prs.getInsecureSkipVerify(),
+			},
+		},
+	}
+}
 
 func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, addr string) *ProviderRelayService {
 	if addr == "" {
@@ -864,6 +889,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	}()
 
 	req := xrequest.New().
+		SetClient(prs.newTLSHTTPClient(32 * time.Hour)).
 		SetHeaders(headers).
 		SetQueryParams(query).
 		SetRetry(1, 500*time.Millisecond).
@@ -1691,7 +1717,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	}
 
 	// 发送请求
-	client := &http.Client{Timeout: 300 * time.Second}
+	client := prs.newTLSHTTPClient(300 * time.Second)
 	resp, err := client.Do(req)
 	providerDuration := time.Since(providerStart).Seconds()
 
@@ -2241,7 +2267,7 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 	}
 
 	// 发送请求
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := prs.newTLSHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("[%s] ✗ 请求失败: %s | 错误: %v\n", logPrefix, selectedProvider.Name, err)

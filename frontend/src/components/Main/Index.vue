@@ -1034,6 +1034,7 @@ import CLIConfigEditor from '../common/CLIConfigEditor.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
+import { GeminiProvider } from '../../../bindings/codeswitch/services/models'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
 import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../services/geminiSettings'
 import { fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
@@ -1486,23 +1487,6 @@ const compareVersions = (current: string, remote: string) => {
   return 0
 }
 
-// 本地 GeminiProvider 类型定义（避免依赖 CI 生成的 bindings）
-interface GeminiProvider {
-  id: string
-  name: string
-  websiteUrl?: string
-  apiKeyUrl?: string
-  baseUrl?: string
-  apiKey?: string
-  model?: string
-  description?: string
-  category?: string
-  partnerPromotionKey?: string
-  enabled: boolean
-  level?: number // 优先级分组 (1-10, 默认 1)
-  envConfig?: Record<string, string>
-  settingsConfig?: Record<string, any>
-}
 
 const tabs = [
   { id: 'claude', label: 'Claude Code' },
@@ -1540,7 +1524,7 @@ const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard =
 })
 
 // AutomationCard 到 Gemini Provider 的转换
-const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiProvider => ({
+const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiProvider => new GeminiProvider({
   ...original,
   name: card.name,
   baseUrl: card.apiUrl,
@@ -1608,14 +1592,14 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
           await UpdateGeminiProvider(cardToGemini(card, original))
         } else {
           // 新添加的 provider，调用 AddProvider
-          const newProvider: GeminiProvider = {
+          const newProvider = new GeminiProvider({
             id: `gemini-${Date.now()}`,
             name: card.name,
             baseUrl: card.apiUrl,
             apiKey: card.apiKey,
             websiteUrl: card.officialSite,
             enabled: card.enabled,
-          }
+          })
           await AddGeminiProvider(newProvider)
         }
       }
