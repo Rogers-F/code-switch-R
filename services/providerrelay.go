@@ -885,6 +885,12 @@ func (prs *ProviderRelayService) forwardRequest(
 			fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, err)
 		}
+		// 尝试从响应体提取供应商原始错误信息
+		if resp != nil {
+			if upstreamBody := extractUpstreamError(resp); upstreamBody != "" {
+				return false, fmt.Errorf("upstream status %d: %s", resp.StatusCode(), upstreamBody)
+			}
+		}
 		return false, err
 	}
 
@@ -900,7 +906,17 @@ func (prs *ProviderRelayService) forwardRequest(
 			fmt.Printf("[INFO] Provider %s 响应错误但状态码为0，判定为客户端中断\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
 		}
-		return false, resp.Error()
+		// 优先使用 extractUpstreamError 提取完整错误（覆盖 SSE 空 body 场景）
+		errMsg := strings.TrimSpace(resp.Error().Error())
+		if errMsg == "" {
+			if upstreamBody := extractUpstreamError(resp); upstreamBody != "" {
+				errMsg = upstreamBody
+			}
+		}
+		if errMsg != "" {
+			return false, fmt.Errorf("upstream status %d: %s", status, errMsg)
+		}
+		return false, fmt.Errorf("upstream status %d", status)
 	}
 
 	// 状态码为 0 且无错误：当作成功处理
@@ -934,7 +950,49 @@ func (prs *ProviderRelayService) forwardRequest(
 		return true, nil
 	}
 
+	// 尝试从响应体提取供应商原始错误信息
+	if upstreamBody := extractUpstreamError(resp); upstreamBody != "" {
+		return false, fmt.Errorf("upstream status %d: %s", status, upstreamBody)
+	}
 	return false, fmt.Errorf("upstream status %d", status)
+}
+
+// extractUpstreamError 从供应商响应中提取原始错误信息（最多 512 字节）
+func extractUpstreamError(resp *xrequest.Response) string {
+	if resp == nil {
+		return ""
+	}
+	// 优先尝试 String()（会自动解压 gzip 等）
+	body := resp.String()
+	// SSE 流式响应时 String() 返回空，回退到直接读取 RawResponse.Body（带超时防御）
+	if body == "" && resp.RawResponse != nil && resp.RawResponse.Body != nil {
+		done := make(chan []byte, 1)
+		go func() {
+			raw, err := io.ReadAll(io.LimitReader(resp.RawResponse.Body, 512))
+			if err == nil {
+				done <- raw
+			} else {
+				done <- nil
+			}
+		}()
+		select {
+		case raw := <-done:
+			if raw != nil {
+				body = string(raw)
+			}
+		case <-time.After(500 * time.Millisecond):
+			// 超时放弃，关闭 Body 中断后台读取，避免 goroutine 泄漏
+			resp.RawResponse.Body.Close()
+		}
+	}
+	if body == "" {
+		return ""
+	}
+	// 截断过长的错误信息
+	if len(body) > 512 {
+		body = body[:512] + "..."
+	}
+	return body
 }
 
 func cloneHeaders(header http.Header) map[string]string {
