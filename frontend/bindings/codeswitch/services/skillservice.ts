@@ -16,7 +16,15 @@ export function AddRepo(repo: $models.skillRepoConfig): $CancellablePromise<$mod
 }
 
 /**
+ * GetSkillContent 获取技能的 SKILL.md 内容
+ */
+export function GetSkillContent(directory: string, platform: string, location: string): $CancellablePromise<string> {
+    return $Call.ByID(3743777913, directory, platform, location);
+}
+
+/**
  * InstallSkill installs a skill directory from the configured repositories.
+ * 支持 platform 和 location 参数，用于指定安装的平台和位置
  */
 export function InstallSkill(req: $models.installRequest): $CancellablePromise<void> {
     return $Call.ByID(2924128557, req);
@@ -37,14 +45,52 @@ export function ListSkills(): $CancellablePromise<$models.Skill[]> {
     });
 }
 
+/**
+ * ListSkillsForPlatform 列出指定平台的技能（用户级 + 项目级）
+ */
+export function ListSkillsForPlatform(platform: string): $CancellablePromise<$models.Skill[]> {
+    return $Call.ByID(2689607053, platform).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
+ * OpenSkillFolder 打开技能目录
+ */
+export function OpenSkillFolder(platform: string, location: string): $CancellablePromise<void> {
+    return $Call.ByID(216615946, platform, location);
+}
+
 export function RemoveRepo(owner: string, name: string): $CancellablePromise<$models.skillRepoConfig[]> {
     return $Call.ByID(2067147157, owner, name).then(($result: any) => {
         return $$createType1($result);
     });
 }
 
+/**
+ * SaveSkillContent 保存技能的 SKILL.md 内容
+ */
+export function SaveSkillContent(directory: string, platform: string, location: string, content: string): $CancellablePromise<void> {
+    return $Call.ByID(3441672290, directory, platform, location, content);
+}
+
+/**
+ * ToggleSkill 切换技能的启用状态
+ * 通过修改 SKILL.md 的 disable-model-invocation 字段实现
+ */
+export function ToggleSkill(directory: string, platform: string, location: string, enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2154856646, directory, platform, location, enabled);
+}
+
 export function UninstallSkill(directory: string): $CancellablePromise<void> {
     return $Call.ByID(3488362258, directory);
+}
+
+/**
+ * UninstallSkillEx 卸载技能（支持多平台多位置）
+ */
+export function UninstallSkillEx(directory: string, platform: string, location: string): $CancellablePromise<void> {
+    return $Call.ByID(3072081143, directory, platform, location);
 }
 
 // Private type creation functions

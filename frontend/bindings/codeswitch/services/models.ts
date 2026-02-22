@@ -12,6 +12,24 @@ import * as time$0 from "../../time/models.js";
 export class AppSettings {
     "show_heatmap": boolean;
     "show_home_title": boolean;
+    "budget_total": number;
+    "budget_used_adjustment": number;
+    "budget_cycle_enabled": boolean;
+    "budget_cycle_mode": string;
+    "budget_refresh_time": string;
+    "budget_refresh_day": number;
+    "budget_show_countdown": boolean;
+    "budget_show_forecast": boolean;
+    "budget_forecast_method": string;
+    "budget_total_codex": number;
+    "budget_used_adjustment_codex": number;
+    "budget_cycle_enabled_codex": boolean;
+    "budget_cycle_mode_codex": string;
+    "budget_refresh_time_codex": string;
+    "budget_refresh_day_codex": number;
+    "budget_show_countdown_codex": boolean;
+    "budget_show_forecast_codex": boolean;
+    "budget_forecast_method_codex": string;
     "auto_start": boolean;
     "auto_update": boolean;
     "auto_connectivity_test": boolean;
@@ -21,6 +39,11 @@ export class AppSettings {
      */
     "enable_switch_notify": boolean;
 
+    /**
+     * 同 Level 轮询负载均衡开关（默认关闭）
+     */
+    "enable_round_robin": boolean;
+
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
         if (!("show_heatmap" in $$source)) {
@@ -28,6 +51,60 @@ export class AppSettings {
         }
         if (!("show_home_title" in $$source)) {
             this["show_home_title"] = false;
+        }
+        if (!("budget_total" in $$source)) {
+            this["budget_total"] = 0;
+        }
+        if (!("budget_used_adjustment" in $$source)) {
+            this["budget_used_adjustment"] = 0;
+        }
+        if (!("budget_cycle_enabled" in $$source)) {
+            this["budget_cycle_enabled"] = false;
+        }
+        if (!("budget_cycle_mode" in $$source)) {
+            this["budget_cycle_mode"] = "";
+        }
+        if (!("budget_refresh_time" in $$source)) {
+            this["budget_refresh_time"] = "";
+        }
+        if (!("budget_refresh_day" in $$source)) {
+            this["budget_refresh_day"] = 0;
+        }
+        if (!("budget_show_countdown" in $$source)) {
+            this["budget_show_countdown"] = false;
+        }
+        if (!("budget_show_forecast" in $$source)) {
+            this["budget_show_forecast"] = false;
+        }
+        if (!("budget_forecast_method" in $$source)) {
+            this["budget_forecast_method"] = "";
+        }
+        if (!("budget_total_codex" in $$source)) {
+            this["budget_total_codex"] = 0;
+        }
+        if (!("budget_used_adjustment_codex" in $$source)) {
+            this["budget_used_adjustment_codex"] = 0;
+        }
+        if (!("budget_cycle_enabled_codex" in $$source)) {
+            this["budget_cycle_enabled_codex"] = false;
+        }
+        if (!("budget_cycle_mode_codex" in $$source)) {
+            this["budget_cycle_mode_codex"] = "";
+        }
+        if (!("budget_refresh_time_codex" in $$source)) {
+            this["budget_refresh_time_codex"] = "";
+        }
+        if (!("budget_refresh_day_codex" in $$source)) {
+            this["budget_refresh_day_codex"] = 0;
+        }
+        if (!("budget_show_countdown_codex" in $$source)) {
+            this["budget_show_countdown_codex"] = false;
+        }
+        if (!("budget_show_forecast_codex" in $$source)) {
+            this["budget_show_forecast_codex"] = false;
+        }
+        if (!("budget_forecast_method_codex" in $$source)) {
+            this["budget_forecast_method_codex"] = "";
         }
         if (!("auto_start" in $$source)) {
             this["auto_start"] = false;
@@ -41,6 +118,9 @@ export class AppSettings {
         if (!("enable_switch_notify" in $$source)) {
             this["enable_switch_notify"] = false;
         }
+        if (!("enable_round_robin" in $$source)) {
+            this["enable_round_robin"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -51,6 +131,41 @@ export class AppSettings {
     static createFrom($$source: any = {}): AppSettings {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new AppSettings($$parsedSource as Partial<AppSettings>);
+    }
+}
+
+/**
+ * AvailabilityConfig 可用性监控高级配置
+ * 在可用性页面的"高级配置"弹窗中设置，可选
+ */
+export class AvailabilityConfig {
+    /**
+     * 覆盖默认测试模型
+     */
+    "testModel"?: string;
+
+    /**
+     * 覆盖默认测试端点
+     */
+    "testEndpoint"?: string;
+
+    /**
+     * 覆盖默认超时（毫秒）
+     */
+    "timeout"?: number;
+
+    /** Creates a new AvailabilityConfig instance. */
+    constructor($$source: Partial<AvailabilityConfig> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AvailabilityConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AvailabilityConfig {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AvailabilityConfig($$parsedSource as Partial<AvailabilityConfig>);
     }
 }
 
@@ -74,6 +189,11 @@ export class BlacklistLevelConfig {
      * 去重窗口（秒）
      */
     "dedupeWindowSeconds": number;
+
+    /**
+     * 同 Provider 重试等待时间（秒），必须 > DedupeWindowSeconds
+     */
+    "retryWaitSeconds": number;
 
     /**
      * 降级配置
@@ -138,6 +258,9 @@ export class BlacklistLevelConfig {
         }
         if (!("dedupeWindowSeconds" in $$source)) {
             this["dedupeWindowSeconds"] = 0;
+        }
+        if (!("retryWaitSeconds" in $$source)) {
+            this["retryWaitSeconds"] = 0;
         }
         if (!("normalDegradeIntervalHours" in $$source)) {
             this["normalDegradeIntervalHours"] = 0;
@@ -323,7 +446,7 @@ export class CLIConfig {
     /**
      * Gemini .env 内容
      */
-    "envContent"?: { [_: string]: string };
+    "envContent"?: { [_ in string]?: string };
 
     /**
      * 配置文件路径
@@ -333,7 +456,7 @@ export class CLIConfig {
     /**
      * 可编辑字段的当前值
      */
-    "editable"?: { [_: string]: any };
+    "editable"?: { [_ in string]?: any };
 
     /** Creates a new CLIConfig instance. */
     constructor($$source: Partial<CLIConfig> = {}) {
@@ -448,6 +571,50 @@ export class CLIConfigFile {
 }
 
 /**
+ * CLIConfigSnapshots CLI 配置快照（用于前端对比：当前 vs 预览）
+ */
+export class CLIConfigSnapshots {
+    "currentFiles": CLIConfigFile[];
+    "previewFiles": CLIConfigFile[];
+
+    /**
+     * "proxy" | "direct"
+     */
+    "mode": string;
+
+    /** Creates a new CLIConfigSnapshots instance. */
+    constructor($$source: Partial<CLIConfigSnapshots> = {}) {
+        if (!("currentFiles" in $$source)) {
+            this["currentFiles"] = [];
+        }
+        if (!("previewFiles" in $$source)) {
+            this["previewFiles"] = [];
+        }
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CLIConfigSnapshots instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CLIConfigSnapshots {
+        const $$createField0_0 = $$createType3;
+        const $$createField1_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("currentFiles" in $$parsedSource) {
+            $$parsedSource["currentFiles"] = $$createField0_0($$parsedSource["currentFiles"]);
+        }
+        if ("previewFiles" in $$parsedSource) {
+            $$parsedSource["previewFiles"] = $$createField1_0($$parsedSource["previewFiles"]);
+        }
+        return new CLIConfigSnapshots($$parsedSource as Partial<CLIConfigSnapshots>);
+    }
+}
+
+/**
  * CLIPlatform CLI 平台类型
  */
 export enum CLIPlatform {
@@ -465,7 +632,7 @@ export enum CLIPlatform {
  * CLITemplate CLI 配置模板
  */
 export class CLITemplate {
-    "template": { [_: string]: any };
+    "template": { [_ in string]?: any };
     "isGlobalDefault": boolean;
 
     /** Creates a new CLITemplate instance. */
@@ -515,6 +682,47 @@ export class ClaudeProxyStatus {
     static createFrom($$source: any = {}): ClaudeProxyStatus {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ClaudeProxyStatus($$parsedSource as Partial<ClaudeProxyStatus>);
+    }
+}
+
+/**
+ * ConfigFile 配置文件信息
+ */
+export class ConfigFile {
+    "id": string;
+    "label": string;
+    "path": string;
+
+    /**
+     * json | toml | env
+     */
+    "format": string;
+    "isPrimary"?: boolean;
+
+    /** Creates a new ConfigFile instance. */
+    constructor($$source: Partial<ConfigFile> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("label" in $$source)) {
+            this["label"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("format" in $$source)) {
+            this["format"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigFile instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigFile {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConfigFile($$parsedSource as Partial<ConfigFile>);
     }
 }
 
@@ -586,6 +794,31 @@ export class ConfigImportStatus {
     static createFrom($$source: any = {}): ConfigImportStatus {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ConfigImportStatus($$parsedSource as Partial<ConfigImportStatus>);
+    }
+}
+
+/**
+ * ConfigureResult 配置结果
+ */
+export class ConfigureResult {
+    "success": boolean;
+    "message"?: string;
+
+    /** Creates a new ConfigureResult instance. */
+    constructor($$source: Partial<ConfigureResult> = {}) {
+        if (!("success" in $$source)) {
+            this["success"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConfigureResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ConfigureResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConfigureResult($$parsedSource as Partial<ConfigureResult>);
     }
 }
 
@@ -672,6 +905,75 @@ export class ConsoleLog {
     static createFrom($$source: any = {}): ConsoleLog {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ConsoleLog($$parsedSource as Partial<ConsoleLog>);
+    }
+}
+
+/**
+ * CustomCliProxyStatus 代理状态
+ */
+export class CustomCliProxyStatus {
+    "enabled": boolean;
+    "baseUrl": string;
+
+    /** Creates a new CustomCliProxyStatus instance. */
+    constructor($$source: Partial<CustomCliProxyStatus> = {}) {
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
+        if (!("baseUrl" in $$source)) {
+            this["baseUrl"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CustomCliProxyStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CustomCliProxyStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CustomCliProxyStatus($$parsedSource as Partial<CustomCliProxyStatus>);
+    }
+}
+
+/**
+ * CustomCliTool 自定义 CLI 工具配置
+ */
+export class CustomCliTool {
+    "id": string;
+    "name": string;
+    "configFiles": ConfigFile[];
+    "proxyInjection"?: ProxyInjection[];
+
+    /** Creates a new CustomCliTool instance. */
+    constructor($$source: Partial<CustomCliTool> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("configFiles" in $$source)) {
+            this["configFiles"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CustomCliTool instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CustomCliTool {
+        const $$createField2_0 = $$createType8;
+        const $$createField3_0 = $$createType10;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("configFiles" in $$parsedSource) {
+            $$parsedSource["configFiles"] = $$createField2_0($$parsedSource["configFiles"]);
+        }
+        if ("proxyInjection" in $$parsedSource) {
+            $$parsedSource["proxyInjection"] = $$createField3_0($$parsedSource["proxyInjection"]);
+        }
+        return new CustomCliTool($$parsedSource as Partial<CustomCliTool>);
     }
 }
 
@@ -928,7 +1230,7 @@ export class GeminiPreset {
     "description"?: string;
     "category": string;
     "partnerPromotionKey"?: string;
-    "envConfig"?: { [_: string]: string };
+    "envConfig"?: { [_ in string]?: string };
 
     /** Creates a new GeminiPreset instance. */
     constructor($$source: Partial<GeminiPreset> = {}) {
@@ -990,12 +1292,12 @@ export class GeminiProvider {
     /**
      * .env 配置
      */
-    "envConfig"?: { [_: string]: string };
+    "envConfig"?: { [_ in string]?: string };
 
     /**
      * settings.json 配置
      */
-    "settingsConfig"?: { [_: string]: any };
+    "settingsConfig"?: { [_ in string]?: any };
 
     /** Creates a new GeminiProvider instance. */
     constructor($$source: Partial<GeminiProvider> = {}) {
@@ -1095,6 +1397,148 @@ export class GeminiStatus {
     }
 }
 
+/**
+ * HealthCheckHistory 健康检查历史（单个 Provider 的时间线）
+ */
+export class HealthCheckHistory {
+    "providerId": number;
+    "providerName": string;
+    "platform": string;
+
+    /**
+     * 历史记录（最近 N 条）
+     */
+    "items": HealthCheckResult[];
+
+    /**
+     * 最新一条
+     */
+    "latest": HealthCheckResult | null;
+
+    /**
+     * 可用率（%）
+     */
+    "uptime": number;
+
+    /**
+     * 平均延迟
+     */
+    "avgLatencyMs": number;
+
+    /** Creates a new HealthCheckHistory instance. */
+    constructor($$source: Partial<HealthCheckHistory> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = 0;
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+        if (!("latest" in $$source)) {
+            this["latest"] = null;
+        }
+        if (!("uptime" in $$source)) {
+            this["uptime"] = 0;
+        }
+        if (!("avgLatencyMs" in $$source)) {
+            this["avgLatencyMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HealthCheckHistory instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HealthCheckHistory {
+        const $$createField3_0 = $$createType12;
+        const $$createField4_0 = $$createType13;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField3_0($$parsedSource["items"]);
+        }
+        if ("latest" in $$parsedSource) {
+            $$parsedSource["latest"] = $$createField4_0($$parsedSource["latest"]);
+        }
+        return new HealthCheckHistory($$parsedSource as Partial<HealthCheckHistory>);
+    }
+}
+
+/**
+ * HealthCheckResult 健康检查结果
+ */
+export class HealthCheckResult {
+    "id": number;
+    "providerId": number;
+    "providerName": string;
+    "platform": string;
+    "model"?: string;
+    "endpoint"?: string;
+
+    /**
+     * operational/degraded/failed/validation_failed
+     */
+    "status": string;
+
+    /**
+     * 响应延迟（毫秒）
+     */
+    "latencyMs": number;
+
+    /**
+     * 错误消息
+     */
+    "errorMessage": string;
+
+    /**
+     * 检测时间
+     */
+    "checkedAt": time$0.Time;
+
+    /** Creates a new HealthCheckResult instance. */
+    constructor($$source: Partial<HealthCheckResult> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("providerId" in $$source)) {
+            this["providerId"] = 0;
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("latencyMs" in $$source)) {
+            this["latencyMs"] = 0;
+        }
+        if (!("errorMessage" in $$source)) {
+            this["errorMessage"] = "";
+        }
+        if (!("checkedAt" in $$source)) {
+            this["checkedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HealthCheckResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HealthCheckResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HealthCheckResult($$parsedSource as Partial<HealthCheckResult>);
+    }
+}
+
 export class HeatmapStat {
     "day": string;
     "total_requests": number;
@@ -1176,6 +1620,21 @@ export class Hotkey {
     }
 }
 
+/**
+ * ListenMode 监听模式
+ */
+export enum ListenMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    ListenModeLocalhost = "localhost",
+    ListenModeWSLAuto = "wsl_auto",
+    ListenModeLAN = "lan",
+    ListenModeCustom = "custom",
+};
+
 export class LogStats {
     "total_requests": number;
     "input_tokens": number;
@@ -1236,7 +1695,7 @@ export class LogStats {
      * Creates a new LogStats instance from a string or object.
      */
     static createFrom($$source: any = {}): LogStats {
-        const $$createField11_0 = $$createType8;
+        const $$createField11_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("series" in $$parsedSource) {
             $$parsedSource["series"] = $$createField11_0($$parsedSource["series"]);
@@ -1295,22 +1754,11 @@ export class LogStatsSeries {
 }
 
 /**
- * MCPParseResult JSON 解析结果
+ * MCPParseResult MCP JSON 解析结果（供前端批量导入向导使用）
  */
 export class MCPParseResult {
-    /**
-     * 解析出的服务器列表
-     */
     "servers": MCPServer[];
-
-    /**
-     * 与现有配置冲突的名称
-     */
     "conflicts": string[];
-
-    /**
-     * 是否需要用户提供名称（单服务器无名时）
-     */
     "needName": boolean;
 
     /** Creates a new MCPParseResult instance. */
@@ -1332,8 +1780,8 @@ export class MCPParseResult {
      * Creates a new MCPParseResult instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPParseResult {
-        const $$createField0_0 = $$createType10;
-        const $$createField1_0 = $$createType11;
+        const $$createField0_0 = $$createType17;
+        const $$createField1_0 = $$createType18;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("servers" in $$parsedSource) {
             $$parsedSource["servers"] = $$createField0_0($$parsedSource["servers"]);
@@ -1350,13 +1798,14 @@ export class MCPServer {
     "type": string;
     "command"?: string;
     "args"?: string[];
-    "env"?: { [_: string]: string };
+    "env"?: { [_ in string]?: string };
     "url"?: string;
     "website"?: string;
     "tips"?: string;
     "enable_platform": string[];
     "enabled_in_claude": boolean;
     "enabled_in_codex": boolean;
+    "enabled_in_gemini": boolean;
     "missing_placeholders": string[];
 
     /** Creates a new MCPServer instance. */
@@ -1376,6 +1825,9 @@ export class MCPServer {
         if (!("enabled_in_codex" in $$source)) {
             this["enabled_in_codex"] = false;
         }
+        if (!("enabled_in_gemini" in $$source)) {
+            this["enabled_in_gemini"] = false;
+        }
         if (!("missing_placeholders" in $$source)) {
             this["missing_placeholders"] = [];
         }
@@ -1387,10 +1839,10 @@ export class MCPServer {
      * Creates a new MCPServer instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPServer {
-        const $$createField3_0 = $$createType11;
+        const $$createField3_0 = $$createType18;
         const $$createField4_0 = $$createType4;
-        const $$createField8_0 = $$createType11;
-        const $$createField11_0 = $$createType11;
+        const $$createField8_0 = $$createType18;
+        const $$createField12_0 = $$createType18;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("args" in $$parsedSource) {
             $$parsedSource["args"] = $$createField3_0($$parsedSource["args"]);
@@ -1402,9 +1854,83 @@ export class MCPServer {
             $$parsedSource["enable_platform"] = $$createField8_0($$parsedSource["enable_platform"]);
         }
         if ("missing_placeholders" in $$parsedSource) {
-            $$parsedSource["missing_placeholders"] = $$createField11_0($$parsedSource["missing_placeholders"]);
+            $$parsedSource["missing_placeholders"] = $$createField12_0($$parsedSource["missing_placeholders"]);
         }
         return new MCPServer($$parsedSource as Partial<MCPServer>);
+    }
+}
+
+/**
+ * ManualTestResult 手动测试结果
+ */
+export class ManualTestResult {
+    "success": boolean;
+    "latencyMs": number;
+    "httpCode": number;
+    "message": string;
+
+    /** Creates a new ManualTestResult instance. */
+    constructor($$source: Partial<ManualTestResult> = {}) {
+        if (!("success" in $$source)) {
+            this["success"] = false;
+        }
+        if (!("latencyMs" in $$source)) {
+            this["latencyMs"] = 0;
+        }
+        if (!("httpCode" in $$source)) {
+            this["httpCode"] = 0;
+        }
+        if (!("message" in $$source)) {
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ManualTestResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ManualTestResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ManualTestResult($$parsedSource as Partial<ManualTestResult>);
+    }
+}
+
+/**
+ * NetworkSettings 网络设置
+ */
+export class NetworkSettings {
+    "listenMode": ListenMode;
+    "customAddress"?: string;
+    "currentAddress"?: string;
+    "wslAutoConfig": boolean;
+    "targetCli": TargetCli;
+
+    /** Creates a new NetworkSettings instance. */
+    constructor($$source: Partial<NetworkSettings> = {}) {
+        if (!("listenMode" in $$source)) {
+            this["listenMode"] = ListenMode.$zero;
+        }
+        if (!("wslAutoConfig" in $$source)) {
+            this["wslAutoConfig"] = false;
+        }
+        if (!("targetCli" in $$source)) {
+            this["targetCli"] = (new TargetCli());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new NetworkSettings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): NetworkSettings {
+        const $$createField4_0 = $$createType19;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("targetCli" in $$parsedSource) {
+            $$parsedSource["targetCli"] = $$createField4_0($$parsedSource["targetCli"]);
+        }
+        return new NetworkSettings($$parsedSource as Partial<NetworkSettings>);
     }
 }
 
@@ -1462,16 +1988,23 @@ export class Provider {
     "enabled": boolean;
 
     /**
+     * API 端点路径（可选）- 覆盖平台默认端点
+     * 如：GLM 模型需要使用 /v1/chat/completions 而非 /v1/messages
+     * 留空则使用平台默认（claude: /v1/messages, codex: /responses）
+     */
+    "apiEndpoint"?: string;
+
+    /**
      * 模型白名单 - Provider 原生支持的模型名
      * 使用 map 实现 O(1) 查找，向后兼容（omitempty）
      */
-    "supportedModels"?: { [_: string]: boolean };
+    "supportedModels"?: { [_ in string]?: boolean };
 
     /**
      * 模型映射 - 外部模型名 -> Provider 内部模型名
      * 支持精确匹配和通配符（如 "claude-*" -> "anthropic/claude-*"）
      */
-    "modelMapping"?: { [_: string]: string };
+    "modelMapping"?: { [_ in string]?: string };
 
     /**
      * 优先级分组 - 数字越小优先级越高（1-10，默认 1）
@@ -1480,9 +2013,51 @@ export class Provider {
     "level"?: number;
 
     /**
-     * 连通性检测开关 - 是否启用自动连通性检测
+     * 可用性监控开关 - 在可用性页面配置
+     * 启用后才会执行后台健康检查
+     */
+    "availabilityMonitorEnabled"?: boolean;
+
+    /**
+     * 连通性自动拉黑开关 - 在 Provider 编辑页面配置
+     * 前置条件：AvailabilityMonitorEnabled 必须为 true
+     * 启用后，当健康检查连续失败达到阈值时自动拉黑
+     */
+    "connectivityAutoBlacklist"?: boolean;
+
+    /**
+     * 可用性高级配置 - 可选，在可用性页面的"高级配置"中设置
+     */
+    "availabilityConfig"?: AvailabilityConfig | null;
+
+    /**
+     * 认证方式 - bearer / x-api-key / 自定义 Header 名
+     * 空值时使用平台默认（claude: x-api-key, codex: bearer）
+     */
+    "connectivityAuthType"?: string;
+
+    /**
+     * 上游协议类型 - anthropic / openai_chat / auto
+     * anthropic: 上游使用 Anthropic Messages API（默认）
+     * openai_chat: 上游使用 OpenAI Chat Completions API，自动转换请求/响应格式
+     * auto: 根据 APIEndpoint 自动检测（包含 /chat/completions 则为 openai_chat）
+     */
+    "upstreamProtocol"?: string;
+
+    /**
+     * [已废弃] 连通性检测开关 - 迁移到 AvailabilityMonitorEnabled
      */
     "connectivityCheck"?: boolean;
+
+    /**
+     * [已废弃] 连通性检测模型 - 迁移到 AvailabilityConfig.TestModel
+     */
+    "connectivityTestModel"?: string;
+
+    /**
+     * [已废弃] 连通性检测端点 - 迁移到 AvailabilityConfig.TestEndpoint
+     */
+    "connectivityTestEndpoint"?: string;
 
     /** Creates a new Provider instance. */
     constructor($$source: Partial<Provider> = {}) {
@@ -1521,14 +2096,18 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField9_0 = $$createType12;
-        const $$createField10_0 = $$createType4;
+        const $$createField10_0 = $$createType20;
+        const $$createField11_0 = $$createType4;
+        const $$createField15_0 = $$createType22;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("supportedModels" in $$parsedSource) {
-            $$parsedSource["supportedModels"] = $$createField9_0($$parsedSource["supportedModels"]);
+            $$parsedSource["supportedModels"] = $$createField10_0($$parsedSource["supportedModels"]);
         }
         if ("modelMapping" in $$parsedSource) {
-            $$parsedSource["modelMapping"] = $$createField10_0($$parsedSource["modelMapping"]);
+            $$parsedSource["modelMapping"] = $$createField11_0($$parsedSource["modelMapping"]);
+        }
+        if ("availabilityConfig" in $$parsedSource) {
+            $$parsedSource["availabilityConfig"] = $$createField15_0($$parsedSource["availabilityConfig"]);
         }
         return new Provider($$parsedSource as Partial<Provider>);
     }
@@ -1592,6 +2171,124 @@ export class ProviderDailyStat {
     static createFrom($$source: any = {}): ProviderDailyStat {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ProviderDailyStat($$parsedSource as Partial<ProviderDailyStat>);
+    }
+}
+
+/**
+ * ProviderTimeline Provider 时间线（用于前端展示）
+ */
+export class ProviderTimeline {
+    "providerId": number;
+    "providerName": string;
+    "platform": string;
+    "availabilityMonitorEnabled": boolean;
+    "connectivityAutoBlacklist": boolean;
+
+    /**
+     * 高级配置
+     */
+    "availabilityConfig"?: AvailabilityConfig | null;
+
+    /**
+     * 历史记录
+     */
+    "items": HealthCheckResult[];
+
+    /**
+     * 最新一条
+     */
+    "latest": HealthCheckResult | null;
+
+    /**
+     * 可用率
+     */
+    "uptime": number;
+
+    /**
+     * 平均延迟
+     */
+    "avgLatencyMs": number;
+
+    /** Creates a new ProviderTimeline instance. */
+    constructor($$source: Partial<ProviderTimeline> = {}) {
+        if (!("providerId" in $$source)) {
+            this["providerId"] = 0;
+        }
+        if (!("providerName" in $$source)) {
+            this["providerName"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("availabilityMonitorEnabled" in $$source)) {
+            this["availabilityMonitorEnabled"] = false;
+        }
+        if (!("connectivityAutoBlacklist" in $$source)) {
+            this["connectivityAutoBlacklist"] = false;
+        }
+        if (!("items" in $$source)) {
+            this["items"] = [];
+        }
+        if (!("latest" in $$source)) {
+            this["latest"] = null;
+        }
+        if (!("uptime" in $$source)) {
+            this["uptime"] = 0;
+        }
+        if (!("avgLatencyMs" in $$source)) {
+            this["avgLatencyMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProviderTimeline instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProviderTimeline {
+        const $$createField5_0 = $$createType22;
+        const $$createField6_0 = $$createType12;
+        const $$createField7_0 = $$createType13;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("availabilityConfig" in $$parsedSource) {
+            $$parsedSource["availabilityConfig"] = $$createField5_0($$parsedSource["availabilityConfig"]);
+        }
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField6_0($$parsedSource["items"]);
+        }
+        if ("latest" in $$parsedSource) {
+            $$parsedSource["latest"] = $$createField7_0($$parsedSource["latest"]);
+        }
+        return new ProviderTimeline($$parsedSource as Partial<ProviderTimeline>);
+    }
+}
+
+/**
+ * ProxyInjection 代理注入配置
+ */
+export class ProxyInjection {
+    "targetFileId": string;
+    "baseUrlField": string;
+    "authTokenField"?: string;
+
+    /** Creates a new ProxyInjection instance. */
+    constructor($$source: Partial<ProxyInjection> = {}) {
+        if (!("targetFileId" in $$source)) {
+            this["targetFileId"] = "";
+        }
+        if (!("baseUrlField" in $$source)) {
+            this["baseUrlField"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProxyInjection instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProxyInjection {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProxyInjection($$parsedSource as Partial<ProxyInjection>);
     }
 }
 
@@ -1708,6 +2405,49 @@ export class ReqeustLog {
     }
 }
 
+/**
+ * RetryConfig 重试配置（供 proxyHandler 使用）
+ */
+export class RetryConfig {
+    /**
+     * 失败阈值（达到后触发拉黑）
+     */
+    "FailureThreshold": number;
+
+    /**
+     * 重试等待时间（秒）
+     */
+    "RetryWaitSeconds": number;
+
+    /**
+     * 去重窗口（秒）
+     */
+    "DedupeWindowSeconds": number;
+
+    /** Creates a new RetryConfig instance. */
+    constructor($$source: Partial<RetryConfig> = {}) {
+        if (!("FailureThreshold" in $$source)) {
+            this["FailureThreshold"] = 0;
+        }
+        if (!("RetryWaitSeconds" in $$source)) {
+            this["RetryWaitSeconds"] = 0;
+        }
+        if (!("DedupeWindowSeconds" in $$source)) {
+            this["DedupeWindowSeconds"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RetryConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RetryConfig {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RetryConfig($$parsedSource as Partial<RetryConfig>);
+    }
+}
+
 export class Skill {
     "key": string;
     "name": string;
@@ -1715,6 +2455,31 @@ export class Skill {
     "directory": string;
     "readme_url": string;
     "installed": boolean;
+
+    /**
+     * 新增字段
+     * 是否启用（从 SKILL.md 读取）
+     */
+    "enabled": boolean;
+
+    /**
+     * 许可证文件路径
+     */
+    "license_file"?: string;
+
+    /**
+     * "claude" | "codex"
+     */
+    "platform"?: string;
+
+    /**
+     * "user" | "project"
+     */
+    "install_location"?: string;
+
+    /**
+     * 仓库字段
+     */
     "repo_owner"?: string;
     "repo_name"?: string;
     "repo_branch"?: string;
@@ -1739,6 +2504,9 @@ export class Skill {
         if (!("installed" in $$source)) {
             this["installed"] = false;
         }
+        if (!("enabled" in $$source)) {
+            this["enabled"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -1753,35 +2521,67 @@ export class Skill {
 }
 
 /**
+ * TargetCli 目标 CLI 工具配置
+ */
+export class TargetCli {
+    "claudeCode": boolean;
+    "codex": boolean;
+    "gemini": boolean;
+
+    /** Creates a new TargetCli instance. */
+    constructor($$source: Partial<TargetCli> = {}) {
+        if (!("claudeCode" in $$source)) {
+            this["claudeCode"] = false;
+        }
+        if (!("codex" in $$source)) {
+            this["codex"] = false;
+        }
+        if (!("gemini" in $$source)) {
+            this["gemini"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TargetCli instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TargetCli {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TargetCli($$parsedSource as Partial<TargetCli>);
+    }
+}
+
+/**
  * UpdateInfo 更新信息
  */
 export class UpdateInfo {
-    "available": boolean;
     "version": string;
+    "pub_date": time$0.Time;
+    "notes": string;
     "download_url": string;
-    "release_notes": string;
-    "file_size": number;
     "sha256": string;
+    "size": number;
 
     /** Creates a new UpdateInfo instance. */
     constructor($$source: Partial<UpdateInfo> = {}) {
-        if (!("available" in $$source)) {
-            this["available"] = false;
-        }
         if (!("version" in $$source)) {
             this["version"] = "";
+        }
+        if (!("pub_date" in $$source)) {
+            this["pub_date"] = null;
+        }
+        if (!("notes" in $$source)) {
+            this["notes"] = "";
         }
         if (!("download_url" in $$source)) {
             this["download_url"] = "";
         }
-        if (!("release_notes" in $$source)) {
-            this["release_notes"] = "";
-        }
-        if (!("file_size" in $$source)) {
-            this["file_size"] = 0;
-        }
         if (!("sha256" in $$source)) {
             this["sha256"] = "";
+        }
+        if (!("size" in $$source)) {
+            this["size"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -1797,54 +2597,136 @@ export class UpdateInfo {
 }
 
 /**
- * UpdateState 更新状态
+ * UpdateState 更新状态枚举
  */
-export class UpdateState {
-    "last_check_time": time$0.Time;
-    "last_check_success": boolean;
-    "consecutive_failures": number;
-    "latest_known_version": string;
-    "download_progress": number;
-    "update_ready": boolean;
+export enum UpdateState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
 
     /**
-     * 新增：持久化自动检查开关
+     * 空闲，无更新任务
      */
-    "auto_check_enabled": boolean;
+    StateIdle = "idle",
 
-    /** Creates a new UpdateState instance. */
-    constructor($$source: Partial<UpdateState> = {}) {
-        if (!("last_check_time" in $$source)) {
-            this["last_check_time"] = null;
+    /**
+     * 正在检查更新
+     */
+    StateChecking = "checking",
+
+    /**
+     * 有可用更新
+     */
+    StateAvailable = "available",
+
+    /**
+     * 正在下载
+     */
+    StateDownloading = "downloading",
+
+    /**
+     * 下载完成，待安装
+     */
+    StateReady = "ready",
+
+    /**
+     * 正在应用更新
+     */
+    StateApplying = "applying",
+
+    /**
+     * 发生错误
+     */
+    StateError = "error",
+};
+
+/**
+ * UpdateStateSnapshot 状态快照（返回给前端）
+ */
+export class UpdateStateSnapshot {
+    "state": UpdateState;
+    "current_version": string;
+    "latest_version"?: string;
+    "notes"?: string;
+    "download_url"?: string;
+    "downloaded_bytes": number;
+    "total_bytes": number;
+
+    /**
+     * 0-100
+     */
+    "progress": number;
+    "error"?: string;
+
+    /**
+     * "check" | "download" | "apply"
+     */
+    "error_op"?: string;
+    "policy": string;
+
+    /** Creates a new UpdateStateSnapshot instance. */
+    constructor($$source: Partial<UpdateStateSnapshot> = {}) {
+        if (!("state" in $$source)) {
+            this["state"] = UpdateState.$zero;
         }
-        if (!("last_check_success" in $$source)) {
-            this["last_check_success"] = false;
+        if (!("current_version" in $$source)) {
+            this["current_version"] = "";
         }
-        if (!("consecutive_failures" in $$source)) {
-            this["consecutive_failures"] = 0;
+        if (!("downloaded_bytes" in $$source)) {
+            this["downloaded_bytes"] = 0;
         }
-        if (!("latest_known_version" in $$source)) {
-            this["latest_known_version"] = "";
+        if (!("total_bytes" in $$source)) {
+            this["total_bytes"] = 0;
         }
-        if (!("download_progress" in $$source)) {
-            this["download_progress"] = 0;
+        if (!("progress" in $$source)) {
+            this["progress"] = 0;
         }
-        if (!("update_ready" in $$source)) {
-            this["update_ready"] = false;
-        }
-        if (!("auto_check_enabled" in $$source)) {
-            this["auto_check_enabled"] = false;
+        if (!("policy" in $$source)) {
+            this["policy"] = "";
         }
 
         Object.assign(this, $$source);
     }
 
     /**
-     * Creates a new UpdateState instance from a string or object.
+     * Creates a new UpdateStateSnapshot instance from a string or object.
      */
-    static createFrom($$source: any = {}): UpdateState {
+    static createFrom($$source: any = {}): UpdateStateSnapshot {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new UpdateState($$parsedSource as Partial<UpdateState>);
+        return new UpdateStateSnapshot($$parsedSource as Partial<UpdateStateSnapshot>);
+    }
+}
+
+/**
+ * WSLDetection WSL 检测结果
+ */
+export class WSLDetection {
+    "detected": boolean;
+    "distros": string[];
+
+    /** Creates a new WSLDetection instance. */
+    constructor($$source: Partial<WSLDetection> = {}) {
+        if (!("detected" in $$source)) {
+            this["detected"] = false;
+        }
+        if (!("distros" in $$source)) {
+            this["distros"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WSLDetection instance from a string or object.
+     */
+    static createFrom($$source: any = {}): WSLDetection {
+        const $$createField1_0 = $$createType18;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("distros" in $$parsedSource) {
+            $$parsedSource["distros"] = $$createField1_0($$parsedSource["distros"]);
+        }
+        return new WSLDetection($$parsedSource as Partial<WSLDetection>);
     }
 }
 
@@ -1853,6 +2735,16 @@ export class installRequest {
     "repo_owner": string;
     "repo_name": string;
     "repo_branch": string;
+
+    /**
+     * "claude" | "codex"
+     */
+    "platform": string;
+
+    /**
+     * "user" | "project"
+     */
+    "location": string;
 
     /** Creates a new installRequest instance. */
     constructor($$source: Partial<installRequest> = {}) {
@@ -1867,6 +2759,12 @@ export class installRequest {
         }
         if (!("repo_branch" in $$source)) {
             this["repo_branch"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("location" in $$source)) {
+            this["location"] = "";
         }
 
         Object.assign(this, $$source);
@@ -1922,9 +2820,19 @@ const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $Create.Map($Create.Any, $Create.Any);
 const $$createType5 = $Create.Map($Create.Any, $Create.Any);
 const $$createType6 = ConfigImportStatus.createFrom;
-const $$createType7 = LogStatsSeries.createFrom;
+const $$createType7 = ConfigFile.createFrom;
 const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = MCPServer.createFrom;
+const $$createType9 = ProxyInjection.createFrom;
 const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = $Create.Array($Create.Any);
-const $$createType12 = $Create.Map($Create.Any, $Create.Any);
+const $$createType11 = HealthCheckResult.createFrom;
+const $$createType12 = $Create.Array($$createType11);
+const $$createType13 = $Create.Nullable($$createType11);
+const $$createType14 = LogStatsSeries.createFrom;
+const $$createType15 = $Create.Array($$createType14);
+const $$createType16 = MCPServer.createFrom;
+const $$createType17 = $Create.Array($$createType16);
+const $$createType18 = $Create.Array($Create.Any);
+const $$createType19 = TargetCli.createFrom;
+const $$createType20 = $Create.Map($Create.Any, $Create.Any);
+const $$createType21 = AvailabilityConfig.createFrom;
+const $$createType22 = $Create.Nullable($$createType21);

@@ -8,12 +8,15 @@ import * as CliConfigService from "./cliconfigservice.js";
 import * as CodexSettingsService from "./codexsettingsservice.js";
 import * as ConnectivityTestService from "./connectivitytestservice.js";
 import * as ConsoleService from "./consoleservice.js";
+import * as CustomCliService from "./customcliservice.js";
 import * as DeepLinkService from "./deeplinkservice.js";
 import * as EnvCheckService from "./envcheckservice.js";
 import * as GeminiService from "./geminiservice.js";
+import * as HealthCheckService from "./healthcheckservice.js";
 import * as ImportService from "./importservice.js";
 import * as LogService from "./logservice.js";
 import * as MCPService from "./mcpservice.js";
+import * as NetworkService from "./networkservice.js";
 import * as PromptService from "./promptservice.js";
 import * as ProviderService from "./providerservice.js";
 import * as SettingsService from "./settingsservice.js";
@@ -29,12 +32,15 @@ export {
     CodexSettingsService,
     ConnectivityTestService,
     ConsoleService,
+    CustomCliService,
     DeepLinkService,
     EnvCheckService,
     GeminiService,
+    HealthCheckService,
     ImportService,
     LogService,
     MCPService,
+    NetworkService,
     PromptService,
     ProviderService,
     SettingsService,
@@ -46,19 +52,25 @@ export {
 
 export {
     AppSettings,
+    AvailabilityConfig,
     BlacklistLevelConfig,
     BlacklistSettings,
     BlacklistStatus,
     CLIConfig,
     CLIConfigField,
     CLIConfigFile,
+    CLIConfigSnapshots,
     CLIPlatform,
     CLITemplate,
     ClaudeProxyStatus,
+    ConfigFile,
     ConfigImportResult,
     ConfigImportStatus,
+    ConfigureResult,
     ConnectivityResult,
     ConsoleLog,
+    CustomCliProxyStatus,
+    CustomCliTool,
     DeepLinkImportRequest,
     EndpointLatency,
     EnvConflict,
@@ -67,17 +79,28 @@ export {
     GeminiProvider,
     GeminiProxyStatus,
     GeminiStatus,
+    HealthCheckHistory,
+    HealthCheckResult,
     HeatmapStat,
     Hotkey,
+    ListenMode,
     LogStats,
     LogStatsSeries,
     MCPParseResult,
     MCPServer,
+    ManualTestResult,
+    NetworkSettings,
     Prompt,
     Provider,
     ProviderDailyStat,
+    ProviderTimeline,
+    ProxyInjection,
     ReqeustLog,
+    RetryConfig,
     Skill,
+    TargetCli,
     UpdateInfo,
-    UpdateState
+    UpdateState,
+    UpdateStateSnapshot,
+    WSLDetection
 } from "./models.js";

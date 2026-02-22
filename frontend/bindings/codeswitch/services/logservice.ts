@@ -9,6 +9,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function CostSince(start: string, platform: string): $CancellablePromise<number> {
+    return $Call.ByID(445919367, start, platform);
+}
+
 export function HeatmapStats(days: number): $CancellablePromise<$models.HeatmapStat[]> {
     return $Call.ByID(1056815029, days).then(($result: any) => {
         return $$createType1($result);

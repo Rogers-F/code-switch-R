@@ -8,3 +8,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 export function CurrentVersion(): $CancellablePromise<string> {
     return $Call.ByID(2619754594);
 }
+
+/**
+ * GetUpdatePolicy 获取更新策略
+ */
+export function GetUpdatePolicy(): $CancellablePromise<string> {
+    return $Call.ByID(728611828);
+}

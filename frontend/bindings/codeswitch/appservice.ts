@@ -16,3 +16,7 @@ export function OpenSecondWindow(): $CancellablePromise<void> {
 export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
     return $Call.ByID(3487267257, app);
 }
+
+export function SetTrayWindowHeight(height: number): $CancellablePromise<void> {
+    return $Call.ByID(3935785145, height);
+}

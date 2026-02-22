@@ -46,7 +46,7 @@ const promptCount = computed(() => promptList.value.length)
 async function loadPrompts() {
   loading.value = true
   try {
-    prompts.value = await GetPrompts(activePlatform.value)
+    prompts.value = await GetPrompts(activePlatform.value) as Record<string, Prompt>
     currentFileContent.value = await GetCurrentFileContent(activePlatform.value)
   } catch (e) {
     console.error('Failed to load prompts:', e)

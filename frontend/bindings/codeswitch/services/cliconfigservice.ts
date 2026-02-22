@@ -25,11 +25,27 @@ export function GetConfig(platform: string): $CancellablePromise<$models.CLIConf
 }
 
 /**
+ * GetConfigSnapshots 获取指定平台的配置快照，用于前端展示"当前(磁盘)"与"预览(激活后)"对比。
+ * 这是纯 dry-run 接口：不会对任何文件进行写入。
+ * 
+ * previewMode 参数：
+ *   - "current": Preview = Current（不做任何注入，适用于新建供应商空输入）
+ *   - "direct": 模拟直连应用 ApplySingleProvider() 的写入结果
+ *   - "proxy": 模拟启用代理 EnableProxy() 的写入结果
+ *   - "" (空字符串): 兼容旧逻辑，若 apiUrl/apiKey 任一非空则为 direct，否则为 proxy
+ */
+export function GetConfigSnapshots(platform: string, apiUrl: string, apiKey: string, previewMode: string): $CancellablePromise<$models.CLIConfigSnapshots | null> {
+    return $Call.ByID(3022973011, platform, apiUrl, apiKey, previewMode).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
  * GetLockedFields 获取指定平台的锁定字段列表
  */
 export function GetLockedFields(platform: string): $CancellablePromise<string[]> {
     return $Call.ByID(1393452899, platform).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType4($result);
     });
 }
 
@@ -38,7 +54,7 @@ export function GetLockedFields(platform: string): $CancellablePromise<string[]>
  */
 export function GetTemplate(platform: string): $CancellablePromise<$models.CLITemplate | null> {
     return $Call.ByID(2146148202, platform).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType6($result);
     });
 }
 
@@ -52,20 +68,30 @@ export function RestoreDefault(platform: string): $CancellablePromise<void> {
 /**
  * SaveConfig 保存 CLI 配置
  */
-export function SaveConfig(platform: string, editable: { [_: string]: any }): $CancellablePromise<void> {
+export function SaveConfig(platform: string, editable: { [_ in string]?: any }): $CancellablePromise<void> {
     return $Call.ByID(3461150403, platform, editable);
+}
+
+/**
+ * SaveConfigFileContent 保存指定配置文件内容（预览区高级编辑）
+ * 为避免越权写文件，只允许写入本服务管理的固定路径文件
+ */
+export function SaveConfigFileContent(platform: string, filePath: string, content: string): $CancellablePromise<void> {
+    return $Call.ByID(4072402714, platform, filePath, content);
 }
 
 /**
  * SetTemplate 设置指定平台的全局模板
  */
-export function SetTemplate(platform: string, template: { [_: string]: any }, isGlobalDefault: boolean): $CancellablePromise<void> {
+export function SetTemplate(platform: string, template: { [_ in string]?: any }, isGlobalDefault: boolean): $CancellablePromise<void> {
     return $Call.ByID(768927510, platform, template, isGlobalDefault);
 }
 
 // Private type creation functions
 const $$createType0 = $models.CLIConfig.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = $models.CLITemplate.createFrom;
-const $$createType4 = $Create.Nullable($$createType3);
+const $$createType2 = $models.CLIConfigSnapshots.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = $models.CLITemplate.createFrom;
+const $$createType6 = $Create.Nullable($$createType5);

@@ -1500,7 +1500,7 @@ interface GeminiProvider {
   partnerPromotionKey?: string
   enabled: boolean
   level?: number // 优先级分组 (1-10, 默认 1)
-  envConfig?: Record<string, string>
+  envConfig?: Record<string, string | undefined>
   settingsConfig?: Record<string, any>
 }
 
@@ -2472,6 +2472,8 @@ type VendorForm = {
   connectivityTestEndpoint?: string
   /** @deprecated */
   connectivityAuthType?: string
+  // 上游协议类型
+  upstreamProtocol?: string
 }
 
 const iconOptions = Object.keys(lobeIcons).sort((a, b) => a.localeCompare(b))

@@ -17,7 +17,7 @@ import * as $models from "./models.js";
 /**
  * GetAllResults 获取所有平台的测试结果
  */
-export function GetAllResults(): $CancellablePromise<{ [_: string]: $models.ConnectivityResult[] }> {
+export function GetAllResults(): $CancellablePromise<{ [_ in string]?: $models.ConnectivityResult[] }> {
     return $Call.ByID(3449037820).then(($result: any) => {
         return $$createType2($result);
     });
@@ -84,8 +84,18 @@ export function TestProvider(provider: $models.Provider, platform: string): $Can
     });
 }
 
+/**
+ * TestProviderManual 手动测试供应商连通性（供前端测试按钮调用）
+ */
+export function TestProviderManual(platform: string, apiURL: string, apiKey: string, model: string, endpoint: string, authType: string): $CancellablePromise<$models.ManualTestResult> {
+    return $Call.ByID(2146278070, platform, apiURL, apiKey, model, endpoint, authType).then(($result: any) => {
+        return $$createType4($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.ConnectivityResult.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Map($Create.Any, $$createType1);
 const $$createType3 = $Create.Nullable($$createType0);
+const $$createType4 = $models.ManualTestResult.createFrom;

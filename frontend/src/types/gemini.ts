@@ -14,7 +14,7 @@ export interface GeminiProvider {
   category?: string // official, third_party, custom
   partnerPromotionKey?: string
   enabled: boolean
-  envConfig?: Record<string, string>
+  envConfig?: Record<string, string | undefined>
   settingsConfig?: Record<string, any>
 }
 
@@ -27,7 +27,7 @@ export interface GeminiPreset {
   description?: string
   category: string
   partnerPromotionKey?: string
-  envConfig?: Record<string, string>
+  envConfig?: Record<string, string | undefined>
 }
 
 export interface GeminiStatus {

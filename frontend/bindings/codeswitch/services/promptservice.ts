@@ -38,7 +38,7 @@ export function GetCurrentFileContent(platform: string): $CancellablePromise<str
 /**
  * GetPrompts 获取指定平台的所有提示词
  */
-export function GetPrompts(platform: string): $CancellablePromise<{ [_: string]: $models.Prompt }> {
+export function GetPrompts(platform: string): $CancellablePromise<{ [_ in string]?: $models.Prompt }> {
     return $Call.ByID(709954839, platform).then(($result: any) => {
         return $$createType1($result);
     });

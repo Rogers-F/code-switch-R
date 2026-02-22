@@ -34,10 +34,13 @@ export function ImportFromPath(path: string): $CancellablePromise<$models.Config
 }
 
 /**
- * ImportMCPFromJSON 导入解析后的 MCP 服务器（用于多服务器批量导入）
+ * ImportMCPServers 将服务器写入配置，并同步到 Claude/Codex。
+ * strategy:
+ * - "skip": 已存在则跳过
+ * - "overwrite": 用导入内容更新（保留既有 enable_platform 的并集）
  */
-export function ImportMCPFromJSON(servers: $models.MCPServer[], conflictStrategy: string): $CancellablePromise<number> {
-    return $Call.ByID(2891198368, servers, conflictStrategy);
+export function ImportMCPServers(servers: $models.MCPServer[], strategy: string): $CancellablePromise<number> {
+    return $Call.ByID(3450963826, servers, strategy);
 }
 
 /**
@@ -55,11 +58,12 @@ export function MarkFirstRunDone(): $CancellablePromise<void> {
 }
 
 /**
- * ParseMCPJSON 解析 JSON 字符串为 MCP 服务器列表
- * 支持三种格式：
- * 1. {"mcpServers": {"name": {...}}} - Claude Desktop 格式
- * 2. [{"name": "...", "command": "..."}] - 数组格式
- * 3. {"command": "...", "args": [...]} - 单服务器格式
+ * ParseMCPJSON 解析用户粘贴的 MCP JSON，返回可供前端预览/选择的结构化结果。
+ * 支持格式：
+ * 1) Claude Desktop: {"mcpServers": {"name": {...}}}
+ * 2) 数组: [{"name": "...", ...}, ...]
+ * 3) 单服务器: {"command": "...", "args": [...] }（name 可选，缺失时 needName=true）
+ * 4) 服务器映射: {"name": {...}, "name2": {...}}
  */
 export function ParseMCPJSON(jsonStr: string): $CancellablePromise<$models.MCPParseResult | null> {
     return $Call.ByID(489842720, jsonStr).then(($result: any) => {
