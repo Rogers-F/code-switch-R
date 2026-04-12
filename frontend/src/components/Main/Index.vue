@@ -2529,9 +2529,8 @@ type VendorForm = {
   // 请求清理
   requestSanitizeEnabled?: boolean
   sanitizeConfig?: {
-    allowedBodyFields?: string[]
-    allowedBodyFieldsChat?: string[]
-    allowedHeaders?: string[]
+    blockedBodyFields?: string[]
+    blockedHeaders?: string[]
     blockedBetaValues?: string[]
   }
   // === 旧连通性字段（已废弃） ===

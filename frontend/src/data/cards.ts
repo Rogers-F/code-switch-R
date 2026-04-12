@@ -34,9 +34,8 @@ export type AutomationCard = {
   // 请求清理：启用后转发前移除非标准字段和请求头
   requestSanitizeEnabled?: boolean
   sanitizeConfig?: {
-    allowedBodyFields?: string[]
-    allowedBodyFieldsChat?: string[]
-    allowedHeaders?: string[]
+    blockedBodyFields?: string[]
+    blockedHeaders?: string[]
     blockedBetaValues?: string[]
   }
 

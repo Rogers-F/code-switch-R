@@ -2132,39 +2132,18 @@ func (prs *ProviderRelayService) customModelsHandler() gin.HandlerFunc {
 	}
 }
 
-// ========== 请求清理（Request Sanitizer） ==========
+// ========== 请求清理（Request Sanitizer — 黑名单模式） ==========
 
-// Anthropic /v1/messages 标准字段白名单
-var anthropicMessagesFields = map[string]bool{
-	"model": true, "messages": true, "max_tokens": true, "system": true,
-	"temperature": true, "top_p": true, "top_k": true, "stream": true,
-	"stop_sequences": true, "tools": true, "tool_choice": true,
-	"metadata": true, "thinking": true,
+// 默认要移除的请求体字段
+var defaultBlockedBodyFields = map[string]bool{
+	"prompt_caching": true,
 }
 
-// OpenAI /v1/chat/completions 标准字段白名单
-var openaiChatFields = map[string]bool{
-	"model": true, "messages": true, "temperature": true, "top_p": true,
-	"n": true, "stream": true, "stop": true, "max_tokens": true,
-	"max_completion_tokens": true, "presence_penalty": true,
-	"frequency_penalty": true, "logit_bias": true, "logprobs": true,
-	"top_logprobs": true, "user": true, "seed": true, "tools": true,
-	"tool_choice": true, "response_format": true, "stream_options": true,
-	"service_tier": true, "metadata": true, "thinking": true,
-}
+// 默认要移除的请求头（小写）
+var defaultBlockedHeaders = map[string]bool{}
 
-// 需要透传的请求头白名单（小写）
-var passthroughHeaders = map[string]bool{
-	"authorization":    true,
-	"content-type":     true,
-	"accept":           true,
-	"anthropic-version": true,
-	"anthropic-beta":   true,
-	"x-api-key":        true,
-}
-
-// anthropic-beta 中需要移除的不支持值
-var unsupportedBetaValues = map[string]bool{
+// 默认 anthropic-beta 中要移除的值
+var defaultBlockedBetaValues = map[string]bool{
 	"prompt-caching-scope-2026-01-05": true,
 	"redact-thinking-2026-02-12":      true,
 }
@@ -2178,35 +2157,27 @@ func sliceToSet(s []string) map[string]bool {
 	return m
 }
 
-// sanitizeRequestBody 根据端点类型过滤请求体中的非标准字段
-// 优先使用供应商自定义配置，为空时 fallback 到内置默认白名单
+// sanitizeRequestBody 移除请求体中黑名单字段（黑名单模式：只删不留）
+// 优先使用供应商自定义配置，为空时 fallback 到内置默认黑名单
 func sanitizeRequestBody(bodyBytes []byte, endpoint string, cfg *SanitizeConfig) ([]byte, []string) {
-	// 根据端点选择白名单
-	var allowed map[string]bool
-	if strings.Contains(endpoint, "/chat/completions") {
-		if cfg != nil && len(cfg.AllowedBodyFieldsChat) > 0 {
-			allowed = sliceToSet(cfg.AllowedBodyFieldsChat)
-		} else {
-			allowed = openaiChatFields
-		}
-	} else {
-		if cfg != nil && len(cfg.AllowedBodyFields) > 0 {
-			allowed = sliceToSet(cfg.AllowedBodyFields)
-		} else {
-			allowed = anthropicMessagesFields
-		}
+	blocked := defaultBlockedBodyFields
+	if cfg != nil && len(cfg.BlockedBodyFields) > 0 {
+		blocked = sliceToSet(cfg.BlockedBodyFields)
 	}
 
-	// 使用 gjson 遍历顶层键，用 sjson 删除不在白名单中的键
-	var removed []string
+	if len(blocked) == 0 {
+		return bodyBytes, nil
+	}
+
 	result := gjson.ParseBytes(bodyBytes)
 	if !result.IsObject() {
 		return bodyBytes, nil
 	}
 
+	var removed []string
 	cleaned := bodyBytes
 	result.ForEach(func(key, _ gjson.Result) bool {
-		if !allowed[key.String()] {
+		if blocked[key.String()] {
 			removed = append(removed, key.String())
 		}
 		return true
@@ -2221,15 +2192,15 @@ func sanitizeRequestBody(bodyBytes []byte, endpoint string, cfg *SanitizeConfig)
 	return cleaned, removed
 }
 
-// sanitizeHeaders 过滤请求头，只保留白名单中的头，并清理 anthropic-beta 中的不支持值
+// sanitizeHeaders 移除黑名单中的请求头，并清理 anthropic-beta 中不支持的值（黑名单模式）
 // 优先使用供应商自定义配置，为空时 fallback 到内置默认值
 func sanitizeHeaders(headers map[string]string, cfg *SanitizeConfig) map[string]string {
-	allowedH := passthroughHeaders
-	if cfg != nil && len(cfg.AllowedHeaders) > 0 {
-		allowedH = sliceToSet(cfg.AllowedHeaders)
+	blockedH := defaultBlockedHeaders
+	if cfg != nil && len(cfg.BlockedHeaders) > 0 {
+		blockedH = sliceToSet(cfg.BlockedHeaders)
 	}
 
-	blockedBeta := unsupportedBetaValues
+	blockedBeta := defaultBlockedBetaValues
 	if cfg != nil && len(cfg.BlockedBetaValues) > 0 {
 		blockedBeta = sliceToSet(cfg.BlockedBetaValues)
 	}
@@ -2237,9 +2208,11 @@ func sanitizeHeaders(headers map[string]string, cfg *SanitizeConfig) map[string]
 	cleaned := make(map[string]string)
 	for k, v := range headers {
 		lower := strings.ToLower(k)
-		if !allowedH[lower] {
+		// 移除黑名单中的请求头
+		if blockedH[lower] {
 			continue
 		}
+		// 清理 anthropic-beta 中不支持的值
 		if lower == "anthropic-beta" {
 			v = cleanAnthropicBeta(v, blockedBeta)
 			if v == "" {

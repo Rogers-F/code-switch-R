@@ -10,13 +10,12 @@ import (
 	"sync"
 )
 
-// SanitizeConfig 请求清理高级配置
-// 各列表为空时使用内置默认白名单/黑名单
+// SanitizeConfig 请求清理高级配置（黑名单模式）
+// 各列表为空时使用内置默认黑名单
 type SanitizeConfig struct {
-	AllowedBodyFields     []string `json:"allowedBodyFields,omitempty"`     // 请求体字段白名单（Anthropic 端点）
-	AllowedBodyFieldsChat []string `json:"allowedBodyFieldsChat,omitempty"` // 请求体字段白名单（OpenAI Chat 端点）
-	AllowedHeaders        []string `json:"allowedHeaders,omitempty"`        // 请求头白名单（小写）
-	BlockedBetaValues     []string `json:"blockedBetaValues,omitempty"`     // anthropic-beta 中需要移除的值
+	BlockedBodyFields []string `json:"blockedBodyFields,omitempty"` // 要移除的请求体字段
+	BlockedHeaders    []string `json:"blockedHeaders,omitempty"`    // 要移除的请求头（小写）
+	BlockedBetaValues []string `json:"blockedBetaValues,omitempty"` // anthropic-beta 中要移除的值
 }
 
 // AvailabilityConfig 可用性监控高级配置

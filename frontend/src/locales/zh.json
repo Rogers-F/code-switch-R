@@ -229,13 +229,12 @@
       },
       "sanitizeConfig": {
         "label": "请求清理高级配置",
-        "allowedBodyFields": "Anthropic 请求体字段白名单",
-        "allowedBodyFieldsChat": "OpenAI Chat 请求体字段白名单",
-        "allowedHeaders": "请求头白名单",
+        "blockedBodyFields": "要移除的请求体字段",
+        "blockedHeaders": "要移除的请求头",
         "blockedBetaValues": "anthropic-beta 要移除的值",
-        "placeholder": "输入字段名，如 model",
-        "placeholderHeader": "输入请求头，如 authorization",
-        "placeholderBeta": "输入 beta 值",
+        "placeholder": "输入字段名，如 prompt_caching",
+        "placeholderHeader": "输入请求头（小写），如 x-custom-header",
+        "placeholderBeta": "输入 beta 值，如 prompt-caching-scope-2026-01-05",
         "add": "添加",
         "remove": "移除",
         "defaultHint": "未配置，使用内置默认值"

@@ -228,13 +228,12 @@
       },
       "sanitizeConfig": {
         "label": "Request Sanitize Advanced Config",
-        "allowedBodyFields": "Anthropic Body Fields Whitelist",
-        "allowedBodyFieldsChat": "OpenAI Chat Body Fields Whitelist",
-        "allowedHeaders": "Headers Whitelist",
+        "blockedBodyFields": "Blocked Body Fields",
+        "blockedHeaders": "Blocked Headers",
         "blockedBetaValues": "Blocked anthropic-beta Values",
-        "placeholder": "Enter field name, e.g. model",
-        "placeholderHeader": "Enter header, e.g. authorization",
-        "placeholderBeta": "Enter beta value",
+        "placeholder": "Enter field name, e.g. prompt_caching",
+        "placeholderHeader": "Enter header (lowercase), e.g. x-custom-header",
+        "placeholderBeta": "Enter beta value, e.g. prompt-caching-scope-2026-01-05",
         "add": "Add",
         "remove": "Remove",
         "defaultHint": "Not configured, using built-in defaults"

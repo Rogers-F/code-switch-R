@@ -22,31 +22,22 @@
     </div>
 
     <div v-if="expanded" class="config-sections">
-      <!-- Anthropic 请求体字段白名单 -->
+      <!-- 要移除的请求体字段 -->
       <SanitizeFieldList
-        :label="$t('components.provider.sanitizeConfig.allowedBodyFields')"
-        :items="config.allowedBodyFields || []"
+        :label="$t('components.provider.sanitizeConfig.blockedBodyFields')"
+        :items="config.blockedBodyFields || []"
         :placeholder="$t('components.provider.sanitizeConfig.placeholder')"
         :default-hint="$t('components.provider.sanitizeConfig.defaultHint')"
-        @update="updateField('allowedBodyFields', $event)"
+        @update="updateField('blockedBodyFields', $event)"
       />
 
-      <!-- OpenAI Chat 请求体字段白名单 -->
+      <!-- 要移除的请求头 -->
       <SanitizeFieldList
-        :label="$t('components.provider.sanitizeConfig.allowedBodyFieldsChat')"
-        :items="config.allowedBodyFieldsChat || []"
-        :placeholder="$t('components.provider.sanitizeConfig.placeholder')"
-        :default-hint="$t('components.provider.sanitizeConfig.defaultHint')"
-        @update="updateField('allowedBodyFieldsChat', $event)"
-      />
-
-      <!-- 请求头白名单 -->
-      <SanitizeFieldList
-        :label="$t('components.provider.sanitizeConfig.allowedHeaders')"
-        :items="config.allowedHeaders || []"
+        :label="$t('components.provider.sanitizeConfig.blockedHeaders')"
+        :items="config.blockedHeaders || []"
         :placeholder="$t('components.provider.sanitizeConfig.placeholderHeader')"
         :default-hint="$t('components.provider.sanitizeConfig.defaultHint')"
-        @update="updateField('allowedHeaders', $event)"
+        @update="updateField('blockedHeaders', $event)"
       />
 
       <!-- 要移除的 anthropic-beta 值 -->
@@ -66,9 +57,8 @@ import { ref, computed } from 'vue'
 import SanitizeFieldList from './SanitizeFieldList.vue'
 
 interface SanitizeConfig {
-  allowedBodyFields?: string[]
-  allowedBodyFieldsChat?: string[]
-  allowedHeaders?: string[]
+  blockedBodyFields?: string[]
+  blockedHeaders?: string[]
   blockedBetaValues?: string[]
 }
 
@@ -89,7 +79,6 @@ const config = computed(() => props.modelValue || {})
 
 const updateField = (field: keyof SanitizeConfig, value: string[]) => {
   const updated = { ...config.value, [field]: value.length > 0 ? value : undefined }
-  // 清理空配置：如果所有字段都为空，返回空对象
   const hasContent = Object.values(updated).some(v => v && (v as string[]).length > 0)
   emit('update:modelValue', hasContent ? updated : {})
 }
