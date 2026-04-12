@@ -758,12 +758,12 @@ func (prs *ProviderRelayService) forwardRequest(
 
 	// 请求清理：启用后移除非标准字段和不支持的请求头
 	if provider.RequestSanitizeEnabled {
-		sanitizedBody, removed := sanitizeRequestBody(bodyBytes, endpoint)
+		sanitizedBody, removed := sanitizeRequestBody(bodyBytes, endpoint, provider.SanitizeConfig)
 		if len(removed) > 0 {
 			fmt.Printf("[Sanitize] Provider %s: 已移除多余字段: %v\n", provider.Name, removed)
 		}
 		bodyBytes = sanitizedBody
-		headers = sanitizeHeaders(headers)
+		headers = sanitizeHeaders(headers, provider.SanitizeConfig)
 	}
 
 	requestLog := &ReqeustLog{
@@ -2169,16 +2169,32 @@ var unsupportedBetaValues = map[string]bool{
 	"redact-thinking-2026-02-12":      true,
 }
 
+// sliceToSet 将字符串切片转换为 map[string]bool 用于 O(1) 查找
+func sliceToSet(s []string) map[string]bool {
+	m := make(map[string]bool, len(s))
+	for _, v := range s {
+		m[v] = true
+	}
+	return m
+}
+
 // sanitizeRequestBody 根据端点类型过滤请求体中的非标准字段
-// 返回清理后的 body 和被移除的字段列表
-func sanitizeRequestBody(bodyBytes []byte, endpoint string) ([]byte, []string) {
+// 优先使用供应商自定义配置，为空时 fallback 到内置默认白名单
+func sanitizeRequestBody(bodyBytes []byte, endpoint string, cfg *SanitizeConfig) ([]byte, []string) {
 	// 根据端点选择白名单
 	var allowed map[string]bool
 	if strings.Contains(endpoint, "/chat/completions") {
-		allowed = openaiChatFields
+		if cfg != nil && len(cfg.AllowedBodyFieldsChat) > 0 {
+			allowed = sliceToSet(cfg.AllowedBodyFieldsChat)
+		} else {
+			allowed = openaiChatFields
+		}
 	} else {
-		// 默认使用 Anthropic Messages 白名单（/v1/messages 等）
-		allowed = anthropicMessagesFields
+		if cfg != nil && len(cfg.AllowedBodyFields) > 0 {
+			allowed = sliceToSet(cfg.AllowedBodyFields)
+		} else {
+			allowed = anthropicMessagesFields
+		}
 	}
 
 	// 使用 gjson 遍历顶层键，用 sjson 删除不在白名单中的键
@@ -2196,7 +2212,6 @@ func sanitizeRequestBody(bodyBytes []byte, endpoint string) ([]byte, []string) {
 		return true
 	})
 
-	// 从后往前删除，避免索引偏移问题
 	for _, k := range removed {
 		if modified, err := sjson.DeleteBytes(cleaned, k); err == nil {
 			cleaned = modified
@@ -2207,15 +2222,26 @@ func sanitizeRequestBody(bodyBytes []byte, endpoint string) ([]byte, []string) {
 }
 
 // sanitizeHeaders 过滤请求头，只保留白名单中的头，并清理 anthropic-beta 中的不支持值
-func sanitizeHeaders(headers map[string]string) map[string]string {
+// 优先使用供应商自定义配置，为空时 fallback 到内置默认值
+func sanitizeHeaders(headers map[string]string, cfg *SanitizeConfig) map[string]string {
+	allowedH := passthroughHeaders
+	if cfg != nil && len(cfg.AllowedHeaders) > 0 {
+		allowedH = sliceToSet(cfg.AllowedHeaders)
+	}
+
+	blockedBeta := unsupportedBetaValues
+	if cfg != nil && len(cfg.BlockedBetaValues) > 0 {
+		blockedBeta = sliceToSet(cfg.BlockedBetaValues)
+	}
+
 	cleaned := make(map[string]string)
 	for k, v := range headers {
 		lower := strings.ToLower(k)
-		if !passthroughHeaders[lower] {
+		if !allowedH[lower] {
 			continue
 		}
 		if lower == "anthropic-beta" {
-			v = cleanAnthropicBeta(v)
+			v = cleanAnthropicBeta(v, blockedBeta)
 			if v == "" {
 				continue
 			}
@@ -2226,12 +2252,12 @@ func sanitizeHeaders(headers map[string]string) map[string]string {
 }
 
 // cleanAnthropicBeta 从 anthropic-beta header 中移除不支持的值
-func cleanAnthropicBeta(value string) string {
+func cleanAnthropicBeta(value string, blocked map[string]bool) string {
 	parts := strings.Split(value, ",")
 	var filtered []string
 	for _, part := range parts {
 		trimmed := strings.TrimSpace(part)
-		if trimmed == "" || unsupportedBetaValues[trimmed] {
+		if trimmed == "" || blocked[trimmed] {
 			continue
 		}
 		filtered = append(filtered, trimmed)

@@ -225,6 +225,19 @@
           "wildcard": "Wildcard mapping, auto expands claude-sonnet-4 → anthropic/claude-sonnet-4",
           "prefix": "Prefix mapping"
         }
+      },
+      "sanitizeConfig": {
+        "label": "Request Sanitize Advanced Config",
+        "allowedBodyFields": "Anthropic Body Fields Whitelist",
+        "allowedBodyFieldsChat": "OpenAI Chat Body Fields Whitelist",
+        "allowedHeaders": "Headers Whitelist",
+        "blockedBetaValues": "Blocked anthropic-beta Values",
+        "placeholder": "Enter field name, e.g. model",
+        "placeholderHeader": "Enter header, e.g. authorization",
+        "placeholderBeta": "Enter beta value",
+        "add": "Add",
+        "remove": "Remove",
+        "defaultHint": "Not configured, using built-in defaults"
       }
     },
     "main": {

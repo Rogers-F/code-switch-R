@@ -634,6 +634,11 @@
                   </div>
                 </div>
 
+                <!-- 请求清理高级配置 -->
+                <div v-if="modalState.form.requestSanitizeEnabled" class="form-field">
+                  <SanitizeConfigEditor v-model="modalState.form.sanitizeConfig" />
+                </div>
+
                 <!-- 认证方式 -->
                 <div class="form-field">
                   <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
@@ -1025,6 +1030,7 @@ import BaseInput from '../common/BaseInput.vue'
 import ModelWhitelistEditor from '../common/ModelWhitelistEditor.vue'
 import ModelMappingEditor from '../common/ModelMappingEditor.vue'
 import CLIConfigEditor from '../common/CLIConfigEditor.vue'
+import SanitizeConfigEditor from '../common/SanitizeConfigEditor.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
@@ -1585,8 +1591,11 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
 const serializeProviders = (providers: AutomationCard[]) =>
   providers.map((provider) => ({
     ...provider,
-    // 请求清理开关
+    // 请求清理开关和配置
     requestSanitizeEnabled: !!provider.requestSanitizeEnabled,
+    sanitizeConfig: provider.sanitizeConfig && Object.keys(provider.sanitizeConfig).length > 0
+      ? provider.sanitizeConfig
+      : undefined,
     // 确保可用性配置正确序列化
     availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
     connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
@@ -2519,6 +2528,12 @@ type VendorForm = {
   }
   // 请求清理
   requestSanitizeEnabled?: boolean
+  sanitizeConfig?: {
+    allowedBodyFields?: string[]
+    allowedBodyFieldsChat?: string[]
+    allowedHeaders?: string[]
+    blockedBetaValues?: string[]
+  }
   // === 旧连通性字段（已废弃） ===
   /** @deprecated */
   connectivityCheck?: boolean
@@ -2554,6 +2569,7 @@ const defaultFormValues = (platform?: string): VendorForm => ({
   cliConfig: {},
   apiEndpoint: '', // API 端点（可选）
   requestSanitizeEnabled: false, // 请求清理（默认关闭）
+  sanitizeConfig: {},
   // 可用性监控配置（新）
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
@@ -2660,6 +2676,7 @@ const openEditModal = (card: AutomationCard) => {
     cliConfig: card.cliConfig || {},
     apiEndpoint: card.apiEndpoint || '',
     requestSanitizeEnabled: card.requestSanitizeEnabled ?? false,
+    sanitizeConfig: card.sanitizeConfig || {},
     // 可用性监控配置（新）- 兼容从旧字段迁移
     availabilityMonitorEnabled:
       card.availabilityMonitorEnabled ?? card.connectivityCheck ?? false,
@@ -2740,6 +2757,7 @@ const submitModal = async () => {
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
       requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
+      sanitizeConfig: modalState.form.sanitizeConfig || undefined,
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
@@ -2777,6 +2795,7 @@ const submitModal = async () => {
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
       requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
+      sanitizeConfig: modalState.form.sanitizeConfig || undefined,
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,

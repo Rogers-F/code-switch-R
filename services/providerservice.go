@@ -10,6 +10,15 @@ import (
 	"sync"
 )
 
+// SanitizeConfig 请求清理高级配置
+// 各列表为空时使用内置默认白名单/黑名单
+type SanitizeConfig struct {
+	AllowedBodyFields     []string `json:"allowedBodyFields,omitempty"`     // 请求体字段白名单（Anthropic 端点）
+	AllowedBodyFieldsChat []string `json:"allowedBodyFieldsChat,omitempty"` // 请求体字段白名单（OpenAI Chat 端点）
+	AllowedHeaders        []string `json:"allowedHeaders,omitempty"`        // 请求头白名单（小写）
+	BlockedBetaValues     []string `json:"blockedBetaValues,omitempty"`     // anthropic-beta 中需要移除的值
+}
+
 // AvailabilityConfig 可用性监控高级配置
 // 在可用性页面的"高级配置"弹窗中设置，可选
 type AvailabilityConfig struct {
@@ -66,7 +75,8 @@ type Provider struct {
 
 	// 请求清理开关 - 启用后在转发前移除非标准字段和不支持的请求头
 	// 解决 LiteLLM 等中转服务的 "Extra inputs are not permitted" 兼容性问题
-	RequestSanitizeEnabled bool `json:"requestSanitizeEnabled,omitempty"`
+	RequestSanitizeEnabled bool             `json:"requestSanitizeEnabled,omitempty"`
+	SanitizeConfig         *SanitizeConfig `json:"sanitizeConfig,omitempty"`
 
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段
