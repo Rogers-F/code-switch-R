@@ -343,6 +343,7 @@
           "apiUrl": "API endpoint",
           "apiKey": "API key",
           "apiEndpoint": "API Endpoint Path (optional)",
+          "requestSanitize": "Request Sanitize",
           "upstreamProtocol": "Upstream Protocol",
           "officialSite": "Official site",
           "icon": "Icon",
@@ -377,6 +378,7 @@
         "hints": {
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
+          "requestSanitize": "When enabled, non-standard fields and unsupported headers will be removed before forwarding, fixing compatibility issues with LiteLLM and similar proxies",
           "upstreamProtocol": "Specify the upstream API protocol type. Auto mode detects based on endpoint; openai_chat mode auto-converts request/response format",
           "availabilityMonitor": "Enable background health checks for this provider. Checks are performed periodically to monitor availability.",
           "connectivityAutoBlacklist": "Automatically blacklist this provider if health checks fail repeatedly",

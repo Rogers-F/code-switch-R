@@ -756,6 +756,16 @@ func (prs *ProviderRelayService) forwardRequest(
 		headers["Accept"] = "application/json"
 	}
 
+	// 请求清理：启用后移除非标准字段和不支持的请求头
+	if provider.RequestSanitizeEnabled {
+		sanitizedBody, removed := sanitizeRequestBody(bodyBytes, endpoint)
+		if len(removed) > 0 {
+			fmt.Printf("[Sanitize] Provider %s: 已移除多余字段: %v\n", provider.Name, removed)
+		}
+		bodyBytes = sanitizedBody
+		headers = sanitizeHeaders(headers)
+	}
+
 	requestLog := &ReqeustLog{
 		Platform: kind,
 		Provider: provider.Name,
@@ -2120,4 +2130,111 @@ func (prs *ProviderRelayService) customModelsHandler() gin.HandlerFunc {
 
 		_ = prs.forwardModelsRequest(c, kind, "CustomModels")
 	}
+}
+
+// ========== 请求清理（Request Sanitizer） ==========
+
+// Anthropic /v1/messages 标准字段白名单
+var anthropicMessagesFields = map[string]bool{
+	"model": true, "messages": true, "max_tokens": true, "system": true,
+	"temperature": true, "top_p": true, "top_k": true, "stream": true,
+	"stop_sequences": true, "tools": true, "tool_choice": true,
+	"metadata": true, "thinking": true,
+}
+
+// OpenAI /v1/chat/completions 标准字段白名单
+var openaiChatFields = map[string]bool{
+	"model": true, "messages": true, "temperature": true, "top_p": true,
+	"n": true, "stream": true, "stop": true, "max_tokens": true,
+	"max_completion_tokens": true, "presence_penalty": true,
+	"frequency_penalty": true, "logit_bias": true, "logprobs": true,
+	"top_logprobs": true, "user": true, "seed": true, "tools": true,
+	"tool_choice": true, "response_format": true, "stream_options": true,
+	"service_tier": true, "metadata": true, "thinking": true,
+}
+
+// 需要透传的请求头白名单（小写）
+var passthroughHeaders = map[string]bool{
+	"authorization":    true,
+	"content-type":     true,
+	"accept":           true,
+	"anthropic-version": true,
+	"anthropic-beta":   true,
+	"x-api-key":        true,
+}
+
+// anthropic-beta 中需要移除的不支持值
+var unsupportedBetaValues = map[string]bool{
+	"prompt-caching-scope-2026-01-05": true,
+	"redact-thinking-2026-02-12":      true,
+}
+
+// sanitizeRequestBody 根据端点类型过滤请求体中的非标准字段
+// 返回清理后的 body 和被移除的字段列表
+func sanitizeRequestBody(bodyBytes []byte, endpoint string) ([]byte, []string) {
+	// 根据端点选择白名单
+	var allowed map[string]bool
+	if strings.Contains(endpoint, "/chat/completions") {
+		allowed = openaiChatFields
+	} else {
+		// 默认使用 Anthropic Messages 白名单（/v1/messages 等）
+		allowed = anthropicMessagesFields
+	}
+
+	// 使用 gjson 遍历顶层键，用 sjson 删除不在白名单中的键
+	var removed []string
+	result := gjson.ParseBytes(bodyBytes)
+	if !result.IsObject() {
+		return bodyBytes, nil
+	}
+
+	cleaned := bodyBytes
+	result.ForEach(func(key, _ gjson.Result) bool {
+		if !allowed[key.String()] {
+			removed = append(removed, key.String())
+		}
+		return true
+	})
+
+	// 从后往前删除，避免索引偏移问题
+	for _, k := range removed {
+		if modified, err := sjson.DeleteBytes(cleaned, k); err == nil {
+			cleaned = modified
+		}
+	}
+
+	return cleaned, removed
+}
+
+// sanitizeHeaders 过滤请求头，只保留白名单中的头，并清理 anthropic-beta 中的不支持值
+func sanitizeHeaders(headers map[string]string) map[string]string {
+	cleaned := make(map[string]string)
+	for k, v := range headers {
+		lower := strings.ToLower(k)
+		if !passthroughHeaders[lower] {
+			continue
+		}
+		if lower == "anthropic-beta" {
+			v = cleanAnthropicBeta(v)
+			if v == "" {
+				continue
+			}
+		}
+		cleaned[k] = v
+	}
+	return cleaned
+}
+
+// cleanAnthropicBeta 从 anthropic-beta header 中移除不支持的值
+func cleanAnthropicBeta(value string) string {
+	parts := strings.Split(value, ",")
+	var filtered []string
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" || unsupportedBetaValues[trimmed] {
+			continue
+		}
+		filtered = append(filtered, trimmed)
+	}
+	return strings.Join(filtered, ", ")
 }

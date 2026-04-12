@@ -31,6 +31,9 @@ export type AutomationCard = {
     timeout?: number        // 超时时间（毫秒）
   }
 
+  // 请求清理：启用后转发前移除非标准字段和请求头
+  requestSanitizeEnabled?: boolean
+
   // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===
   /** @deprecated 已迁移到 availabilityMonitorEnabled */
   connectivityCheck?: boolean

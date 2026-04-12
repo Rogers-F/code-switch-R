@@ -64,6 +64,10 @@ type Provider struct {
 	// 空值时使用平台默认（claude: x-api-key, codex: bearer）
 	ConnectivityAuthType string `json:"connectivityAuthType,omitempty"`
 
+	// 请求清理开关 - 启用后在转发前移除非标准字段和不支持的请求头
+	// 解决 LiteLLM 等中转服务的 "Extra inputs are not permitted" 兼容性问题
+	RequestSanitizeEnabled bool `json:"requestSanitizeEnabled,omitempty"`
+
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段
 

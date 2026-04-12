@@ -619,6 +619,21 @@
                   <span class="field-hint">{{ t('components.main.form.hints.apiEndpoint') }}</span>
                 </label>
 
+                <!-- 请求清理 -->
+                <div class="form-field">
+                  <span>{{ t('components.main.form.labels.requestSanitize') }}</span>
+                  <div class="toggle-with-hint">
+                    <label class="mac-switch">
+                      <input
+                        type="checkbox"
+                        v-model="modalState.form.requestSanitizeEnabled"
+                      />
+                      <span></span>
+                    </label>
+                    <span class="field-hint">{{ t('components.main.form.hints.requestSanitize') }}</span>
+                  </div>
+                </div>
+
                 <!-- 认证方式 -->
                 <div class="form-field">
                   <span>{{ t('components.main.form.labels.connectivityAuthType') }}</span>
@@ -1570,6 +1585,8 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
 const serializeProviders = (providers: AutomationCard[]) =>
   providers.map((provider) => ({
     ...provider,
+    // 请求清理开关
+    requestSanitizeEnabled: !!provider.requestSanitizeEnabled,
     // 确保可用性配置正确序列化
     availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
     connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
@@ -2500,6 +2517,8 @@ type VendorForm = {
     testEndpoint?: string
     timeout?: number
   }
+  // 请求清理
+  requestSanitizeEnabled?: boolean
   // === 旧连通性字段（已废弃） ===
   /** @deprecated */
   connectivityCheck?: boolean
@@ -2534,6 +2553,7 @@ const defaultFormValues = (platform?: string): VendorForm => ({
   modelMapping: {},
   cliConfig: {},
   apiEndpoint: '', // API 端点（可选）
+  requestSanitizeEnabled: false, // 请求清理（默认关闭）
   // 可用性监控配置（新）
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
@@ -2639,6 +2659,7 @@ const openEditModal = (card: AutomationCard) => {
     modelMapping: card.modelMapping || {},
     cliConfig: card.cliConfig || {},
     apiEndpoint: card.apiEndpoint || '',
+    requestSanitizeEnabled: card.requestSanitizeEnabled ?? false,
     // 可用性监控配置（新）- 兼容从旧字段迁移
     availabilityMonitorEnabled:
       card.availabilityMonitorEnabled ?? card.connectivityCheck ?? false,
@@ -2718,6 +2739,7 @@ const submitModal = async () => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
+      requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
@@ -2754,6 +2776,7 @@ const submitModal = async () => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
+      requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
