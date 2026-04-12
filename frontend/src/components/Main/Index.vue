@@ -570,7 +570,6 @@
                     type="text"
                     :placeholder="t('components.main.form.placeholders.name')"
                     required
-                    :disabled="Boolean(modalState.editingId)"
                   />
                 </label>
 
@@ -2745,6 +2744,7 @@ const submitModal = async () => {
     const prevLevel = normalizeLevel(editingCard.value.level)
     const nextLevel = normalizeLevel(modalState.form.level)
     Object.assign(editingCard.value, {
+      name: name || editingCard.value.name,
       apiUrl: apiUrl || editingCard.value.apiUrl,
       apiKey,
       officialSite,
