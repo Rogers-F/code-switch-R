@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/daodao97/xgo/xdb"
 )
 
 // SanitizeConfig 请求清理高级配置（黑名单模式）
@@ -199,9 +201,11 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	for i := range providers {
 		p := &providers[i]
 
-		// 规则：name 不可修改（黑名单/统计以 name 为 key，改名会导致数据丢失）
+		// 改名时同步更新数据库中的 provider_name（黑名单、请求日志）
 		if oldName, ok := nameByID[p.ID]; ok && oldName != p.Name {
-			return fmt.Errorf("provider id %d 的 name 不可修改（会导致黑名单和统计数据丢失）", p.ID)
+			if err := migrateProviderName(kind, oldName, p.Name); err != nil {
+				log.Printf("⚠️  迁移 provider 名称失败 (%s -> %s): %v", oldName, p.Name, err)
+			}
 		}
 
 		// 验证模型配置
@@ -634,4 +638,32 @@ func applyWildcardMapping(pattern, replacement, input string) string {
 
 	// 替换 replacement 中的 *
 	return strings.Replace(replacement, "*", wildcardPart, 1)
+}
+
+// migrateProviderName 在 provider 改名时同步更新数据库中的 provider_name
+// 更新 provider_blacklist 和 request_log 两张表
+func migrateProviderName(platform, oldName, newName string) error {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return fmt.Errorf("获取数据库连接失败: %w", err)
+	}
+
+	// 更新黑名单表
+	if _, err := db.Exec(
+		`UPDATE provider_blacklist SET provider_name = ? WHERE platform = ? AND provider_name = ?`,
+		newName, platform, oldName,
+	); err != nil {
+		return fmt.Errorf("更新 provider_blacklist 失败: %w", err)
+	}
+
+	// 更新请求日志表
+	if _, err := db.Exec(
+		`UPDATE request_log SET provider = ? WHERE platform = ? AND provider = ?`,
+		newName, platform, oldName,
+	); err != nil {
+		return fmt.Errorf("更新 request_log 失败: %w", err)
+	}
+
+	log.Printf("✓ Provider 改名成功: %s/%s -> %s/%s", platform, oldName, platform, newName)
+	return nil
 }
