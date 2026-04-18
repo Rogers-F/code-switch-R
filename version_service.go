@@ -1,6 +1,6 @@
 package main
 
-const AppVersion = "v2.6.28"
+const AppVersion = "v2.6.29"
 
 // UpdatePolicy 更新策略（可通过 -ldflags "-X main.UpdatePolicy=installer" 覆盖）
 // 可选值：auto（默认）、portable、installer

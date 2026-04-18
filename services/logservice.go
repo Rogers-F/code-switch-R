@@ -36,6 +36,7 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 			"cache_read_tokens",
 			"ephemeral_5m_tokens",
 			"ephemeral_1h_tokens",
+			"service_tier",
 		),
 	}
 	if platform != "" {
@@ -57,7 +58,7 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 	return total, nil
 }
 
-// buildSnapshotFromRecord 从 request_log 记录构造定价输入,统一处理 ephemeral 拆分。
+// buildSnapshotFromRecord 从 request_log 记录构造定价输入,统一处理 ephemeral 拆分 + service_tier。
 func buildSnapshotFromRecord(record xdb.Record) modelpricing.UsageSnapshot {
 	total := record.GetInt("cache_create_tokens")
 	fiveM := record.GetInt("ephemeral_5m_tokens")
@@ -68,6 +69,7 @@ func buildSnapshotFromRecord(record xdb.Record) modelpricing.UsageSnapshot {
 		ReasoningTokens:   record.GetInt("reasoning_tokens"),
 		CacheCreateTokens: total,
 		CacheReadTokens:   record.GetInt("cache_read_tokens"),
+		ServiceTier:       modelpricing.ServiceTier(strings.ToLower(strings.TrimSpace(record.GetString("service_tier")))),
 	}
 	if fiveM > 0 || oneH > 0 {
 		snap.CacheCreation = &modelpricing.CacheCreationDetail{
@@ -126,6 +128,7 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 			CreatedAt:         record.GetString("created_at"),
 			IsStream:          record.GetBool("is_stream"),
 			DurationSec:       record.GetFloat64("duration_sec"),
+			ServiceTier:       record.GetString("service_tier"),
 		}
 		ls.decorateCost(&logEntry)
 		logs = append(logs, logEntry)
@@ -181,6 +184,7 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 			"cache_read_tokens",
 			"ephemeral_5m_tokens",
 			"ephemeral_1h_tokens",
+			"service_tier",
 			"created_at",
 		),
 		xdb.OrderByDesc("created_at"),
@@ -253,6 +257,7 @@ func (ls *LogService) StatsSince(platform string) (LogStats, error) {
 			"cache_read_tokens",
 			"ephemeral_5m_tokens",
 			"ephemeral_1h_tokens",
+			"service_tier",
 			"created_at",
 		),
 		xdb.OrderByAsc("created_at"),
@@ -362,6 +367,7 @@ func (ls *LogService) ProviderDailyStats(platform string) ([]ProviderDailyStat, 
 			"cache_read_tokens",
 			"ephemeral_5m_tokens",
 			"ephemeral_1h_tokens",
+			"service_tier",
 			"created_at",
 		),
 	}
@@ -440,6 +446,7 @@ func (ls *LogService) decorateCost(logEntry *ReqeustLog) {
 		ReasoningTokens:   logEntry.ReasoningTokens,
 		CacheCreateTokens: logEntry.CacheCreateTokens,
 		CacheReadTokens:   logEntry.CacheReadTokens,
+		ServiceTier:       modelpricing.ServiceTier(strings.ToLower(strings.TrimSpace(logEntry.ServiceTier))),
 	}
 	if logEntry.Ephemeral5mTokens > 0 || logEntry.Ephemeral1hTokens > 0 {
 		usage.CacheCreation = &modelpricing.CacheCreationDetail{
