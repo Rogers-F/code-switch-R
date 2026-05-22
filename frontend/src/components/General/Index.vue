@@ -32,6 +32,7 @@ const getCachedString = (key: string, defaultValue: string): string => {
 }
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
+const trayPopupEnabled = ref(getCachedValue('trayPopup', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
@@ -113,10 +114,12 @@ const loadAppSettings = async () => {
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
     autoUpdateEnabled.value = data?.auto_update ?? true
+    trayPopupEnabled.value = data?.enable_tray_popup ?? true
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
     localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+    localStorage.setItem('app-settings-trayPopup', String(trayPopupEnabled.value))
     localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
     localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
     localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
@@ -144,6 +147,7 @@ const loadAppSettings = async () => {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
     homeTitleVisible.value = true
+    trayPopupEnabled.value = true
     budgetTotal.value = 0
     budgetUsedAdjustment.value = 0
     budgetForecastMethod.value = 'cycle'
@@ -231,6 +235,7 @@ const persistAppSettings = async () => {
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
       auto_update: autoUpdateEnabled.value,
+      enable_tray_popup: trayPopupEnabled.value,
     }
     await saveAppSettings(payload)
 
@@ -243,6 +248,7 @@ const persistAppSettings = async () => {
     // 更新缓存
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
     localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+    localStorage.setItem('app-settings-trayPopup', String(trayPopupEnabled.value))
     localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
     localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
     localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
@@ -497,6 +503,23 @@ onMounted(async () => {
 
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.trayPanel') }}</h2>
+        <div class="mac-panel">
+          <p class="panel-title">{{ $t('components.general.label.trayPanelGlobal') }}</p>
+          <ListItem :label="$t('components.general.label.enableTrayPopup')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="trayPopupEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.enableTrayPopupHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
         <div class="mac-panel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelClaude') }}</p>
           <ListItem :label="$t('components.general.label.budgetTotal')">

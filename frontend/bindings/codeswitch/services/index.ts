@@ -18,6 +18,7 @@ import * as LogService from "./logservice.js";
 import * as MCPService from "./mcpservice.js";
 import * as NetworkService from "./networkservice.js";
 import * as PromptService from "./promptservice.js";
+import * as ProviderRelayService from "./providerrelayservice.js";
 import * as ProviderService from "./providerservice.js";
 import * as SettingsService from "./settingsservice.js";
 import * as SkillService from "./skillservice.js";
@@ -42,6 +43,7 @@ export {
     MCPService,
     NetworkService,
     PromptService,
+    ProviderRelayService,
     ProviderService,
     SettingsService,
     SkillService,
@@ -83,6 +85,7 @@ export {
     HealthCheckResult,
     HeatmapStat,
     Hotkey,
+    LastUsedProvider,
     ListenMode,
     LogStats,
     LogStatsSeries,

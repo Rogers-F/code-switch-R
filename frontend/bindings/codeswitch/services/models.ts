@@ -44,6 +44,11 @@ export class AppSettings {
      */
     "enable_round_robin": boolean;
 
+    /**
+     * 托盘弹窗开关
+     */
+    "enable_tray_popup": boolean;
+
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
         if (!("show_heatmap" in $$source)) {
@@ -120,6 +125,9 @@ export class AppSettings {
         }
         if (!("enable_round_robin" in $$source)) {
             this["enable_round_robin"] = false;
+        }
+        if (!("enable_tray_popup" in $$source)) {
+            this["enable_tray_popup"] = false;
         }
 
         Object.assign(this, $$source);
@@ -1617,6 +1625,50 @@ export class Hotkey {
     static createFrom($$source: any = {}): Hotkey {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new Hotkey($$parsedSource as Partial<Hotkey>);
+    }
+}
+
+/**
+ * LastUsedProvider 最后使用的供应商信息
+ * @author sm
+ */
+export class LastUsedProvider {
+    /**
+     * claude/codex/gemini
+     */
+    "platform": string;
+
+    /**
+     * 供应商名称
+     */
+    "provider_name": string;
+
+    /**
+     * 更新时间（毫秒）
+     */
+    "updated_at": number;
+
+    /** Creates a new LastUsedProvider instance. */
+    constructor($$source: Partial<LastUsedProvider> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("provider_name" in $$source)) {
+            this["provider_name"] = "";
+        }
+        if (!("updated_at" in $$source)) {
+            this["updated_at"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LastUsedProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LastUsedProvider {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LastUsedProvider($$parsedSource as Partial<LastUsedProvider>);
     }
 }
 

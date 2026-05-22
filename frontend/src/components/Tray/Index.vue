@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
-import { Call } from '@wailsio/runtime'
+import { Call, Window } from '@wailsio/runtime'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
@@ -353,14 +353,31 @@ const refreshAll = async () => {
   }
 }
 
-const handleFocus = () => {
+const handleFocus = async () => {
+  try {
+    const settings = await fetchAppSettings()
+    if (settings && settings.enable_tray_popup === false) {
+      const mainWindow = Window.Get('main')
+      const trayWindow = Window.Get('tray')
+      await mainWindow.Show()
+      await mainWindow.Focus()
+      await trayWindow.Hide()
+      return
+    }
+  } catch (error) {
+    console.error('failed to fetch settings in handleFocus', error)
+  }
+  void refreshAll()
+}
+
+const handleSettingsUpdated = () => {
   void refreshAll()
 }
 
 onMounted(() => {
   void refreshAll()
   window.addEventListener('focus', handleFocus)
-  window.addEventListener('app-settings-updated', handleFocus)
+  window.addEventListener('app-settings-updated', handleSettingsUpdated)
 })
 
 onUnmounted(() => {
@@ -368,7 +385,7 @@ onUnmounted(() => {
     window.clearInterval(ticker)
   }
   window.removeEventListener('focus', handleFocus)
-  window.removeEventListener('app-settings-updated', handleFocus)
+  window.removeEventListener('app-settings-updated', handleSettingsUpdated)
 })
 </script>
 
