@@ -344,6 +344,9 @@ const refreshAll = async () => {
   refreshBusy = true
   try {
     const settings = await fetchAppSettings()
+    if (settings) {
+      localStorage.setItem('app-settings-trayPopup', String(settings.enable_tray_popup))
+    }
     await Promise.all(cards.map((card) => card.refresh(settings)))
   } finally {
     refreshBusy = false
@@ -354,15 +357,34 @@ const refreshAll = async () => {
 }
 
 const handleFocus = async () => {
-  try {
-    const settings = await fetchAppSettings()
-    if (settings && settings.enable_tray_popup === false) {
+  // 1. 同步检查 localStorage 缓存以彻底消除视觉闪烁
+  const cachedVal = localStorage.getItem('app-settings-trayPopup')
+  if (cachedVal === 'false') {
+    try {
       const mainWindow = Window.Get('main')
       const trayWindow = Window.Get('tray')
       await mainWindow.Show()
       await mainWindow.Focus()
       await trayWindow.Hide()
-      return
+    } catch (e) {
+      console.error('failed to hide tray and show main synchronously', e)
+    }
+    return
+  }
+
+  // 2. 异步获取最新设置作为兜底，确保设置更新时的正确性
+  try {
+    const settings = await fetchAppSettings()
+    if (settings) {
+      localStorage.setItem('app-settings-trayPopup', String(settings.enable_tray_popup))
+      if (settings.enable_tray_popup === false) {
+        const mainWindow = Window.Get('main')
+        const trayWindow = Window.Get('tray')
+        await mainWindow.Show()
+        await mainWindow.Focus()
+        await trayWindow.Hide()
+        return
+      }
     }
   } catch (error) {
     console.error('failed to fetch settings in handleFocus', error)
