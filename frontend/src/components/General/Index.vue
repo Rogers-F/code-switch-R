@@ -73,9 +73,6 @@ const importPath = ref('')
 const importing = ref(false)
 const importLoading = ref(true)
 
-const goBack = () => {
-  router.push('/')
-}
 
 const normalizeBudgetForecastMethod = (value: string) => {
   const trimmed = value?.trim()
@@ -417,23 +414,17 @@ onMounted(async () => {
 
 <template>
   <div class="main-shell general-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ $t('components.general.title.application') }}</p>
-      <button class="ghost-icon" :aria-label="$t('components.general.buttons.back')" @click="goBack">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M15 18l-6-6 6-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-    </div>
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ $t('components.general.title.application') }}</h1>
+        <p class="app-page-subtitle">配置应用全局行为、偏好与导入设置</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- Settings actions -->
+      </div>
+    </header>
 
-    <div class="general-page">
+    <div class="app-page-container general-page">
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.application') }}</h2>
         <div class="mac-panel">

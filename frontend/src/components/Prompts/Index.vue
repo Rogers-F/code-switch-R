@@ -164,13 +164,33 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="prompts-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('prompts.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('prompts.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('prompts.hero.lead') }}</p>
-    </div>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('prompts.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('prompts.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- Import button -->
+        <button class="ghost-icon" :title="t('prompts.actions.import')" :disabled="loading" @click="handleImport">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+        </button>
+
+        <!-- Create button -->
+        <button class="ghost-icon" :title="t('prompts.actions.create')" @click="openCreateModal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-page-container prompts-page">
 
     <!-- Platform Tabs -->
     <div class="platform-tabs">
@@ -243,23 +263,6 @@ onMounted(() => {
       <span>{{ t('prompts.loading') }}</span>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="page-actions">
-      <button class="primary-btn" @click="openCreateModal">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        {{ t('prompts.actions.create') }}
-      </button>
-      <button class="secondary-btn" @click="handleImport" :disabled="loading">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="17 8 12 3 7 8"></polyline>
-          <line x1="12" y1="3" x2="12" y2="15"></line>
-        </svg>
-        {{ t('prompts.actions.import') }}
-      </button>
     </div>
 
     <!-- Edit Modal (不使用 Teleport 以修复 macOS WebView 键盘输入问题) -->

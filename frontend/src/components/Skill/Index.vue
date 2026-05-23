@@ -1,47 +1,44 @@
 <template>
   <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.skill.hero.eyebrow') }}</p>
-      <button class="ghost-icon" :title="t('components.skill.actions.back')"
-        :data-tooltip="t('components.skill.actions.back')" @click="goHome">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
-            stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="ghost-icon" :title="t('components.skill.actions.refresh')"
-        :data-tooltip="t('components.skill.actions.refresh')" :disabled="refreshing" @click="refresh">
-        <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spin: refreshing }">
-          <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
-            stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M20.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
-            stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="ghost-icon" :title="t('components.skill.actions.openFolder')"
-        :data-tooltip="t('components.skill.actions.openFolder')" @click="handleOpenFolder">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
-            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="ghost-icon" :title="t('components.skill.repos.open')"
-        :data-tooltip="t('components.skill.repos.open')" @click="openRepoModal">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 5h14v6H5zM7 13h10v6H7z" fill="none" stroke="currentColor" stroke-width="1.5"
-            stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M12 7.5v1M12 15.5v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-        </svg>
-      </button>
-    </div>
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('components.skill.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('components.skill.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- Refresh button -->
+        <button class="ghost-icon" :title="t('components.skill.actions.refresh')"
+          :data-tooltip="t('components.skill.actions.refresh')" :disabled="refreshing" @click="refresh">
+          <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spin: refreshing }">
+            <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M20.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+              stroke-linejoin="round" />
+          </svg>
+        </button>
 
-    <div class="contrib-page skill-page">
-      <header class="skill-hero">
-        <div class="skill-hero-text">
-          <h1>{{ t('components.skill.hero.title') }}</h1>
-          <p class="skill-lead">{{ t('components.skill.hero.lead') }}</p>
-        </div>
-      </header>
+        <!-- Open folder -->
+        <button class="ghost-icon" :title="t('components.skill.actions.openFolder')"
+          :data-tooltip="t('components.skill.actions.openFolder')" @click="handleOpenFolder">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+
+        <!-- Repos modal -->
+        <button class="ghost-icon" :title="t('components.skill.repos.open')"
+          :data-tooltip="t('components.skill.repos.open')" @click="openRepoModal">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 5h14v6H5zM7 13h10v6H7z" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M12 7.5v1M12 15.5v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-page-container skill-page">
 
       <!-- Platform Tabs -->
       <div class="skill-platform-tabs">
@@ -543,11 +540,6 @@ const handleUninstall = async (skill: SkillSummary) => {
   } finally {
     processingSkill.value = ''
   }
-}
-
-// Navigation
-const goHome = () => {
-  router.push('/')
 }
 
 const openExternal = (target: string) => {

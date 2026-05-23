@@ -65,13 +65,25 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="envcheck-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('envcheck.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('envcheck.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('envcheck.hero.lead') }}</p>
-    </div>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('envcheck.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('envcheck.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- Refresh Button -->
+        <button class="ghost-icon" :title="t('envcheck.refresh')" @click="checkConflicts" :disabled="loading">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: loading }">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-page-container envcheck-page">
 
     <!-- Platform Tabs -->
     <div class="platform-tabs">
@@ -155,16 +167,6 @@ onMounted(() => {
       <span>{{ t('envcheck.checking') }}</span>
     </div>
 
-    <!-- Refresh Button -->
-    <div class="page-actions">
-      <button class="refresh-btn" @click="checkConflicts" :disabled="loading">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: loading }">
-          <polyline points="23 4 23 10 17 10"></polyline>
-          <polyline points="1 20 1 14 7 14"></polyline>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-        </svg>
-        {{ t('envcheck.refresh') }}
-      </button>
     </div>
   </div>
 </template>

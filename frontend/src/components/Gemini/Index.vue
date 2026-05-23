@@ -1,19 +1,6 @@
 <template>
   <div class="main-shell">
     <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.gemini.hero.eyebrow') }}</p>
-      <button class="ghost-icon" :aria-label="t('components.gemini.controls.back')" @click="goHome">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M15 18l-6-6 6-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
       <button class="ghost-icon" :aria-label="t('components.gemini.controls.settings')" @click="goToSettings">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -318,7 +305,6 @@ const confirmState = reactive({
   provider: null as BindingGeminiProvider | null,
 })
 
-const goHome = () => router.push('/')
 const goToSettings = () => router.push('/settings')
 
 const reload = async () => {

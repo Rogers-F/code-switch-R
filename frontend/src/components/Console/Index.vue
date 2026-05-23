@@ -16,9 +16,6 @@ const loading = ref(false)
 const logsContainer = ref<HTMLElement>()
 let refreshInterval: number | null = null
 
-const goBack = () => {
-  router.push('/')
-}
 
 const loadLogs = async () => {
   try {
@@ -88,49 +85,42 @@ onUnmounted(() => {
 
 <template>
   <div class="main-shell console-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">控制台</p>
-      <div class="actions-group">
-        <button class="secondary-btn" @click="clearLogs">清空日志</button>
-        <label class="auto-scroll-toggle">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">控制台</h1>
+        <p class="app-page-subtitle">查看后端服务的实时运行日志</p>
+      </div>
+      <div class="app-page-actions">
+        <label class="auto-scroll-toggle mr-2">
           <input type="checkbox" v-model="autoScroll" />
           <span>自动滚动</span>
         </label>
-        <button class="ghost-icon" aria-label="返回" @click="goBack">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M15 18l-6-6 6-6"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
+        <button class="secondary-btn" @click="clearLogs">清空日志</button>
       </div>
-    </div>
+    </header>
 
-    <div class="console-container">
-      <div v-if="loading" class="loading-state">
-        <div class="spinner"></div>
-        <p>加载中...</p>
-      </div>
-
-      <div v-else class="console-content" ref="logsContainer">
-        <div v-if="logs.length === 0" class="empty-state">
-          <p>暂无日志</p>
+    <div class="app-page-container flex-1 overflow-hidden">
+      <div class="console-container">
+        <div v-if="loading" class="loading-state">
+          <div class="spinner"></div>
+          <p>加载中...</p>
         </div>
 
-        <div
-          v-for="(log, index) in logs"
-          :key="index"
-          class="log-entry"
-          :class="getLevelClass(log.level)"
-        >
-          <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
-          <span class="log-level">{{ log.level }}</span>
-          <span class="log-message">{{ log.message }}</span>
+        <div v-else class="console-content" ref="logsContainer">
+          <div v-if="logs.length === 0" class="empty-state">
+            <p>暂无日志</p>
+          </div>
+
+          <div
+            v-for="(log, index) in logs"
+            :key="index"
+            class="log-entry"
+            :class="getLevelClass(log.level)"
+          >
+            <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
+            <span class="log-level">{{ log.level }}</span>
+            <span class="log-message">{{ log.message }}</span>
+          </div>
         </div>
       </div>
     </div>

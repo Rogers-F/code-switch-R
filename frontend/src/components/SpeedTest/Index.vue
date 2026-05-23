@@ -159,13 +159,18 @@ onActivated(() => {
 </script>
 
 <template>
-  <div class="speedtest-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('speedtest.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('speedtest.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('speedtest.hero.lead') }}</p>
-    </div>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('speedtest.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('speedtest.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- Header actions can be added here if needed -->
+      </div>
+    </header>
+
+    <div class="app-page-container speedtest-page">
 
     <!-- URL Input -->
     <div class="input-section">
@@ -300,6 +305,7 @@ onActivated(() => {
         <span class="legend-dot" style="background: #ef4444;"></span>
         <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
       </div>
+    </div>
     </div>
   </div>
 </template>

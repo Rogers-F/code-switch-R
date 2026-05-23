@@ -254,46 +254,43 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="availability-page p-6">
-    <!-- 页面标题 -->
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <h1 class="text-2xl font-semibold text-[var(--mac-text)]">
-          {{ t('availability.title') }}
-        </h1>
-        <p class="text-sm text-[var(--mac-text-secondary)] mt-1">
-          {{ t('availability.subtitle') }}
-        </p>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('availability.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('availability.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="app-page-actions">
         <button
           @click="refreshAll"
           :disabled="refreshing"
-          class="px-6 py-3 text-base font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl shadow-lg hover:shadow-xl hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          class="primary-btn"
         >
           <span v-if="refreshing">🔄 {{ t('availability.refreshing') }}</span>
           <span v-else>⚡ {{ t('availability.refreshAll') }}</span>
         </button>
       </div>
-    </div>
+    </header>
+
+    <div class="app-page-container availability-page">
 
     <!-- 状态概览 -->
     <div class="grid grid-cols-4 gap-4 mb-6">
-      <div class="stat-card bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
-        <div class="text-3xl font-bold text-green-600 dark:text-green-400">{{ statusStats.operational }}</div>
-        <div class="text-sm text-green-700 dark:text-green-300">{{ t('availability.stats.operational') }}</div>
+      <div class="stat-card bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4">
+        <div class="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{{ statusStats.operational }}</div>
+        <div class="text-sm text-emerald-700 dark:text-emerald-300">{{ t('availability.stats.operational') }}</div>
       </div>
-      <div class="stat-card bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-4">
-        <div class="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{{ statusStats.degraded }}</div>
-        <div class="text-sm text-yellow-700 dark:text-yellow-300">{{ t('availability.stats.degraded') }}</div>
+      <div class="stat-card bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
+        <div class="text-3xl font-bold text-amber-600 dark:text-amber-400">{{ statusStats.degraded }}</div>
+        <div class="text-sm text-amber-700 dark:text-amber-300">{{ t('availability.stats.degraded') }}</div>
       </div>
-      <div class="stat-card bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
-        <div class="text-3xl font-bold text-red-600 dark:text-red-400">{{ statusStats.failed }}</div>
-        <div class="text-sm text-red-700 dark:text-red-300">{{ t('availability.stats.failed') }}</div>
+      <div class="stat-card bg-rose-500/10 border border-rose-500/20 rounded-xl p-4">
+        <div class="text-3xl font-bold text-rose-600 dark:text-rose-400">{{ statusStats.failed }}</div>
+        <div class="text-sm text-rose-700 dark:text-rose-300">{{ t('availability.stats.failed') }}</div>
       </div>
-      <div class="stat-card bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-        <div class="text-3xl font-bold text-gray-600 dark:text-gray-400">{{ statusStats.disabled }}</div>
-        <div class="text-sm text-gray-700 dark:text-gray-300">{{ t('availability.stats.disabled') }}</div>
+      <div class="stat-card bg-[var(--mac-surface-strong)] border border-[var(--mac-border)] rounded-xl p-4">
+        <div class="text-3xl font-bold text-[var(--mac-text)] opacity-80">{{ statusStats.disabled }}</div>
+        <div class="text-sm text-[var(--mac-text-secondary)]">{{ t('availability.stats.disabled') }}</div>
       </div>
     </div>
 
@@ -491,6 +488,7 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
+    </div>
     </div>
   </div>
 </template>
