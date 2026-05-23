@@ -534,7 +534,8 @@
       "streamOff": "Single response",
       "back": "Back to home",
       "nextRefresh": "Next refresh in {seconds}s",
-      "query": "Query",
+      "query": "Filter",
+      "reset": "Reset",
       "costDetail": {
         "title": "Today's Cost Breakdown",
         "empty": "No cost records today"
@@ -551,9 +552,12 @@
         "power": "Permission settings",
         "blacklist": "Blacklist Settings",
         "dataImport": "Data Import",
-        "connectivity": "Connectivity Test"
+        "connectivity": "Connectivity Test",
+        "navigation": "Navigation Settings",
+        "about": "About"
       },
       "label": {
+        "openGithub": "Visit GitHub Releases",
         "assistant_access": "Accessibility permissions",
         "automatic_up": "Automatically check for updates",
         "disk_access": "Full disk access",
@@ -909,7 +913,8 @@
     "themesetting": {
       "select": {
         "opt_dark": "Dark Mode",
-        "opt_light": "Bright Mode"
+        "opt_light": "Bright Mode",
+        "opt_system": "Follow System"
       }
     },
     "shortcut": {

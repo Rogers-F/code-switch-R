@@ -60,9 +60,12 @@
           </select>
         </label>
       </div>
-      <div class="filter-actions">
+      <div class="filter-actions" style="display: flex; gap: 8px;">
         <BaseButton type="submit" :disabled="loading">
           {{ t('components.logs.query') }}
+        </BaseButton>
+        <BaseButton variant="outline" type="button" @click="resetFilters" :disabled="loading">
+          {{ t('components.logs.reset') }}
         </BaseButton>
       </div>
     </form>
@@ -506,6 +509,12 @@ const applyFilters = async () => {
   page.value = 1
   await loadDashboard()
   resetTimer()
+}
+
+const resetFilters = async () => {
+  filters.platform = ''
+  filters.provider = ''
+  await applyFilters()
 }
 
 const refreshLogs = () => {

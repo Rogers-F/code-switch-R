@@ -953,9 +953,14 @@ html.dark .mac-sidebar-item:hover {
 .logs-table th,
 .logs-table td {
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid #E1E5EC;
   text-align: left;
   white-space: nowrap;
+}
+
+html.dark .logs-table th,
+html.dark .logs-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .logs-table .col-time { width: 180px; }

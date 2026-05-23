@@ -535,7 +535,8 @@
       "streamOff": "非流",
       "back": "返回主页",
       "nextRefresh": "距离下次刷新 {seconds}s",
-      "query": "查询",
+      "query": "过滤",
+      "reset": "重置",
       "costDetail": {
         "title": "今日消费明细",
         "empty": "今日暂无消费记录"
@@ -552,9 +553,12 @@
         "exterior": "外观设置",
         "blacklist": "拉黑配置",
         "dataImport": "数据导入",
-        "connectivity": "连通性检测"
+        "connectivity": "连通性检测",
+        "navigation": "导航设置",
+        "about": "关于"
       },
       "label": {
+        "openGithub": "访问 GitHub Releases",
         "assistant_access": "辅助功能访问权限",
         "disk_access": "完全磁盘访问权限",
         "startup": "登录时启动",
@@ -910,7 +914,8 @@
     "themesetting": {
       "select": {
         "opt_light": "亮色模式",
-        "opt_dark": "暗色模式"
+        "opt_dark": "暗色模式",
+        "opt_system": "跟随系统"
       }
     },
     "shortcut": {

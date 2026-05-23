@@ -325,6 +325,12 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.network-wsl-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
 .mac-select {
   padding: 6px 12px;
   border: 1px solid var(--mac-border);

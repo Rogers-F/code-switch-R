@@ -1,30 +1,16 @@
 <template>
   <div class="main-shell">
-    <div class="global-actions">
-      <button class="ghost-icon" :aria-label="t('components.gemini.controls.settings')" @click="goToSettings">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M12 15a3 3 0 100-6 3 3 0 000 6z"
-            stroke="currentColor"
-            stroke-width="1.5"
-            fill="none"
-          />
-          <path
-            d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
-            stroke="currentColor"
-            stroke-width="1.5"
-            fill="none"
-          />
-        </svg>
-      </button>
-    </div>
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('components.gemini.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('components.gemini.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- Header Actions: Clean and Unified -->
+      </div>
+    </header>
 
-    <div class="contrib-page">
-      <section class="contrib-hero">
-        <h1>{{ t('components.gemini.hero.title') }}</h1>
-        <p class="lead">{{ t('components.gemini.hero.lead') }}</p>
-      </section>
-
+    <div class="app-page-container">
       <!-- 当前状态 -->
       <section v-if="status" class="status-section">
         <div class="status-card" :class="{ enabled: status?.enabled }">
@@ -245,6 +231,7 @@
         </BaseButton>
       </footer>
     </BaseModal>
+    </div>
   </div>
 </template>
 
@@ -304,8 +291,6 @@ const confirmState = reactive({
   open: false,
   provider: null as BindingGeminiProvider | null,
 })
-
-const goToSettings = () => router.push('/settings')
 
 const reload = async () => {
   loading.value = true

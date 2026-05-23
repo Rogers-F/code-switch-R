@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Call } from '@wailsio/runtime'
+import { Call, Browser } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
@@ -401,6 +401,53 @@ const handleImport = async () => {
   }
 }
 
+interface OptionalNavItem {
+  path: string
+  labelKey: string
+}
+
+const optionalNavItems: OptionalNavItem[] = [
+  { path: '/prompts', labelKey: 'sidebar.prompts' },
+  { path: '/mcp', labelKey: 'sidebar.mcp' },
+  { path: '/skill', labelKey: 'sidebar.skill' },
+  { path: '/availability', labelKey: 'sidebar.availability' },
+  { path: '/speedtest', labelKey: 'sidebar.speedtest' },
+  { path: '/env', labelKey: 'sidebar.env' },
+  { path: '/logs', labelKey: 'sidebar.logs' },
+  { path: '/console', labelKey: 'sidebar.console' }
+]
+
+const hiddenNavItems = ref<Set<string>>(new Set())
+
+const loadHiddenNavItems = () => {
+  const hiddenJson = localStorage.getItem('hidden-nav-items')
+  if (hiddenJson) {
+    try {
+      hiddenNavItems.value = new Set(JSON.parse(hiddenJson))
+    } catch {
+      hiddenNavItems.value = new Set()
+    }
+  } else {
+    hiddenNavItems.value = new Set()
+  }
+}
+
+const toggleNavItem = (path: string) => {
+  if (hiddenNavItems.value.has(path)) {
+    hiddenNavItems.value.delete(path)
+  } else {
+    hiddenNavItems.value.add(path)
+  }
+  localStorage.setItem('hidden-nav-items', JSON.stringify([...hiddenNavItems.value]))
+  window.dispatchEvent(new CustomEvent('nav-settings-changed'))
+}
+
+const openGithub = () => {
+  Browser.OpenURL('https://github.com/iblueer/code-switch-R/releases').catch((err) => {
+    console.error('failed to open url', err)
+  })
+}
+
 onMounted(async () => {
   await loadAppSettings()
 
@@ -409,6 +456,9 @@ onMounted(async () => {
 
   // 加载导入状态
   await loadImportStatus()
+
+  // 加载隐藏的导航项
+  loadHiddenNavItems()
 })
 </script>
 
@@ -897,6 +947,26 @@ onMounted(async () => {
       </section>
 
       <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.navigation') }}</h2>
+        <div class="mac-panel">
+          <ListItem
+            v-for="item in optionalNavItems"
+            :key="item.path"
+            :label="$t(item.labelKey)"
+          >
+            <label class="mac-switch">
+              <input
+                type="checkbox"
+                :checked="!hiddenNavItems.has(item.path)"
+                @change="toggleNavItem(item.path)"
+              />
+              <span></span>
+            </label>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.exterior') }}</h2>
         <div class="mac-panel">
           <ListItem :label="$t('components.general.label.language')">
@@ -904,6 +974,17 @@ onMounted(async () => {
           </ListItem>
           <ListItem :label="$t('components.general.label.theme')">
             <ThemeSetting />
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.about') }}</h2>
+        <div class="mac-panel">
+          <ListItem label="GitHub Repository">
+            <button class="action-btn" @click="openGithub">
+              {{ $t('components.general.label.openGithub') }}
+            </button>
           </ListItem>
         </div>
       </section>
