@@ -41,12 +41,14 @@
     <div class="app-page-container skill-page">
 
       <!-- Platform Tabs -->
-      <div class="skill-platform-tabs">
+      <div class="tab-group" role="tablist">
         <button
           v-for="platform in platforms"
           :key="platform.value"
-          :class="['skill-platform-tab', { active: activePlatform === platform.value }]"
+          class="tab-pill"
+          :class="{ active: activePlatform === platform.value }"
           @click="switchPlatform(platform.value)"
+          role="tab"
         >
           {{ platform.label }}
         </button>
@@ -638,35 +640,8 @@ onMounted(() => {
 }
 
 /* Platform Tabs */
-.skill-platform-tabs {
-  display: flex;
-  gap: 8px;
+.skill-page .tab-group {
   margin-bottom: 24px;
-  border-bottom: 1px solid var(--mac-border);
-  padding-bottom: 12px;
-}
-
-.skill-platform-tab {
-  padding: 8px 16px;
-  border: 1px solid var(--mac-border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--mac-text-secondary);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.skill-platform-tab:hover {
-  background: var(--mac-surface);
-  color: var(--mac-text);
-}
-
-.skill-platform-tab.active {
-  background: var(--mac-accent);
-  color: white;
-  border-color: var(--mac-accent);
 }
 
 /* Skill Groups */
@@ -1066,7 +1041,7 @@ html.dark .skill-card.available-card {
     flex-direction: column;
   }
 
-  .skill-platform-tabs {
+  .tab-group {
     flex-wrap: wrap;
   }
 }

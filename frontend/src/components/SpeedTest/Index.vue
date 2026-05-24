@@ -312,9 +312,6 @@ onActivated(() => {
 
 <style scoped>
 .speedtest-page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
 }
 
 .page-hero {

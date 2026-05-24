@@ -193,13 +193,14 @@ onMounted(() => {
     <div class="app-page-container prompts-page">
 
     <!-- Platform Tabs -->
-    <div class="platform-tabs">
+    <div class="tab-group" role="tablist">
       <button
         v-for="platform in platforms"
         :key="platform.id"
-        class="platform-tab"
+        class="tab-pill"
         :class="{ active: activePlatform === platform.id }"
         @click="activePlatform = platform.id"
+        role="tab"
       >
         {{ platform.name }}
       </button>
@@ -312,10 +313,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.prompts-page {
-  padding: 24px;
-  max-width: 900px;
-  margin: 0 auto;
+.prompts-page .tab-group {
+  margin-bottom: 20px;
 }
 
 .page-hero {
@@ -342,46 +341,6 @@ onMounted(() => {
   font-size: 0.95rem;
   color: var(--mac-text-secondary);
   line-height: 1.5;
-}
-
-.platform-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  padding: 4px;
-  background: var(--mac-surface);
-  border-radius: 12px;
-  border: 1px solid var(--mac-border);
-}
-
-.platform-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--mac-text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.platform-tab:hover {
-  color: var(--mac-text);
-  background: rgba(15, 23, 42, 0.05);
-}
-
-html.dark .platform-tab:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.platform-tab.active {
-  background: var(--mac-accent);
-  color: #fff;
 }
 
 .stats-bar {
