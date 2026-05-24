@@ -378,16 +378,15 @@ html.dark .mac-sidebar-item:hover {
 	gap: 4px;
 	overflow: hidden;
 	width: 100%;
-	justify-content: space-between;
+	justify-content: flex-start;
 }
 
 .contrib-column {
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
-	flex: 1 1 0;
-	min-width: 10px;
-	max-width: 18px;
+	flex: 0 0 auto;
+	width: 14px;
 }
 
 .contrib-cell {
@@ -481,8 +480,8 @@ html.dark .mac-sidebar-item:hover {
 	}
 
 	.contrib-column {
-		min-width: 10px;
-		max-width: 15px;
+		width: 12px;
+		gap: 3px;
 	}
 
 	.contrib-grid {
@@ -501,8 +500,8 @@ html.dark .mac-sidebar-item:hover {
 	}
 
 	.contrib-column {
-		min-width: 8px;
-		max-width: 12px;
+		width: 10px;
+		gap: 2px;
 	}
 }
 .automation-section {
