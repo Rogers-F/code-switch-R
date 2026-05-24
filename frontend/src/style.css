@@ -746,12 +746,12 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .primary-btn {
-  background: #0ea5e9;
+  background: var(--mac-accent);
   color: white;
 }
 
 .primary-btn:hover:not(:disabled) {
-  background: #0284c7;
+  opacity: 0.9;
 }
 
 .action-btn:disabled,

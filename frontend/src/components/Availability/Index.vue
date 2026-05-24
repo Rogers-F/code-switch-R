@@ -323,14 +323,13 @@ onUnmounted(() => {
                 <!-- 左侧：开关 + 名称 + 状态 -->
                 <div class="flex items-center gap-4">
                   <!-- 开关 -->
-                  <label class="relative inline-flex items-center cursor-pointer">
+                  <label class="mac-switch">
                     <input
                       type="checkbox"
                       :checked="timeline.availabilityMonitorEnabled"
                       @change="toggleMonitor(platform, timeline.providerId, !timeline.availabilityMonitorEnabled)"
-                      class="sr-only peer"
                     />
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-[var(--mac-accent)]"></div>
+                    <span></span>
                   </label>
 
                   <!-- 名称 -->
@@ -359,7 +358,7 @@ onUnmounted(() => {
                   <button
                     v-if="timeline.availabilityMonitorEnabled"
                     @click="checkSingle(platform, timeline.providerId)"
-                    class="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors flex items-center gap-1 hover:bg-gray-100 dark:hover:bg-white/5 rounded-md"
+                    class="action-btn text-xs py-1 px-2 flex items-center gap-1"
                   >
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -371,7 +370,7 @@ onUnmounted(() => {
                   <button
                     v-if="!timeline.availabilityMonitorEnabled"
                     @click="enableMonitoringAndEdit(platform, timeline)"
-                    class="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-400 hover:from-blue-700 hover:via-blue-600 hover:to-cyan-500 text-white font-bold py-1.5 px-4 rounded shadow-lg transform transition-all duration-200 hover:-translate-y-0.5 hover:shadow-blue-500/30 text-sm"
+                    class="primary-btn text-sm py-1.5 px-3"
                   >
                     {{ t('availability.enableMonitoring') }}
                   </button>
@@ -380,7 +379,7 @@ onUnmounted(() => {
                   <button
                     v-else
                     @click="editConfig(platform, timeline)"
-                    class="bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 border border-gray-600 dark:border-gray-500 text-gray-300 hover:text-white font-medium py-1.5 px-4 rounded transition-colors duration-200 flex items-center gap-2 text-sm"
+                    class="action-btn text-sm py-1.5 px-3 flex items-center gap-2"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -473,13 +472,13 @@ onUnmounted(() => {
 
         <div class="mt-6 flex justify-end gap-3">
           <button
-            class="px-4 py-2 rounded-lg border border-[var(--mac-border)] text-[var(--mac-text)] hover:bg-[var(--mac-border)]"
+            class="action-btn px-4 py-2 rounded-lg text-sm"
             @click="closeConfigModal"
           >
             {{ t('common.cancel') }}
           </button>
           <button
-            class="px-4 py-2 rounded-lg bg-[var(--mac-accent)] text-white hover:opacity-90 disabled:opacity-50"
+            class="primary-btn px-4 py-2 rounded-lg text-sm"
             :disabled="savingConfig"
             @click="saveConfig"
           >
@@ -495,8 +494,6 @@ onUnmounted(() => {
 
 <style scoped>
 .availability-page {
-  min-height: 100vh;
-  background: var(--mac-surface);
 }
 
 .provider-card {
