@@ -266,8 +266,8 @@ onUnmounted(() => {
           :disabled="refreshing"
           class="primary-btn"
         >
-          <span v-if="refreshing">🔄 {{ t('availability.refreshing') }}</span>
-          <span v-else>⚡ {{ t('availability.refreshAll') }}</span>
+          <span v-if="refreshing">{{ t('availability.refreshing') }}</span>
+          <span v-else>{{ t('availability.refreshAll') }}</span>
         </button>
       </div>
     </header>

@@ -717,8 +717,8 @@ html.dark .mac-sidebar-item:hover {
 }
 
 /* 更新检查按钮样式 - 仅用于设置页面，不影响其他页面的按钮 */
-.general-page .action-btn,
-.general-page .primary-btn {
+.action-btn,
+.primary-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1545,8 +1545,8 @@ html.dark .ghost-icon:hover {
 
 .btn {
   border: none;
-  border-radius: 999px;
-  padding: 10px 22px;
+  border-radius: 8px;
+  padding: 8px 16px;
   font-weight: 600;
   font-size: 0.95rem;
   cursor: pointer;
