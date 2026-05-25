@@ -9,11 +9,9 @@
         <!-- Refresh button -->
         <button class="ghost-icon" :title="t('components.skill.actions.refresh')"
           :data-tooltip="t('components.skill.actions.refresh')" :disabled="refreshing" @click="refresh">
-          <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spin: refreshing }">
-            <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
-              stroke-linecap="round" stroke-linejoin="round" />
-            <path d="M20.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
-              stroke-linejoin="round" />
+          <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ 'rotating': refreshing }">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" fill="none" />
           </svg>
         </button>
 

@@ -264,10 +264,13 @@ onUnmounted(() => {
         <button
           @click="refreshAll"
           :disabled="refreshing"
-          class="primary-btn"
+          class="ghost-icon"
+          :class="{ 'rotating': refreshing }"
+          :title="refreshing ? t('availability.refreshing') : t('availability.refreshAll')"
         >
-          <span v-if="refreshing">{{ t('availability.refreshing') }}</span>
-          <span v-else>{{ t('availability.refreshAll') }}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
         </button>
       </div>
     </header>
@@ -366,18 +369,9 @@ onUnmounted(() => {
                     {{ t('availability.check') }}
                   </button>
 
-                  <!-- 启用监控按钮 (监控关闭时显示 - 高对比度吸引注意力) -->
-                  <button
-                    v-if="!timeline.availabilityMonitorEnabled"
-                    @click="enableMonitoringAndEdit(platform, timeline)"
-                    class="primary-btn text-sm py-1.5 px-3"
-                  >
-                    {{ t('availability.enableMonitoring') }}
-                  </button>
-
                   <!-- 编辑配置按钮 (监控开启时显示 - 相对低调但清晰可见) -->
                   <button
-                    v-else
+                    v-if="timeline.availabilityMonitorEnabled"
                     @click="editConfig(platform, timeline)"
                     class="action-btn text-sm py-1.5 px-3 flex items-center gap-2"
                   >

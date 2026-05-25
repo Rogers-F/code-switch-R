@@ -2,8 +2,20 @@
   <div class="network-wsl-settings">
     <!-- Network Settings Section -->
     <section>
-      <h2 class="mac-section-title">{{ t('settings.network.title') }}</h2>
-      <div class="mac-panel">
+      <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="$emit('toggle-section', 'network')">
+        <span>{{ t('settings.network.title') }}</span>
+        <svg
+          class="h-4 w-4 collapse-arrow"
+          :class="{ 'collapsed': collapsedSections.network }"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2.5"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </h2>
+      <div class="mac-panel" v-show="!collapsedSections.network">
         <!-- Listen Mode Selection -->
         <ListItem :label="t('settings.network.listenMode')">
           <select
@@ -54,8 +66,20 @@
 
     <!-- WSL Configuration Section -->
     <section>
-      <h2 class="mac-section-title">{{ t('settings.network.wslTitle') }}</h2>
-    <div class="mac-panel">
+      <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="$emit('toggle-section', 'wsl')">
+        <span>{{ t('settings.network.wslTitle') }}</span>
+        <svg
+          class="h-4 w-4 collapse-arrow"
+          :class="{ 'collapsed': collapsedSections.wsl }"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2.5"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </h2>
+    <div class="mac-panel" v-show="!collapsedSections.wsl">
       <!-- WSL Auto-Config Toggle -->
       <ListItem :label="t('settings.network.wslAutoConfig')">
         <div class="toggle-with-hint">
@@ -156,6 +180,19 @@ import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 import ListItem from './ListRow.vue'
 import { showToast } from '../../utils/toast'
+
+const props = withDefaults(
+  defineProps<{
+    collapsedSections?: Record<string, boolean>
+  }>(),
+  {
+    collapsedSections: () => ({ network: false, wsl: false })
+  }
+)
+
+const emit = defineEmits<{
+  (e: 'toggle-section', key: string): void
+}>()
 
 const { t } = useI18n()
 
@@ -604,5 +641,15 @@ onMounted(async () => {
 :global(.dark) .status-dot.status-active {
   background: #4ade80;
   box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+/* Section header collapsible arrow styles */
+.collapse-arrow {
+  transition: transform 0.2s ease;
+  color: var(--mac-text-secondary);
+}
+
+.collapse-arrow.collapsed {
+  transform: rotate(-90deg);
 }
 </style>

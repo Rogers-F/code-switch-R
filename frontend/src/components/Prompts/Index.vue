@@ -27,6 +27,8 @@ const prompts = ref<Record<string, Prompt>>({})
 const loading = ref(false)
 const showModal = ref(false)
 const editingPrompt = ref<Prompt | null>(null)
+const showConfirmModal = ref(false)
+const promptToDeleteId = ref<string | null>(null)
 const currentFileContent = ref<string | null>(null)
 const nameInputRef = ref<HTMLInputElement | null>(null)
 
@@ -132,10 +134,27 @@ async function savePrompt() {
   }
 }
 
-async function deletePrompt(id: string) {
-  if (!confirm(t('prompts.confirmDelete'))) return
+function deletePrompt(id: string) {
+  const prompt = prompts.value[id]
+  if (prompt && prompt.enabled) {
+    alert(t('prompts.cannotDeleteEnabled'))
+    return
+  }
+  promptToDeleteId.value = id
+  showConfirmModal.value = true
+}
+
+function closeConfirmModal() {
+  showConfirmModal.value = false
+  promptToDeleteId.value = null
+}
+
+async function confirmDeletePrompt() {
+  if (!promptToDeleteId.value) return
   try {
-    await DeletePrompt(activePlatform.value, id)
+    await DeletePrompt(activePlatform.value, promptToDeleteId.value)
+    showConfirmModal.value = false
+    promptToDeleteId.value = null
     await loadPrompts()
   } catch (e) {
     console.error('Failed to delete prompt:', e)
@@ -244,13 +263,18 @@ onMounted(() => {
           </div>
         </div>
         <div class="prompt-actions">
-          <button class="action-btn" @click="openEditModal(prompt)">
+          <button class="prompt-action-btn" @click="openEditModal(prompt)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
           </button>
-          <button class="action-btn danger" @click="deletePrompt(prompt.id)">
+          <button
+            class="prompt-action-btn danger"
+            :disabled="prompt.enabled"
+            :title="prompt.enabled ? t('prompts.cannotDeleteEnabled') : ''"
+            @click="deletePrompt(prompt.id)"
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -300,11 +324,28 @@ onMounted(() => {
         </div>
 
         <div class="modal-actions">
-          <button class="secondary-btn" @click="showModal = false">
+          <button class="action-btn" @click="showModal = false">
             {{ t('prompts.form.cancel') }}
           </button>
           <button class="primary-btn" @click="savePrompt" :disabled="!formData.name">
             {{ t('prompts.form.save') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 确认删除弹窗 -->
+    <div v-if="showConfirmModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div class="bg-[var(--mac-surface)] border border-[var(--mac-border)] rounded-2xl shadow-xl w-full max-w-sm p-6 confirm-modal">
+        <div class="confirm-body mb-6 text-[var(--mac-text)] text-sm">
+          {{ t('prompts.confirmDelete') }}
+        </div>
+        <div class="confirm-actions flex justify-end gap-3">
+          <button class="action-btn px-4 py-2 rounded-lg text-sm" @click="closeConfirmModal">
+            {{ t('prompts.form.cancel') }}
+          </button>
+          <button class="primary-btn px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white" @click="confirmDeletePrompt">
+            {{ t('common.delete') }}
           </button>
         </div>
       </div>
@@ -455,7 +496,7 @@ html.dark .toggle-switch {
   gap: 8px;
 }
 
-.action-btn {
+.prompt-action-btn {
   width: 34px;
   height: 34px;
   border: none;
@@ -469,23 +510,30 @@ html.dark .toggle-switch {
   transition: all 0.15s ease;
 }
 
-.action-btn:hover {
+.prompt-action-btn:hover {
   background: rgba(15, 23, 42, 0.06);
   color: var(--mac-text);
 }
 
-html.dark .action-btn:hover {
+html.dark .prompt-action-btn:hover {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.action-btn.danger:hover {
+.prompt-action-btn.danger:hover {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
 }
 
-.action-btn svg {
+.prompt-action-btn svg {
   width: 16px;
   height: 16px;
+}
+
+.prompt-action-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  background: transparent !important;
+  color: var(--mac-text-secondary) !important;
 }
 
 .empty-state,

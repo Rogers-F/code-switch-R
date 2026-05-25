@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 
 interface ConsoleLog {
@@ -9,6 +10,7 @@ interface ConsoleLog {
   message: string
 }
 
+const { t } = useI18n()
 const router = useRouter()
 const logs = ref<ConsoleLog[]>([])
 const autoScroll = ref(true)
@@ -95,7 +97,16 @@ onUnmounted(() => {
           <input type="checkbox" v-model="autoScroll" />
           <span>自动滚动</span>
         </label>
-        <button class="secondary-btn" @click="clearLogs">清空日志</button>
+        <button
+          class="ghost-icon"
+          @click="clearLogs"
+          :title="t('console.clear') || '清空日志'"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -244,5 +255,11 @@ html.dark .console-content {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Scoped destructive red hover for Console trash button */
+.console-shell .ghost-icon:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Call, Browser } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
@@ -448,6 +448,55 @@ const openGithub = () => {
   })
 }
 
+// 折叠面板状态
+const collapsedSections = ref<Record<string, boolean>>({
+  application: false,
+  trayPanel: false,
+  connectivity: false,
+  network: false,
+  wsl: false,
+  blacklist: false,
+  dataImport: false,
+  navigation: false,
+  exterior: false,
+  about: false,
+})
+
+const loadCollapsedStates = () => {
+  const cached = localStorage.getItem('settings-collapsed-sections')
+  if (cached) {
+    try {
+      collapsedSections.value = {
+        ...collapsedSections.value,
+        ...JSON.parse(cached),
+      }
+    } catch (e) {
+      console.error('Failed to parse cached collapsed states:', e)
+    }
+  }
+}
+
+const saveCollapsedStates = () => {
+  localStorage.setItem('settings-collapsed-sections', JSON.stringify(collapsedSections.value))
+}
+
+const toggleSection = (key: string) => {
+  collapsedSections.value[key] = !collapsedSections.value[key]
+  saveCollapsedStates()
+}
+
+const isAllCollapsed = computed(() => {
+  return Object.values(collapsedSections.value).every(v => v === true)
+})
+
+const toggleAllSections = () => {
+  const targetState = !isAllCollapsed.value
+  Object.keys(collapsedSections.value).forEach((key) => {
+    collapsedSections.value[key] = targetState
+  })
+  saveCollapsedStates()
+}
+
 onMounted(async () => {
   await loadAppSettings()
 
@@ -459,6 +508,9 @@ onMounted(async () => {
 
   // 加载隐藏的导航项
   loadHiddenNavItems()
+
+  // 加载折叠面板状态
+  loadCollapsedStates()
 })
 </script>
 
@@ -470,14 +522,40 @@ onMounted(async () => {
         <p class="app-page-subtitle">配置应用全局行为、偏好与导入设置</p>
       </div>
       <div class="app-page-actions">
-        <!-- Settings actions -->
+        <!-- 全局展开/收起 按钮 -->
+        <button
+          class="ghost-icon"
+          @click="toggleAllSections"
+          :title="isAllCollapsed ? '展开全部' : '收起全部'"
+        >
+          <svg v-if="isAllCollapsed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="7 13 12 18 17 13"></polyline>
+            <polyline points="7 6 12 11 17 6"></polyline>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="17 11 12 6 7 11"></polyline>
+            <polyline points="17 18 12 13 7 18"></polyline>
+          </svg>
+        </button>
       </div>
     </header>
 
     <div class="app-page-container general-page">
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.application') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('application')">
+          <span>{{ $t('components.general.title.application') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.application }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.application">
           <ListItem :label="$t('components.general.label.heatmap')">
             <label class="mac-switch">
               <input
@@ -543,8 +621,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.trayPanel') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('trayPanel')">
+          <span>{{ $t('components.general.title.trayPanel') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.trayPanel }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.trayPanel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelGlobal') }}</p>
           <ListItem :label="$t('components.general.label.enableTrayPopup')">
             <div class="toggle-with-hint">
@@ -561,7 +651,7 @@ onMounted(async () => {
             </div>
           </ListItem>
         </div>
-        <div class="mac-panel">
+        <div class="mac-panel" v-show="!collapsedSections.trayPanel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelClaude') }}</p>
           <ListItem :label="$t('components.general.label.budgetTotal')">
             <div class="toggle-with-hint">
@@ -687,7 +777,7 @@ onMounted(async () => {
             </div>
           </ListItem>
         </div>
-        <div class="mac-panel">
+        <div class="mac-panel" v-show="!collapsedSections.trayPanel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelCodex') }}</p>
           <ListItem :label="$t('components.general.label.budgetTotal')">
             <div class="toggle-with-hint">
@@ -816,8 +906,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.connectivity') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('connectivity')">
+          <span>{{ $t('components.general.title.connectivity') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.connectivity }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.connectivity">
           <ListItem :label="$t('components.general.label.autoConnectivityTest')">
             <div class="toggle-with-hint">
               <label class="mac-switch">
@@ -836,11 +938,23 @@ onMounted(async () => {
       </section>
 
       <!-- Network & WSL Settings -->
-      <NetworkWslSettings />
+      <NetworkWslSettings :collapsed-sections="collapsedSections" @toggle-section="toggleSection" />
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.blacklist') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('blacklist')">
+          <span>{{ $t('components.general.title.blacklist') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.blacklist }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.blacklist">
           <ListItem :label="$t('components.general.label.enableBlacklist')">
             <div class="toggle-with-hint">
               <label class="mac-switch">
@@ -908,8 +1022,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.dataImport') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('dataImport')">
+          <span>{{ $t('components.general.title.dataImport') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.dataImport }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.dataImport">
           <ListItem :label="$t('components.general.import.configPath')">
             <input
               type="text"
@@ -947,8 +1073,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.navigation') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('navigation')">
+          <span>{{ $t('components.general.title.navigation') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.navigation }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.navigation">
           <ListItem
             v-for="item in optionalNavItems"
             :key="item.path"
@@ -967,8 +1105,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.exterior') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('exterior')">
+          <span>{{ $t('components.general.title.exterior') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.exterior }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.exterior">
           <ListItem :label="$t('components.general.label.language')">
             <LanguageSwitcher />
           </ListItem>
@@ -979,8 +1129,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.about') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('about')">
+          <span>{{ $t('components.general.title.about') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.about }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.about">
           <ListItem label="GitHub Repository">
             <button class="action-btn" @click="openGithub">
               {{ $t('components.general.label.openGithub') }}
@@ -1082,5 +1244,15 @@ onMounted(async () => {
 
 :global(.dark) .mac-input {
   background: var(--mac-surface-strong);
+}
+
+/* Section header collapsible arrow styles */
+.collapse-arrow {
+  transition: transform 0.2s ease;
+  color: var(--mac-text-secondary);
+}
+
+.collapse-arrow.collapsed {
+  transform: rotate(-90deg);
 }
 </style>

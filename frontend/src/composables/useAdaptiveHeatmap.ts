@@ -42,7 +42,7 @@ export function useAdaptiveHeatmap(containerRef: Ref<HTMLElement | null>) {
 	 * 获取当前视口下的格子尺寸配置
 	 */
 	const cellConfig = computed(() => {
-		const width = containerWidth.value
+		const width = window.innerWidth
 		if (width > 960) return CELL_SIZES.large
 		if (width > 640) return CELL_SIZES.medium
 		return CELL_SIZES.small
@@ -50,11 +50,11 @@ export function useAdaptiveHeatmap(containerRef: Ref<HTMLElement | null>) {
 
 	/**
 	 * 计算可显示的列数
-	 * @param containerWidth 容器宽度
+	 * @param contentWidth 容器内容宽度 (已减去 padding)
 	 */
-	const calculateColumns = (containerWidth: number): number => {
-		const { cell, gap, padding } = cellConfig.value
-		const availableWidth = containerWidth - padding * 2
+	const calculateColumns = (contentWidth: number): number => {
+		const { cell, gap } = cellConfig.value
+		const availableWidth = contentWidth
 		const cellUnit = cell + gap
 
 		// 计算可容纳的列数
@@ -156,8 +156,8 @@ export function useAdaptiveHeatmap(containerRef: Ref<HTMLElement | null>) {
 		const container = containerRef.value
 		if (!container) return
 
-		// 初始宽度计算
-		const initialWidth = container.clientWidth
+		// 初始内容宽度计算 (clientWidth 包含 padding，需减去 padding * 2)
+		const initialWidth = container.clientWidth - cellConfig.value.padding * 2
 		containerWidth.value = initialWidth
 		const initialColumns = calculateColumns(initialWidth)
 		visibleColumns.value = initialColumns
@@ -169,7 +169,7 @@ export function useAdaptiveHeatmap(containerRef: Ref<HTMLElement | null>) {
 		// 设置 ResizeObserver
 		resizeObserver = new ResizeObserver((entries) => {
 			for (const entry of entries) {
-				const { width } = entry.contentRect
+				const { width } = entry.contentRect // contentRect.width 不含 padding，已经是内容宽度
 				handleResize(width)
 			}
 		})

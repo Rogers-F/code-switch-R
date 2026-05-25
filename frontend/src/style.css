@@ -378,7 +378,7 @@ html.dark .mac-sidebar-item:hover {
 	gap: 4px;
 	overflow: hidden;
 	width: 100%;
-	justify-content: flex-start;
+	justify-content: flex-end;
 }
 
 .contrib-column {
@@ -732,6 +732,9 @@ html.dark .mac-sidebar-item:hover {
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  width: auto;
+  min-width: auto;
+  flex-shrink: 0;
 }
 
 .action-btn {
@@ -1595,15 +1598,21 @@ html.dark .btn-outline:focus-visible {
 
 /* 次要按钮样式（用于控制台等页面） */
 .secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
   border: 1px solid var(--mac-border);
   border-radius: 8px;
-  padding: 8px 16px;
+  padding: 0 16px;
   background: var(--mac-surface-strong);
   color: var(--mac-text);
   font-size: 0.875rem;
   font-weight: 500;
+  line-height: 1;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
 .secondary-btn:hover:not(:disabled) {

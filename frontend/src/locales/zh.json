@@ -133,7 +133,8 @@
   "common": {
     "save": "保存",
     "saving": "保存中...",
-    "cancel": "取消"
+    "cancel": "取消",
+    "delete": "删除"
   },
   "prompts": {
     "hero": {
@@ -148,6 +149,7 @@
     "empty": "暂无提示词，点击下方按钮创建",
     "loading": "加载中...",
     "confirmDelete": "确认删除此提示词？",
+    "cannotDeleteEnabled": "无法删除当前已启用的提示词",
     "actions": {
       "create": "新增提示词",
       "import": "从文件导入"
@@ -992,6 +994,9 @@
       "savePartialSuccess": "成功 {success} 个，失败 {fail} 个",
       "tabPreview": "预览效果",
       "tabCurrent": "当前磁盘"
+    },
+    "console": {
+      "clear": "清空日志"
     }
   }
 }

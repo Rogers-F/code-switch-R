@@ -133,7 +133,8 @@
   "common": {
     "save": "Save",
     "saving": "Saving...",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "delete": "Delete"
   },
   "prompts": {
     "hero": {
@@ -148,6 +149,7 @@
     "empty": "No prompts yet. Click below to create one.",
     "loading": "Loading...",
     "confirmDelete": "Are you sure you want to delete this prompt?",
+    "cannotDeleteEnabled": "Cannot delete the currently enabled prompt",
     "actions": {
       "create": "New Prompt",
       "import": "Import from File"
@@ -991,6 +993,9 @@
       "savePartialSuccess": "{success} saved, {fail} failed",
       "tabPreview": "Preview",
       "tabCurrent": "Current"
+    },
+    "console": {
+      "clear": "Clear Logs"
     }
   }
 }
