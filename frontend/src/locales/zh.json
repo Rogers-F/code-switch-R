@@ -133,7 +133,8 @@
   "common": {
     "save": "保存",
     "saving": "保存中...",
-    "cancel": "取消"
+    "cancel": "取消",
+    "delete": "删除"
   },
   "prompts": {
     "hero": {
@@ -148,6 +149,7 @@
     "empty": "暂无提示词，点击下方按钮创建",
     "loading": "加载中...",
     "confirmDelete": "确认删除此提示词？",
+    "cannotDeleteEnabled": "无法删除当前已启用的提示词",
     "actions": {
       "create": "新增提示词",
       "import": "从文件导入"
@@ -535,7 +537,8 @@
       "streamOff": "非流",
       "back": "返回主页",
       "nextRefresh": "距离下次刷新 {seconds}s",
-      "query": "查询",
+      "query": "过滤",
+      "reset": "重置",
       "costDetail": {
         "title": "今日消费明细",
         "empty": "今日暂无消费记录"
@@ -552,9 +555,12 @@
         "exterior": "外观设置",
         "blacklist": "拉黑配置",
         "dataImport": "数据导入",
-        "connectivity": "连通性检测"
+        "connectivity": "连通性检测",
+        "navigation": "导航设置",
+        "about": "关于"
       },
       "label": {
+        "openGithub": "访问 GitHub Releases",
         "assistant_access": "辅助功能访问权限",
         "disk_access": "完全磁盘访问权限",
         "startup": "登录时启动",
@@ -589,6 +595,9 @@
         "budgetForecastMethod1h": "近 1 小时速度",
         "budgetForecastMethodYesterday": "昨日平均速度",
         "budgetForecastMethod24h": "近 24 小时速度",
+        "trayPanelGlobal": "全局设置",
+        "enableTrayPopup": "启用托盘弹窗",
+        "enableTrayPopupHint": "关闭后点击托盘图标将直接打开主窗口",
         "trayPanelClaude": "Claude Code",
         "trayPanelCodex": "Codex",
         "autoStart": "开机自启动",
@@ -907,7 +916,8 @@
     "themesetting": {
       "select": {
         "opt_light": "亮色模式",
-        "opt_dark": "暗色模式"
+        "opt_dark": "暗色模式",
+        "opt_system": "跟随系统"
       }
     },
     "shortcut": {
@@ -984,6 +994,9 @@
       "savePartialSuccess": "成功 {success} 个，失败 {fail} 个",
       "tabPreview": "预览效果",
       "tabCurrent": "当前磁盘"
+    },
+    "console": {
+      "clear": "清空日志"
     }
   }
 }

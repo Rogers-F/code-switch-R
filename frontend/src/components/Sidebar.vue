@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { fetchCurrentVersion } from '../services/version'
+import { getCurrentTheme, setTheme } from '../utils/ThemeManager'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,7 +25,50 @@ const VISITED_PAGES_KEY = 'visited-pages'
 const isCollapsed = ref(false)
 const visitedPages = ref<Set<string>>(new Set())
 
+const hiddenNavItems = ref<Set<string>>(new Set())
+const activeThemeMode = ref<'light' | 'dark' | 'systemdefault'>('systemdefault')
+
+const loadHiddenNavItems = () => {
+  const hiddenJson = localStorage.getItem('hidden-nav-items')
+  if (hiddenJson) {
+    try {
+      hiddenNavItems.value = new Set(JSON.parse(hiddenJson))
+    } catch {
+      hiddenNavItems.value = new Set()
+    }
+  } else {
+    hiddenNavItems.value = new Set()
+  }
+}
+
+const handleThemeEvent = (e: Event) => {
+  const customEvent = e as CustomEvent
+  if (customEvent.detail) {
+    activeThemeMode.value = customEvent.detail
+  } else {
+    activeThemeMode.value = getCurrentTheme()
+  }
+}
+
+const isDarkMode = computed(() => {
+  const mode = activeThemeMode.value
+  if (mode === 'systemdefault') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  }
+  return mode === 'dark'
+})
+
+const toggleTheme = () => {
+  const nextTheme = isDarkMode.value ? 'light' : 'dark'
+  activeThemeMode.value = nextTheme
+  setTheme(nextTheme)
+  window.dispatchEvent(new CustomEvent('theme-changed', { detail: nextTheme }))
+}
+
 onMounted(() => {
+  activeThemeMode.value = getCurrentTheme()
+  loadHiddenNavItems()
+
   // 加载侧边栏状态
   const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
   if (saved !== null) {
@@ -41,6 +85,14 @@ onMounted(() => {
   }
   // 标记当前页面为已访问
   markAsVisited(route.path)
+
+  window.addEventListener('nav-settings-changed', loadHiddenNavItems)
+  window.addEventListener('theme-changed', handleThemeEvent)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('nav-settings-changed', loadHiddenNavItems)
+  window.removeEventListener('theme-changed', handleThemeEvent)
 })
 
 // 监听路由变化，标记为已访问
@@ -85,6 +137,13 @@ const navItems: NavItem[] = [
   { path: '/settings', icon: 'settings', labelKey: 'sidebar.settings' },
 ]
 
+const visibleNavItems = computed(() => {
+  return navItems.filter(item => {
+    if (item.path === '/' || item.path === '/settings') return true
+    return !hiddenNavItems.value.has(item.path)
+  })
+})
+
 const currentPath = computed(() => route.path)
 
 const navigate = (path: string) => {
@@ -106,7 +165,7 @@ const navigate = (path: string) => {
 
     <div class="nav-list">
       <button
-        v-for="item in navItems"
+        v-for="item in visibleNavItems"
         :key="item.path"
         class="nav-item"
         :class="{ active: currentPath === item.path }"
@@ -183,6 +242,15 @@ const navigate = (path: string) => {
 
     <div class="sidebar-footer" v-if="!isCollapsed">
       <span class="version">{{ appVersion }}</span>
+      <button class="theme-toggle-switch" @click="toggleTheme" :title="isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+        <svg v-if="isDarkMode" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      </button>
     </div>
   </nav>
 </template>
@@ -372,11 +440,43 @@ html.dark .nav-item:hover {
 .sidebar-footer {
   padding: 12px 16px;
   border-top: 1px solid var(--mac-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .version {
   font-size: 0.75rem;
   color: var(--mac-text-secondary);
   opacity: 0.6;
+}
+
+.theme-toggle-switch {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.theme-toggle-switch:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--mac-text);
+}
+
+html.dark .theme-toggle-switch:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--mac-text);
+}
+
+.theme-toggle-switch svg {
+  width: 16px;
+  height: 16px;
 }
 </style>

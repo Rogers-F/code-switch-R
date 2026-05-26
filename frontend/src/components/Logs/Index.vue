@@ -1,16 +1,23 @@
 <template>
-  <div class="logs-page">
-    <div class="logs-header">
-      <BaseButton variant="outline" type="button" @click="backToHome">
-        {{ t('components.logs.back') }}
-      </BaseButton>
-      <div class="refresh-indicator">
-        <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
-        <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
-          {{ t('components.logs.refresh') }}
-        </BaseButton>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('components.logs.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('components.logs.subtitle') }}</p>
       </div>
-    </div>
+      <div class="app-page-actions">
+        <span class="text-sm text-[var(--mac-text-secondary)] mr-2">
+          {{ t('components.logs.nextRefresh', { seconds: countdown }) }}
+        </span>
+        <button class="ghost-icon" :title="t('components.logs.refresh')" :disabled="loading" @click="manualRefresh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: loading }">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-page-container logs-page">
 
     <section class="logs-summary" v-if="statsCards.length">
       <article
@@ -53,9 +60,12 @@
           </select>
         </label>
       </div>
-      <div class="filter-actions">
+      <div class="filter-actions" style="display: flex; gap: 8px;">
         <BaseButton type="submit" :disabled="loading">
           {{ t('components.logs.query') }}
+        </BaseButton>
+        <BaseButton variant="outline" type="button" @click="resetFilters" :disabled="loading">
+          {{ t('components.logs.reset') }}
         </BaseButton>
       </div>
     </form>
@@ -169,6 +179,7 @@
         </div>
       </div>
     </BaseModal>
+    </div>
   </div>
 </template>
 
@@ -500,6 +511,12 @@ const applyFilters = async () => {
   resetTimer()
 }
 
+const resetFilters = async () => {
+  filters.platform = ''
+  filters.provider = ''
+  await applyFilters()
+}
+
 const refreshLogs = () => {
   void loadDashboard()
 }
@@ -519,10 +536,6 @@ const prevPage = () => {
   if (page.value > 1) {
     page.value -= 1
   }
-}
-
-const backToHome = () => {
-  router.push('/')
 }
 
 const padHour = (num: number) => num.toString().padStart(2, '0')

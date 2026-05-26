@@ -107,8 +107,8 @@ export function RecordSuccess(platform: string, providerName: string): $Cancella
  * 满足以下所有条件时返回 true：
  * 1. 黑名单总开关已启用
  * 2. 且满足以下任一：
- *    - 等级拉黑开启
- *    - 等级拉黑关闭但 fallbackMode="fixed"
+ *   - 等级拉黑开启
+ *   - 等级拉黑关闭但 fallbackMode="fixed"
  */
 export function ShouldUseFixedMode(): $CancellablePromise<boolean> {
     return $Call.ByID(4011954676);

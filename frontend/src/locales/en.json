@@ -133,7 +133,8 @@
   "common": {
     "save": "Save",
     "saving": "Saving...",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "delete": "Delete"
   },
   "prompts": {
     "hero": {
@@ -148,6 +149,7 @@
     "empty": "No prompts yet. Click below to create one.",
     "loading": "Loading...",
     "confirmDelete": "Are you sure you want to delete this prompt?",
+    "cannotDeleteEnabled": "Cannot delete the currently enabled prompt",
     "actions": {
       "create": "New Prompt",
       "import": "Import from File"
@@ -534,7 +536,8 @@
       "streamOff": "Single response",
       "back": "Back to home",
       "nextRefresh": "Next refresh in {seconds}s",
-      "query": "Query",
+      "query": "Filter",
+      "reset": "Reset",
       "costDetail": {
         "title": "Today's Cost Breakdown",
         "empty": "No cost records today"
@@ -551,9 +554,12 @@
         "power": "Permission settings",
         "blacklist": "Blacklist Settings",
         "dataImport": "Data Import",
-        "connectivity": "Connectivity Test"
+        "connectivity": "Connectivity Test",
+        "navigation": "Navigation Settings",
+        "about": "About"
       },
       "label": {
+        "openGithub": "Visit GitHub Releases",
         "assistant_access": "Accessibility permissions",
         "automatic_up": "Automatically check for updates",
         "disk_access": "Full disk access",
@@ -590,6 +596,9 @@
         "budgetForecastMethod1h": "Last 1 hour rate",
         "budgetForecastMethodYesterday": "Yesterday average rate",
         "budgetForecastMethod24h": "Last 24 hours rate",
+        "trayPanelGlobal": "Global settings",
+        "enableTrayPopup": "Enable tray popup",
+        "enableTrayPopupHint": "When disabled, clicking the tray icon directly opens the main window",
         "trayPanelClaude": "Claude Code",
         "trayPanelCodex": "Codex",
         "autoStart": "Launch at login",
@@ -906,7 +915,8 @@
     "themesetting": {
       "select": {
         "opt_dark": "Dark Mode",
-        "opt_light": "Bright Mode"
+        "opt_light": "Bright Mode",
+        "opt_system": "Follow System"
       }
     },
     "shortcut": {
@@ -983,6 +993,9 @@
       "savePartialSuccess": "{success} saved, {fail} failed",
       "tabPreview": "Preview",
       "tabCurrent": "Current"
+    },
+    "console": {
+      "clear": "Clear Logs"
     }
   }
 }

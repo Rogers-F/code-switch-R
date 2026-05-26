@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   TestEndpoints
@@ -17,7 +17,45 @@ interface Endpoint {
   providerName?: string                              // 新增：供应商名称
 }
 
+const showAddModal = ref(false)
+const addInputRef = ref<HTMLInputElement | null>(null)
 const newUrl = ref('')
+
+function openAddModal() {
+  newUrl.value = ''
+  showAddModal.value = true
+  nextTick(() => {
+    addInputRef.value?.focus()
+  })
+}
+
+function handleAddConfirm() {
+  if (!newUrl.value.trim()) return
+
+  // 基础 URL 校验
+  try {
+    new URL(newUrl.value)
+  } catch {
+    alert(t('speedtest.invalidUrl') || '请输入有效的 URL (以 http:// 或 https:// 开头)')
+    return
+  }
+
+  // 检查重复
+  if (endpoints.value.some(e => e.url === newUrl.value)) {
+    alert(t('speedtest.duplicateUrl') || '该端点已存在')
+    return
+  }
+
+  endpoints.value.push({
+    url: newUrl.value,
+    result: null,
+    testing: false,
+    source: 'manual'
+  })
+  newUrl.value = ''
+  showAddModal.value = false
+}
+
 const endpoints = ref<Endpoint[]>([
   { url: 'https://api.anthropic.com', result: null, testing: false, source: 'manual' },
   { url: 'https://api.openai.com', result: null, testing: false, source: 'manual' }
@@ -27,30 +65,6 @@ const isLoadingProviders = ref(false)
 const syncError = ref('')
 
 const endpointCount = computed(() => endpoints.value.length)
-
-function addEndpoint() {
-  if (!newUrl.value.trim()) return
-
-  // 基础 URL 校验
-  try {
-    new URL(newUrl.value)
-  } catch {
-    return
-  }
-
-  // 检查重复
-  if (endpoints.value.some(e => e.url === newUrl.value)) {
-    return
-  }
-
-  endpoints.value.push({
-    url: newUrl.value,
-    result: null,
-    testing: false,
-    source: 'manual'  // 手动添加的端点
-  })
-  newUrl.value = ''
-}
 
 function removeEndpoint(index: number) {
   endpoints.value.splice(index, 1)
@@ -159,45 +173,76 @@ onActivated(() => {
 </script>
 
 <template>
-  <div class="speedtest-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('speedtest.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('speedtest.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('speedtest.hero.lead') }}</p>
-    </div>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('speedtest.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('speedtest.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- 添加 API 端点 按钮 -->
+        <button
+          class="ghost-icon"
+          @click="openAddModal"
+          :title="t('speedtest.add') || '添加端点'"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
 
-    <!-- URL Input -->
-    <div class="input-section">
-      <input
-        v-model="newUrl"
-        type="url"
-        class="url-input"
-        :placeholder="t('speedtest.placeholder')"
-        @keyup.enter="addEndpoint"
-      />
-      <button class="add-btn" @click="addEndpoint" :disabled="!newUrl.trim()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        {{ t('speedtest.add') }}
-      </button>
-      <button
-        class="sync-btn"
-        :class="{ syncing: isLoadingProviders }"
-        @click="syncProviderEndpoints"
-        :disabled="isLoadingProviders"
-        :title="t('speedtest.syncButton')"
-      >
-        <svg v-if="!isLoadingProviders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 6v6l4 2"></path>
-        </svg>
-      </button>
+        <!-- 刷新供应商端点 按钮 -->
+        <button
+          class="ghost-icon"
+          :class="{ 'rotating': isLoadingProviders }"
+          @click="syncProviderEndpoints"
+          :disabled="isLoadingProviders"
+          :title="t('speedtest.syncButton')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          </svg>
+        </button>
+
+        <!-- 开始测试 按钮 -->
+        <button
+          class="ghost-icon"
+          @click="runTest"
+          :disabled="isTesting || endpointCount === 0"
+          :title="isTesting ? t('speedtest.testing') : t('speedtest.start')"
+        >
+          <svg v-if="!isTesting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 6v6l4 2"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-page-container speedtest-page">
+
+    <!-- Legend (移至顶端) -->
+    <div class="legend">
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #10b981;"></span>
+        <span>&lt; 300ms</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #f59e0b;"></span>
+        <span>300-500ms</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #f97316;"></span>
+        <span>500-800ms</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #ef4444;"></span>
+        <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
+      </div>
     </div>
 
     <!-- 加载状态提示 -->
@@ -215,21 +260,6 @@ onActivated(() => {
       <span class="list-title">
         {{ t('speedtest.endpoints', { count: endpointCount }) }}
       </span>
-      <button
-        class="test-btn"
-        :class="{ testing: isTesting }"
-        @click="runTest"
-        :disabled="isTesting || endpointCount === 0"
-      >
-        <svg v-if="!isTesting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 6v6l4 2"></path>
-        </svg>
-        {{ isTesting ? t('speedtest.testing') : t('speedtest.start') }}
-      </button>
     </div>
 
     <!-- Endpoint List -->
@@ -282,33 +312,41 @@ onActivated(() => {
       </div>
     </div>
 
-    <!-- Legend -->
-    <div class="legend">
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #10b981;"></span>
-        <span>&lt; 300ms</span>
+    <!-- 添加端点二级弹窗 (参考 新增提示词 弹窗样式) -->
+    <div v-if="showAddModal" class="modal-overlay" @click.self="showAddModal = false">
+      <div class="modal-content">
+        <h2 class="modal-title">
+          {{ t('speedtest.add') || '添加 API 端点' }}
+        </h2>
+
+        <div class="form-group">
+          <label>{{ t('speedtest.placeholder') || '输入 API 端点 URL' }}</label>
+          <input
+            v-model="newUrl"
+            type="url"
+            class="form-input"
+            placeholder="https://api.example.com"
+            @keyup.enter="handleAddConfirm"
+            ref="addInputRef"
+          />
+        </div>
+
+        <div class="modal-actions">
+          <button class="action-btn" @click="showAddModal = false">
+            {{ t('common.cancel') || '取消' }}
+          </button>
+          <button class="primary-btn" @click="handleAddConfirm" :disabled="!newUrl.trim()">
+            {{ t('common.save') || '保存' }}
+          </button>
+        </div>
       </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #f59e0b;"></span>
-        <span>300-500ms</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #f97316;"></span>
-        <span>500-800ms</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #ef4444;"></span>
-        <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
-      </div>
+    </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .speedtest-page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
 }
 
 .page-hero {
@@ -644,6 +682,7 @@ onActivated(() => {
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);
   border-radius: 12px;
+  margin-bottom: 24px;
 }
 
 .legend-item {
@@ -658,5 +697,71 @@ onActivated(() => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+/* Modal overlay & content matching prompts popup style */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--mac-surface);
+  border-radius: 20px;
+  padding: 24px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--mac-border);
+}
+
+.modal-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--mac-text);
+  margin-bottom: 24px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--mac-text);
+  margin-bottom: 8px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--mac-border);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  background: var(--mac-bg);
+  color: var(--mac-text);
+  transition: all 0.15s ease;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
 }
 </style>

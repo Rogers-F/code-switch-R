@@ -1,108 +1,85 @@
 <template>
   <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.main.hero.eyebrow') }}</p>
-      <button
-        class="ghost-icon github-icon"
-        :data-tooltip="getGithubTooltip()"
-        @click="handleGithubClick"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M9 19c-4.5 1.5-4.5-2.5-6-3m12 5v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0018 3.77 5.07 5.07 0 0017.91 1S16.73.65 14 2.48a13.38 13.38 0 00-5 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 3.77a5.44 5.44 0 00-1.5 3.76c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-      <button
-        class="ghost-icon"
-        :data-tooltip="t('components.main.controls.theme')"
-        @click="toggleTheme"
-      >
-        <svg v-if="themeIcon === 'sun'" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" />
-          <path
-            d="M12 3v2m0 14v2m9-9h-2M5 12H3m14.95 6.95-1.41-1.41M7.46 7.46 6.05 6.05m12.9 0-1.41 1.41M7.46 16.54l-1.41 1.41"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-          />
-        </svg>
-        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M21 12.79A9 9 0 1111.21 3a7 7 0 109.79 9.79z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-      <button
-        v-if="showImportButton"
-        class="ghost-icon"
-        :data-tooltip="importButtonTooltip"
-        :disabled="importBusy"
-        @click="handleImportClick"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ rotating: importBusy }">
-          <path
-            d="M12 4v9"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
-          <path
-            d="M8.5 10.5l3.5 3.5 3.5-3.5"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
-          <path
-            d="M5 19h14"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
-        </svg>
-      </button>
-      <button
-        class="ghost-icon"
-        :data-tooltip="t('components.main.controls.settings')"
-        @click="goToSettings"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M12 15a3 3 0 100-6 3 3 0 000 6z"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
-          <path
-            d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"
-          />
-        </svg>
-      </button>
-    </div>
-    <div class="contrib-page">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title" v-if="showHomeTitle">{{ t('components.main.hero.title') }}</h1>
+        <h1 class="app-page-title" v-else>Code Switch R</h1>
+        <p class="app-page-subtitle">{{ t('components.main.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <button
+          v-if="showImportButton"
+          class="ghost-icon"
+          :data-tooltip="importButtonTooltip"
+          :disabled="importBusy"
+          @click="handleImportClick"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ rotating: importBusy }">
+            <path
+              d="M12 4v9"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+            <path
+              d="M8.5 10.5l3.5 3.5 3.5-3.5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+            <path
+              d="M5 19h14"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+          </svg>
+        </button>
+
+        <button
+          class="ghost-icon"
+          :data-tooltip="t('components.main.tabs.addCard')"
+          @click="openCreateModal"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 5v14M5 12h14"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+          </svg>
+        </button>
+
+        <button
+          class="ghost-icon"
+          :class="{ 'rotating': refreshing }"
+          :data-tooltip="t('components.main.tabs.refresh')"
+          @click="refreshAllData"
+          :disabled="refreshing"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+          </svg>
+        </button>
+      </div>
+    </header>
+    <div class="app-page-container contrib-page">
       <!-- 首次使用提示横幅 -->
       <div v-if="showFirstRunPrompt" class="first-run-banner">
         <div class="banner-content">
@@ -118,12 +95,6 @@
           </button>
         </div>
       </div>
-      <section class="contrib-hero">
-        <h1 v-if="showHomeTitle">{{ t('components.main.hero.title') }}</h1>
-        <!-- <p class="lead">
-          {{ t('components.main.hero.lead') }}
-        </p> -->
-      </section>
 
       <section
         v-if="showHeatmap"
@@ -202,40 +173,6 @@
               <span class="relay-tooltip-content">{{ currentProxyLabel }} · {{ t('components.main.relayToggle.tooltip') }}</span>
             </div>
           </div>
-          <button
-            class="ghost-icon"
-            :data-tooltip="t('components.main.tabs.addCard')"
-            @click="openCreateModal"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M12 5v14M5 12h14"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                fill="none"
-              />
-            </svg>
-          </button>
-          <button
-            class="ghost-icon"
-            :class="{ 'rotating': refreshing }"
-            :data-tooltip="t('components.main.tabs.refresh')"
-            @click="refreshAllData"
-            :disabled="refreshing"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                fill="none"
-              />
-            </svg>
-          </button>
         </div>
       </div>
 
@@ -2421,26 +2358,7 @@ const goToSkill = () => {
   router.push('/skill')
 }
 
-const goToSettings = () => {
-  router.push('/settings')
-}
 
-const toggleTheme = () => {
-  const next = resolvedTheme.value === 'dark' ? 'light' : 'dark'
-  themeMode.value = next
-  setTheme(next)
-}
-
-const handleGithubClick = () => {
-  Browser.OpenURL(releasePageUrl).catch(() => {
-    console.error('failed to open github')
-  })
-}
-
-// 获取 GitHub 图标的 tooltip
-const getGithubTooltip = () => {
-  return t('components.main.controls.github')
-}
 
 type VendorForm = {
   name: string

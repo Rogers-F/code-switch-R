@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Call } from '@wailsio/runtime'
+import { Call, Browser } from '@wailsio/runtime'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
@@ -32,6 +32,7 @@ const getCachedString = (key: string, defaultValue: string): string => {
 }
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
+const trayPopupEnabled = ref(getCachedValue('trayPopup', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
@@ -72,9 +73,6 @@ const importPath = ref('')
 const importing = ref(false)
 const importLoading = ref(true)
 
-const goBack = () => {
-  router.push('/')
-}
 
 const normalizeBudgetForecastMethod = (value: string) => {
   const trimmed = value?.trim()
@@ -113,10 +111,12 @@ const loadAppSettings = async () => {
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
     autoUpdateEnabled.value = data?.auto_update ?? true
+    trayPopupEnabled.value = data?.enable_tray_popup ?? true
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
     localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+    localStorage.setItem('app-settings-trayPopup', String(trayPopupEnabled.value))
     localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
     localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
     localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
@@ -144,6 +144,7 @@ const loadAppSettings = async () => {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
     homeTitleVisible.value = true
+    trayPopupEnabled.value = true
     budgetTotal.value = 0
     budgetUsedAdjustment.value = 0
     budgetForecastMethod.value = 'cycle'
@@ -231,6 +232,7 @@ const persistAppSettings = async () => {
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
       auto_update: autoUpdateEnabled.value,
+      enable_tray_popup: trayPopupEnabled.value,
     }
     await saveAppSettings(payload)
 
@@ -243,6 +245,7 @@ const persistAppSettings = async () => {
     // 更新缓存
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
     localStorage.setItem('app-settings-homeTitle', String(homeTitleVisible.value))
+    localStorage.setItem('app-settings-trayPopup', String(trayPopupEnabled.value))
     localStorage.setItem('app-settings-budgetTotal', String(budgetTotal.value))
     localStorage.setItem('app-settings-budgetUsedAdjustment', String(budgetUsedAdjustment.value))
     localStorage.setItem('app-settings-budgetForecastMethod', budgetForecastMethod.value)
@@ -398,6 +401,102 @@ const handleImport = async () => {
   }
 }
 
+interface OptionalNavItem {
+  path: string
+  labelKey: string
+}
+
+const optionalNavItems: OptionalNavItem[] = [
+  { path: '/prompts', labelKey: 'sidebar.prompts' },
+  { path: '/mcp', labelKey: 'sidebar.mcp' },
+  { path: '/skill', labelKey: 'sidebar.skill' },
+  { path: '/availability', labelKey: 'sidebar.availability' },
+  { path: '/speedtest', labelKey: 'sidebar.speedtest' },
+  { path: '/env', labelKey: 'sidebar.env' },
+  { path: '/logs', labelKey: 'sidebar.logs' },
+  { path: '/console', labelKey: 'sidebar.console' }
+]
+
+const hiddenNavItems = ref<Set<string>>(new Set())
+
+const loadHiddenNavItems = () => {
+  const hiddenJson = localStorage.getItem('hidden-nav-items')
+  if (hiddenJson) {
+    try {
+      hiddenNavItems.value = new Set(JSON.parse(hiddenJson))
+    } catch {
+      hiddenNavItems.value = new Set()
+    }
+  } else {
+    hiddenNavItems.value = new Set()
+  }
+}
+
+const toggleNavItem = (path: string) => {
+  if (hiddenNavItems.value.has(path)) {
+    hiddenNavItems.value.delete(path)
+  } else {
+    hiddenNavItems.value.add(path)
+  }
+  localStorage.setItem('hidden-nav-items', JSON.stringify([...hiddenNavItems.value]))
+  window.dispatchEvent(new CustomEvent('nav-settings-changed'))
+}
+
+const openGithub = () => {
+  Browser.OpenURL('https://github.com/iblueer/code-switch-R/releases').catch((err) => {
+    console.error('failed to open url', err)
+  })
+}
+
+// 折叠面板状态
+const collapsedSections = ref<Record<string, boolean>>({
+  application: false,
+  trayPanel: false,
+  connectivity: false,
+  network: false,
+  wsl: false,
+  blacklist: false,
+  dataImport: false,
+  navigation: false,
+  exterior: false,
+  about: false,
+})
+
+const loadCollapsedStates = () => {
+  const cached = localStorage.getItem('settings-collapsed-sections')
+  if (cached) {
+    try {
+      collapsedSections.value = {
+        ...collapsedSections.value,
+        ...JSON.parse(cached),
+      }
+    } catch (e) {
+      console.error('Failed to parse cached collapsed states:', e)
+    }
+  }
+}
+
+const saveCollapsedStates = () => {
+  localStorage.setItem('settings-collapsed-sections', JSON.stringify(collapsedSections.value))
+}
+
+const toggleSection = (key: string) => {
+  collapsedSections.value[key] = !collapsedSections.value[key]
+  saveCollapsedStates()
+}
+
+const isAllCollapsed = computed(() => {
+  return Object.values(collapsedSections.value).every(v => v === true)
+})
+
+const toggleAllSections = () => {
+  const targetState = !isAllCollapsed.value
+  Object.keys(collapsedSections.value).forEach((key) => {
+    collapsedSections.value[key] = targetState
+  })
+  saveCollapsedStates()
+}
+
 onMounted(async () => {
   await loadAppSettings()
 
@@ -406,31 +505,57 @@ onMounted(async () => {
 
   // 加载导入状态
   await loadImportStatus()
+
+  // 加载隐藏的导航项
+  loadHiddenNavItems()
+
+  // 加载折叠面板状态
+  loadCollapsedStates()
 })
 </script>
 
 <template>
   <div class="main-shell general-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ $t('components.general.title.application') }}</p>
-      <button class="ghost-icon" :aria-label="$t('components.general.buttons.back')" @click="goBack">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M15 18l-6-6 6-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-    </div>
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ $t('components.general.title.application') }}</h1>
+        <p class="app-page-subtitle">配置应用全局行为、偏好与导入设置</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- 全局展开/收起 按钮 -->
+        <button
+          class="ghost-icon"
+          @click="toggleAllSections"
+          :title="isAllCollapsed ? '展开全部' : '收起全部'"
+        >
+          <svg v-if="isAllCollapsed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="7 13 12 18 17 13"></polyline>
+            <polyline points="7 6 12 11 17 6"></polyline>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="17 11 12 6 7 11"></polyline>
+            <polyline points="17 18 12 13 7 18"></polyline>
+          </svg>
+        </button>
+      </div>
+    </header>
 
-    <div class="general-page">
+    <div class="app-page-container general-page">
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.application') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('application')">
+          <span>{{ $t('components.general.title.application') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.application }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.application">
           <ListItem :label="$t('components.general.label.heatmap')">
             <label class="mac-switch">
               <input
@@ -496,8 +621,37 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.trayPanel') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('trayPanel')">
+          <span>{{ $t('components.general.title.trayPanel') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.trayPanel }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.trayPanel">
+          <p class="panel-title">{{ $t('components.general.label.trayPanelGlobal') }}</p>
+          <ListItem :label="$t('components.general.label.enableTrayPopup')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="trayPopupEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.enableTrayPopupHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
+        <div class="mac-panel" v-show="!collapsedSections.trayPanel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelClaude') }}</p>
           <ListItem :label="$t('components.general.label.budgetTotal')">
             <div class="toggle-with-hint">
@@ -623,7 +777,7 @@ onMounted(async () => {
             </div>
           </ListItem>
         </div>
-        <div class="mac-panel">
+        <div class="mac-panel" v-show="!collapsedSections.trayPanel">
           <p class="panel-title">{{ $t('components.general.label.trayPanelCodex') }}</p>
           <ListItem :label="$t('components.general.label.budgetTotal')">
             <div class="toggle-with-hint">
@@ -752,8 +906,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.connectivity') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('connectivity')">
+          <span>{{ $t('components.general.title.connectivity') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.connectivity }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.connectivity">
           <ListItem :label="$t('components.general.label.autoConnectivityTest')">
             <div class="toggle-with-hint">
               <label class="mac-switch">
@@ -772,11 +938,23 @@ onMounted(async () => {
       </section>
 
       <!-- Network & WSL Settings -->
-      <NetworkWslSettings />
+      <NetworkWslSettings :collapsed-sections="collapsedSections" @toggle-section="toggleSection" />
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.blacklist') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('blacklist')">
+          <span>{{ $t('components.general.title.blacklist') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.blacklist }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.blacklist">
           <ListItem :label="$t('components.general.label.enableBlacklist')">
             <div class="toggle-with-hint">
               <label class="mac-switch">
@@ -844,8 +1022,20 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.dataImport') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('dataImport')">
+          <span>{{ $t('components.general.title.dataImport') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.dataImport }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.dataImport">
           <ListItem :label="$t('components.general.import.configPath')">
             <input
               type="text"
@@ -883,13 +1073,80 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mac-section-title">{{ $t('components.general.title.exterior') }}</h2>
-        <div class="mac-panel">
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('navigation')">
+          <span>{{ $t('components.general.title.navigation') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.navigation }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.navigation">
+          <ListItem
+            v-for="item in optionalNavItems"
+            :key="item.path"
+            :label="$t(item.labelKey)"
+          >
+            <label class="mac-switch">
+              <input
+                type="checkbox"
+                :checked="!hiddenNavItems.has(item.path)"
+                @change="toggleNavItem(item.path)"
+              />
+              <span></span>
+            </label>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('exterior')">
+          <span>{{ $t('components.general.title.exterior') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.exterior }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.exterior">
           <ListItem :label="$t('components.general.label.language')">
             <LanguageSwitcher />
           </ListItem>
           <ListItem :label="$t('components.general.label.theme')">
             <ThemeSetting />
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title flex items-center justify-between cursor-pointer select-none" @click="toggleSection('about')">
+          <span>{{ $t('components.general.title.about') }}</span>
+          <svg
+            class="h-4 w-4 collapse-arrow"
+            :class="{ 'collapsed': collapsedSections.about }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </h2>
+        <div class="mac-panel" v-show="!collapsedSections.about">
+          <ListItem label="GitHub Repository">
+            <button class="action-btn" @click="openGithub">
+              {{ $t('components.general.label.openGithub') }}
+            </button>
           </ListItem>
         </div>
       </section>
@@ -987,5 +1244,15 @@ onMounted(async () => {
 
 :global(.dark) .mac-input {
   background: var(--mac-surface-strong);
+}
+
+/* Section header collapsible arrow styles */
+.collapse-arrow {
+  transition: transform 0.2s ease;
+  color: var(--mac-text-secondary);
+}
+
+.collapse-arrow.collapsed {
+  transform: rotate(-90deg);
 }
 </style>

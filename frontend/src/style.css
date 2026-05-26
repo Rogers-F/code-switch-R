@@ -378,16 +378,15 @@ html.dark .mac-sidebar-item:hover {
 	gap: 4px;
 	overflow: hidden;
 	width: 100%;
-	justify-content: space-between;
+	justify-content: flex-end;
 }
 
 .contrib-column {
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
-	flex: 1 1 0;
-	min-width: 10px;
-	max-width: 18px;
+	flex: 0 0 auto;
+	width: 14px;
 }
 
 .contrib-cell {
@@ -481,8 +480,8 @@ html.dark .mac-sidebar-item:hover {
 	}
 
 	.contrib-column {
-		min-width: 10px;
-		max-width: 15px;
+		width: 12px;
+		gap: 3px;
 	}
 
 	.contrib-grid {
@@ -501,8 +500,8 @@ html.dark .mac-sidebar-item:hover {
 	}
 
 	.contrib-column {
-		min-width: 8px;
-		max-width: 12px;
+		width: 10px;
+		gap: 2px;
 	}
 }
 .automation-section {
@@ -578,6 +577,52 @@ html.dark .mac-sidebar-item:hover {
     width: 100%;
     justify-content: center;
   }
+}/* Unified Page Header Design Standards */
+.app-page-header {
+  width: 100%;
+  padding: 52px 48px 16px; /* 52px top padding to elegantly clear macOS traffic lights */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--mac-border);
+  background: transparent;
+}
+
+.app-page-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-page-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--mac-text);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.app-page-subtitle {
+  font-size: 0.85rem;
+  color: var(--mac-text-secondary);
+  margin: 0;
+}
+
+.app-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-page-container {
+  flex: 1;
+  width: 100%;
+  padding: 32px 48px 48px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .main-shell {
@@ -672,8 +717,8 @@ html.dark .mac-sidebar-item:hover {
 }
 
 /* 更新检查按钮样式 - 仅用于设置页面，不影响其他页面的按钮 */
-.general-page .action-btn,
-.general-page .primary-btn {
+.action-btn,
+.primary-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -687,6 +732,9 @@ html.dark .mac-sidebar-item:hover {
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  width: auto;
+  min-width: auto;
+  flex-shrink: 0;
 }
 
 .action-btn {
@@ -700,12 +748,12 @@ html.dark .mac-sidebar-item:hover {
 }
 
 .primary-btn {
-  background: #0ea5e9;
+  background: var(--mac-accent);
   color: white;
 }
 
 .primary-btn:hover:not(:disabled) {
-  background: #0284c7;
+  opacity: 0.9;
 }
 
 .action-btn:disabled,
@@ -907,9 +955,14 @@ html.dark .mac-sidebar-item:hover {
 .logs-table th,
 .logs-table td {
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid #E1E5EC;
   text-align: left;
   white-space: nowrap;
+}
+
+html.dark .logs-table th,
+html.dark .logs-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .logs-table .col-time { width: 180px; }
@@ -1495,8 +1548,8 @@ html.dark .ghost-icon:hover {
 
 .btn {
   border: none;
-  border-radius: 999px;
-  padding: 10px 22px;
+  border-radius: 8px;
+  padding: 8px 16px;
   font-weight: 600;
   font-size: 0.95rem;
   cursor: pointer;
@@ -1545,15 +1598,21 @@ html.dark .btn-outline:focus-visible {
 
 /* 次要按钮样式（用于控制台等页面） */
 .secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
   border: 1px solid var(--mac-border);
   border-radius: 8px;
-  padding: 8px 16px;
+  padding: 0 16px;
   background: var(--mac-surface-strong);
   color: var(--mac-text);
   font-size: 0.875rem;
   font-weight: 500;
+  line-height: 1;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
 .secondary-btn:hover:not(:disabled) {

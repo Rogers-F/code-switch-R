@@ -44,6 +44,11 @@ export class AppSettings {
      */
     "enable_round_robin": boolean;
 
+    /**
+     * 托盘弹窗开关
+     */
+    "enable_tray_popup": boolean;
+
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
         if (!("show_heatmap" in $$source)) {
@@ -120,6 +125,9 @@ export class AppSettings {
         }
         if (!("enable_round_robin" in $$source)) {
             this["enable_round_robin"] = false;
+        }
+        if (!("enable_tray_popup" in $$source)) {
+            this["enable_tray_popup"] = false;
         }
 
         Object.assign(this, $$source);
@@ -1621,6 +1629,50 @@ export class Hotkey {
 }
 
 /**
+ * LastUsedProvider 最后使用的供应商信息
+ * @author sm
+ */
+export class LastUsedProvider {
+    /**
+     * claude/codex/gemini
+     */
+    "platform": string;
+
+    /**
+     * 供应商名称
+     */
+    "provider_name": string;
+
+    /**
+     * 更新时间（毫秒）
+     */
+    "updated_at": number;
+
+    /** Creates a new LastUsedProvider instance. */
+    constructor($$source: Partial<LastUsedProvider> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("provider_name" in $$source)) {
+            this["provider_name"] = "";
+        }
+        if (!("updated_at" in $$source)) {
+            this["updated_at"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LastUsedProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LastUsedProvider {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LastUsedProvider($$parsedSource as Partial<LastUsedProvider>);
+    }
+}
+
+/**
  * ListenMode 监听模式
  */
 export enum ListenMode {
@@ -2309,11 +2361,23 @@ export class ReqeustLog {
     "input_tokens": number;
     "output_tokens": number;
     "cache_create_tokens": number;
+
+    /**
+     * Ephemeral5mTokens/Ephemeral1hTokens 分别对应 cache_creation.ephemeral_5m/1h_input_tokens。
+     * 为 0 时按 CacheCreateTokens 全量当 5m 计费(旧数据兼容)。
+     */
+    "ephemeral_5m_tokens": number;
+    "ephemeral_1h_tokens": number;
     "cache_read_tokens": number;
     "reasoning_tokens": number;
     "is_stream": boolean;
     "duration_sec": number;
     "created_at": string;
+
+    /**
+     * ServiceTier 上游实际分配的档位(default/priority/flex 等),空=未区分。
+     */
+    "service_tier": string;
     "input_cost": number;
     "output_cost": number;
     "reasoning_cost": number;
@@ -2350,6 +2414,12 @@ export class ReqeustLog {
         if (!("cache_create_tokens" in $$source)) {
             this["cache_create_tokens"] = 0;
         }
+        if (!("ephemeral_5m_tokens" in $$source)) {
+            this["ephemeral_5m_tokens"] = 0;
+        }
+        if (!("ephemeral_1h_tokens" in $$source)) {
+            this["ephemeral_1h_tokens"] = 0;
+        }
         if (!("cache_read_tokens" in $$source)) {
             this["cache_read_tokens"] = 0;
         }
@@ -2364,6 +2434,9 @@ export class ReqeustLog {
         }
         if (!("created_at" in $$source)) {
             this["created_at"] = "";
+        }
+        if (!("service_tier" in $$source)) {
+            this["service_tier"] = "";
         }
         if (!("input_cost" in $$source)) {
             this["input_cost"] = 0;
