@@ -11,6 +11,8 @@ import (
 
 // TestModelsHandler 测试 /v1/models 端点处理器
 func TestModelsHandler(t *testing.T) {
+	setupRenameTestEnv(t)
+
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
 
@@ -62,8 +64,11 @@ func TestModelsHandler(t *testing.T) {
 
 	// 创建测试用的 ProviderService
 	providerService := NewProviderService()
-	blacklistService := NewBlacklistService()
-	notificationService := NewNotificationService()
+	autoStart := NewAutoStartService()
+	appSettings := NewAppSettingsService(autoStart)
+	notificationService := NewNotificationService(appSettings)
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, notificationService)
 
 	// 创建测试用的 provider（使用模拟服务器的 URL）
 	testProvider := Provider{
@@ -82,7 +87,7 @@ func TestModelsHandler(t *testing.T) {
 	}
 
 	// 创建 ProviderRelayService
-	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, "")
+	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, appSettings, "")
 
 	// 创建测试路由
 	router := gin.New()
@@ -123,6 +128,8 @@ func TestModelsHandler(t *testing.T) {
 
 // TestCustomModelsHandler 测试自定义 CLI 工具的 /v1/models 端点
 func TestCustomModelsHandler(t *testing.T) {
+	setupRenameTestEnv(t)
+
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
 
@@ -164,8 +171,11 @@ func TestCustomModelsHandler(t *testing.T) {
 
 	// 创建测试用的 ProviderService
 	providerService := NewProviderService()
-	blacklistService := NewBlacklistService()
-	notificationService := NewNotificationService()
+	autoStart := NewAutoStartService()
+	appSettings := NewAppSettingsService(autoStart)
+	notificationService := NewNotificationService(appSettings)
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, notificationService)
 
 	// 创建测试用的 provider（使用模拟服务器的 URL）
 	testProvider := Provider{
@@ -186,7 +196,7 @@ func TestCustomModelsHandler(t *testing.T) {
 	}
 
 	// 创建 ProviderRelayService
-	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, "")
+	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, appSettings, "")
 
 	// 创建测试路由
 	router := gin.New()
@@ -227,15 +237,20 @@ func TestCustomModelsHandler(t *testing.T) {
 
 // TestModelsHandler_NoProviders 测试没有可用 provider 的情况
 func TestModelsHandler_NoProviders(t *testing.T) {
+	setupRenameTestEnv(t)
+
 	gin.SetMode(gin.TestMode)
 
 	// 创建空的 ProviderService
 	providerService := NewProviderService()
-	blacklistService := NewBlacklistService()
-	notificationService := NewNotificationService()
+	autoStart := NewAutoStartService()
+	appSettings := NewAppSettingsService(autoStart)
+	notificationService := NewNotificationService(appSettings)
+	settingsService := NewSettingsService()
+	blacklistService := NewBlacklistService(settingsService, notificationService)
 
 	// 创建 ProviderRelayService（没有配置任何 provider）
-	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, "")
+	relayService := NewProviderRelayService(providerService, nil, blacklistService, notificationService, appSettings, "")
 
 	// 创建测试路由
 	router := gin.New()
