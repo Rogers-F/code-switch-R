@@ -2323,9 +2323,9 @@ const activeCards = computed(() => cards[activeTab.value] ?? [])
 // 连通性测试模型选项（根据平台）
 const connectivityTestModelOptions = computed(() => {
   const options: Record<string, string[]> = {
-    claude: ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5-20250929'],
-    codex: ['gpt-5.1', 'gpt-5.1-codex'],
-    gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    claude: ['claude-opus-4-8', 'claude-sonnet-4-6'],
+    codex: ['gpt-5.5', 'gpt-5.3-codex'],
+    gemini: ['gemini-3.1-pro-preview', 'gemini-3-flash-preview'],
   }
   return options[modalState.tabId] || options.claude
 })

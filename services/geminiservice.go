@@ -100,13 +100,13 @@ func getGeminiPresets() []GeminiPreset {
 			WebsiteURL:          "https://www.packyapi.com",
 			APIKeyURL:           "https://www.packyapi.com/register?aff=cc-switch",
 			BaseURL:             "https://www.packyapi.com",
-			Model:               "gemini-2.5-pro-preview",
+			Model:               "gemini-3.1-pro-preview",
 			Description:         "PackyCode 中转服务",
 			Category:            "third_party",
 			PartnerPromotionKey: "packycode",
 			EnvConfig: map[string]string{
 				"GOOGLE_GEMINI_BASE_URL": "https://www.packyapi.com",
-				"GEMINI_MODEL":           "gemini-2.5-pro-preview",
+				"GEMINI_MODEL":           "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -116,7 +116,7 @@ func getGeminiPresets() []GeminiPreset {
 			Category:    "custom",
 			EnvConfig: map[string]string{
 				"GOOGLE_GEMINI_BASE_URL": "",
-				"GEMINI_MODEL":           "gemini-2.5-pro-preview",
+				"GEMINI_MODEL":           "gemini-3.1-pro-preview",
 			},
 		},
 	}

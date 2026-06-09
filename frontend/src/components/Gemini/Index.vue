@@ -225,7 +225,7 @@
 
         <label class="form-field">
           <span>{{ t('components.gemini.form.model') }}</span>
-          <BaseInput v-model="modalState.form.model" type="text" :disabled="saving" placeholder="gemini-2.5-pro-preview" />
+          <BaseInput v-model="modalState.form.model" type="text" :disabled="saving" placeholder="gemini-3.1-pro-preview" />
         </label>
 
         <footer class="form-actions">
@@ -380,7 +380,7 @@ const openPresetModal = (preset: BindingGeminiPreset) => {
   modalState.form.name = preset.name
   modalState.form.baseUrl = preset.baseUrl ?? ''
   modalState.form.apiKey = ''
-  modalState.form.model = preset.model ?? 'gemini-2.5-pro-preview'
+  modalState.form.model = preset.model ?? 'gemini-3.1-pro-preview'
 }
 
 const openCreateModal = () => {
@@ -390,7 +390,7 @@ const openCreateModal = () => {
   modalState.form.name = ''
   modalState.form.baseUrl = ''
   modalState.form.apiKey = ''
-  modalState.form.model = 'gemini-2.5-pro-preview'
+  modalState.form.model = 'gemini-3.1-pro-preview'
 }
 
 const openEditModal = (provider: BindingGeminiProvider) => {

@@ -11,6 +11,7 @@
     "kimi-k2-0711-preview": "moonshot/kimi-k2-0711-preview",
     "glm-4.5": "fireworks_ai/accounts/fireworks/models/glm-4p5",
     "glm-4.5-air": "fireworks_ai/accounts/fireworks/models/glm-4p5-air",
-    "glm-4.6": "fireworks_ai/accounts/fireworks/models/glm-4p6"
+    "glm-4.6": "fireworks_ai/accounts/fireworks/models/glm-4p6",
+    "gpt-5.5-2026-04-23": "gpt-5.5"
   }
 }

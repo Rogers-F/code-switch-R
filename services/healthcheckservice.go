@@ -677,9 +677,9 @@ func (hcs *HealthCheckService) getEffectiveModel(provider *Provider, platform st
 	case "claude":
 		return "claude-haiku-4-5-20251001"
 	case "codex":
-		return "gpt-4o-mini"
+		return "gpt-5.1"
 	case "gemini":
-		return "gemini-1.5-flash"
+		return "gemini-2.5-flash"
 	default:
 		return "gpt-3.5-turbo"
 	}
