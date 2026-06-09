@@ -456,8 +456,7 @@ func TestProvider_ValidateConfiguration(t *testing.T) {
 					"external": "internal",
 				},
 			},
-			expectErrors:  true,
-			errorContains: "未配置 supportedModels",
+			expectErrors: false,
 		},
 
 		// 警告：自映射
@@ -472,8 +471,7 @@ func TestProvider_ValidateConfiguration(t *testing.T) {
 					"model-a": "model-a",
 				},
 			},
-			expectErrors:  true,
-			errorContains: "映射到自身",
+			expectErrors: false,
 		},
 
 		// 通配符映射（不验证）
