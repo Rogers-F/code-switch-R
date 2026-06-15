@@ -1,3 +1,5 @@
+//go:build ignore
+
 // 临时修复脚本：移除空的 supportedModels 和 modelMapping 字段
 package main
 

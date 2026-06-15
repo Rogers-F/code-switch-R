@@ -35,6 +35,13 @@ func setupRenameTestEnv(t *testing.T) string {
 	}
 	_, _ = db.Exec("PRAGMA busy_timeout = 30000")
 
+	// 测试结束关闭 DB 句柄，确保 Windows 下 t.TempDir() 能删除 app.db（句柄占用会导致 RemoveAll 失败）
+	t.Cleanup(func() {
+		if d, e := xdb.DB("default"); e == nil && d != nil {
+			_ = d.Close()
+		}
+	})
+
 	schemas := []string{
 		`CREATE TABLE IF NOT EXISTS request_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,

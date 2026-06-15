@@ -1,3 +1,5 @@
+//go:build ignore
+
 // scripts/test-write-queue-stress.go
 // SQLite 并发写入队列 - 压力测试脚本
 // Author: Half open flowers
