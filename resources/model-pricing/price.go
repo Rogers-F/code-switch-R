@@ -21,6 +21,111 @@ var (
 	nameReplacer   = strings.NewReplacer("-", "", "_", "", ".", "", ":", "", "/", "", " ", "")
 )
 
+var closedModelTokens = []struct {
+	ID          string
+	AllowSuffix bool
+}{
+	{ID: "chatgpt-4o-latest"},
+	{ID: "codex-mini-latest"},
+	{ID: "dall-e-2"},
+	{ID: "dall-e-3"},
+	{ID: "gpt-4-0125-preview"},
+	{ID: "gpt-4-0314"},
+	{ID: "gpt-4-1106-preview"},
+	{ID: "gpt-4-turbo-preview"},
+	{ID: "gpt-4-32k", AllowSuffix: true},
+	{ID: "gpt-4.5-preview"},
+	{ID: "gpt-4o-audio-preview", AllowSuffix: true},
+	{ID: "gpt-4o-mini-audio-preview", AllowSuffix: true},
+	{ID: "gpt-4o-realtime-preview", AllowSuffix: true},
+	{ID: "gpt-4o-mini-realtime-preview", AllowSuffix: true},
+	{ID: "gpt-4-vision-preview"},
+	{ID: "gpt-4-1106-vision-preview"},
+	{ID: "o1-preview", AllowSuffix: true},
+	{ID: "o1-mini", AllowSuffix: true},
+	{ID: "gpt-3.5-turbo-0301"},
+	{ID: "gpt-3.5-turbo-0613"},
+	{ID: "gpt-3.5-turbo-16k-0613"},
+	{ID: "text-moderation-007"},
+	{ID: "text-moderation-latest"},
+	{ID: "text-moderation-stable"},
+	{ID: "text-ada-001"},
+	{ID: "text-babbage-001"},
+	{ID: "text-curie-001"},
+	{ID: "text-davinci-001"},
+	{ID: "text-davinci-002"},
+	{ID: "text-davinci-003"},
+	{ID: "text-davinci-edit-001"},
+	{ID: "code-davinci-edit-001"},
+	{ID: "code-davinci-001"},
+	{ID: "code-davinci-002"},
+	{ID: "code-cushman-001"},
+	{ID: "code-cushman-002"},
+	{ID: "ada"},
+	{ID: "babbage"},
+	{ID: "curie"},
+	{ID: "davinci"},
+	{ID: "text-similarity-ada-001"},
+	{ID: "text-search-ada-doc-001"},
+	{ID: "text-search-ada-query-001"},
+	{ID: "code-search-ada-code-001"},
+	{ID: "code-search-ada-text-001"},
+	{ID: "text-similarity-babbage-001"},
+	{ID: "text-search-babbage-doc-001"},
+	{ID: "text-search-babbage-query-001"},
+	{ID: "code-search-babbage-code-001"},
+	{ID: "code-search-babbage-text-001"},
+	{ID: "text-similarity-curie-001"},
+	{ID: "text-search-curie-doc-001"},
+	{ID: "text-search-curie-query-001"},
+	{ID: "text-similarity-davinci-001"},
+	{ID: "text-search-davinci-doc-001"},
+	{ID: "text-search-davinci-query-001"},
+	{ID: "gemini-3-pro-preview"},
+	{ID: "gemini-3.1-flash-lite-preview"},
+	{ID: "gemini-2.5-pro-preview-03-25"},
+	{ID: "gemini-2.5-pro-preview-05-06"},
+	{ID: "gemini-2.5-pro-preview-06-05"},
+	{ID: "gemini-2.5-flash-lite-preview-09-2025"},
+	{ID: "gemini-2.5-flash-preview-05-20"},
+	{ID: "gemini-2.5-flash-preview-09-25"},
+	{ID: "gemini-2.5-flash-image-preview"},
+	{ID: "gemini-2.0-flash", AllowSuffix: true},
+	{ID: "gemini-2.0-flash-lite", AllowSuffix: true},
+	{ID: "gemini-2.0-flash-preview-image-generation"},
+	{ID: "gemini-2.0-flash-exp-image-generation"},
+	{ID: "gemini-2.0-flash-live-001"},
+	{ID: "gemini-live-2.5-flash-preview", AllowSuffix: true},
+	{ID: "text-embedding-004"},
+	{ID: "embedding-001"},
+	{ID: "embedding-gecko-001"},
+	{ID: "gemini-embedding-001"},
+	{ID: "gemini-embedding-exp", AllowSuffix: true},
+	{ID: "imagen-3.0-generate-002"},
+	{ID: "imagen-4.0-generate-preview-06-06"},
+	{ID: "imagen-4.0-ultra-generate-preview-06-06"},
+	{ID: "veo-3.0-generate-preview"},
+	{ID: "veo-3.0-fast-generate-preview"},
+	{ID: "gemini-robotics-er-1.5-preview"},
+	{ID: "claude-opus-4-20250514", AllowSuffix: true},
+	{ID: "claude-sonnet-4-20250514", AllowSuffix: true},
+	{ID: "claude-3-7-sonnet", AllowSuffix: true},
+	{ID: "claude-3-5-haiku", AllowSuffix: true},
+	{ID: "claude-3-5-sonnet", AllowSuffix: true},
+	{ID: "claude-3-haiku", AllowSuffix: true},
+	{ID: "claude-3-opus", AllowSuffix: true},
+	{ID: "claude-3-sonnet", AllowSuffix: true},
+	{ID: "claude-2.0"},
+	{ID: "claude-2.1"},
+	{ID: "claude-v2"},
+	{ID: "claude-1.0"},
+	{ID: "claude-1.1"},
+	{ID: "claude-1.2"},
+	{ID: "claude-1.3"},
+	{ID: "claude-v1"},
+	{ID: "claude-instant", AllowSuffix: true},
+}
+
 // familyRules 定义裸名 -> vendor 前缀的家族映射,顺序决定匹配优先级。
 // 保留确定性,不使用 map 遍历(避免随机命中)。
 var familyRules = []struct {
@@ -56,16 +161,25 @@ type PricingEntry struct {
 	OutputCostPerTokenAbove128k float64 `json:"output_cost_per_token_above_128k_tokens"`
 
 	// 200k 档(Anthropic 长上下文 Sonnet)
-	InputCostPerTokenAbove200k          float64 `json:"input_cost_per_token_above_200k_tokens"`
-	OutputCostPerTokenAbove200k         float64 `json:"output_cost_per_token_above_200k_tokens"`
-	CacheCreationInputTokenCostAbove200 float64 `json:"cache_creation_input_token_cost_above_200k_tokens"`
-	CacheReadInputTokenCostAbove200k    float64 `json:"cache_read_input_token_cost_above_200k_tokens"`
+	InputCostPerTokenAbove200k           float64 `json:"input_cost_per_token_above_200k_tokens"`
+	OutputCostPerTokenAbove200k          float64 `json:"output_cost_per_token_above_200k_tokens"`
+	CacheCreationInputTokenCostAbove200  float64 `json:"cache_creation_input_token_cost_above_200k_tokens"`
+	CacheReadInputTokenCostAbove200k     float64 `json:"cache_read_input_token_cost_above_200k_tokens"`
+	InputCostPerTokenAbove200kFlex       float64 `json:"input_cost_per_token_above_200k_tokens_flex"`
+	OutputCostPerTokenAbove200kFlex      float64 `json:"output_cost_per_token_above_200k_tokens_flex"`
+	CacheReadInputTokenCostAbove200kFlex float64 `json:"cache_read_input_token_cost_above_200k_tokens_flex"`
 
 	// 272k 档(GPT-5.x 系列)
-	InputCostPerTokenAbove272k          float64 `json:"input_cost_per_token_above_272k_tokens"`
-	OutputCostPerTokenAbove272k         float64 `json:"output_cost_per_token_above_272k_tokens"`
-	CacheCreationInputTokenCostAbove272 float64 `json:"cache_creation_input_token_cost_above_272k_tokens"`
-	CacheReadInputTokenCostAbove272k    float64 `json:"cache_read_input_token_cost_above_272k_tokens"`
+	InputCostPerTokenAbove272k           float64 `json:"input_cost_per_token_above_272k_tokens"`
+	OutputCostPerTokenAbove272k          float64 `json:"output_cost_per_token_above_272k_tokens"`
+	CacheCreationInputTokenCostAbove272  float64 `json:"cache_creation_input_token_cost_above_272k_tokens"`
+	CacheReadInputTokenCostAbove272k     float64 `json:"cache_read_input_token_cost_above_272k_tokens"`
+	InputCostPerTokenAbove272kFlex       float64 `json:"input_cost_per_token_above_272k_tokens_flex"`
+	OutputCostPerTokenAbove272kFlex      float64 `json:"output_cost_per_token_above_272k_tokens_flex"`
+	CacheReadInputTokenCostAbove272kFlex float64 `json:"cache_read_input_token_cost_above_272k_tokens_flex"`
+
+	DisableCacheReadPricing bool `json:"disable_cache_read_pricing,omitempty"`
+	DisableLongFlexPricing  bool `json:"disable_long_flex_pricing,omitempty"`
 
 	// Cache 1h(Anthropic ephemeral-1h)
 	CacheCreationInputTokenCostAbove1Hr         float64 `json:"cache_creation_input_token_cost_above_1hr"`
@@ -225,6 +339,7 @@ func NewService() (*Service, error) {
 	}
 	// litellm 首条 sample_spec 是 schema 文档,不是真实模型。
 	delete(raw, "sample_spec")
+	removeClosedPricing(raw)
 
 	pricing := make(map[string]*PricingEntry, len(raw))
 	normalized := make(map[string]string, len(raw))
@@ -377,10 +492,8 @@ type longContextBand struct {
 }
 
 // resolveLongContextBand 按 prompt tokens 选择 >272k / >200k / >128k 档,未超阈值返回 active=false。
-// tier=priority 时回退顺序:组合档 priority > 基础 priority > 组合档 default。
-// 保证 priority 长上下文永远不会低于"priority 基础单价",避免某些模型缺组合字段导致低计费
-// (例:部分 272k+ 模型有 output_cost_per_token_priority 但无 output_cost_per_token_above_272k_tokens_priority)。
-// tier=flex 时:JSON 无 *_flex_above_200k/272k 字段,由 scaleLongRate 按短窗 flex/default 比例外推长窗单价。
+// tier=priority 时只使用显式组合档字段,缺失时回落到 default 长上下文价,避免合成官方未给出的价格。
+// tier=flex 时优先使用显式组合档字段;旧条目缺字段时才按短窗 flex/default 比例外推。
 func (e *PricingEntry) resolveLongContextBand(totalPromptTokens int, tier ServiceTier) longContextBand {
 	if totalPromptTokens > 272000 && e.InputCostPerTokenAbove272k > 0 {
 		input := e.InputCostPerTokenAbove272k
@@ -388,13 +501,15 @@ func (e *PricingEntry) resolveLongContextBand(totalPromptTokens int, tier Servic
 		cacheRead := firstNonZero(e.CacheReadInputTokenCostAbove272k, e.CacheReadInputTokenCost)
 		switch tier {
 		case ServiceTierPriority:
-			input = firstNonZero(e.InputCostPerTokenAbove272kPriority, e.InputCostPerTokenPriority, input)
-			output = firstNonZero(e.OutputCostPerTokenAbove272kPriority, e.OutputCostPerTokenPriority, output)
-			cacheRead = firstNonZero(e.CacheReadInputTokenCostAbove272kPriority, e.CacheReadInputTokenCostPriority, cacheRead)
+			input = firstNonZero(e.InputCostPerTokenAbove272kPriority, input)
+			output = firstNonZero(e.OutputCostPerTokenAbove272kPriority, output)
+			cacheRead = firstNonZero(e.CacheReadInputTokenCostAbove272kPriority, cacheRead)
 		case ServiceTierFlex:
-			input = scaleLongRate(input, e.InputCostPerTokenFlex, e.InputCostPerToken)
-			output = scaleLongRate(output, e.OutputCostPerTokenFlex, e.OutputCostPerToken)
-			cacheRead = scaleLongRate(cacheRead, e.CacheReadInputTokenCostFlex, e.CacheReadInputTokenCost)
+			if !e.DisableLongFlexPricing {
+				input = firstNonZero(e.InputCostPerTokenAbove272kFlex, scaleLongRate(input, e.InputCostPerTokenFlex, e.InputCostPerToken))
+				output = firstNonZero(e.OutputCostPerTokenAbove272kFlex, scaleLongRate(output, e.OutputCostPerTokenFlex, e.OutputCostPerToken))
+				cacheRead = firstNonZero(e.CacheReadInputTokenCostAbove272kFlex, scaleLongRate(cacheRead, e.CacheReadInputTokenCostFlex, e.CacheReadInputTokenCost))
+			}
 		}
 		return longContextBand{
 			active:        true,
@@ -411,13 +526,15 @@ func (e *PricingEntry) resolveLongContextBand(totalPromptTokens int, tier Servic
 		cacheRead := firstNonZero(e.CacheReadInputTokenCostAbove200k, e.CacheReadInputTokenCost)
 		switch tier {
 		case ServiceTierPriority:
-			input = firstNonZero(e.InputCostPerTokenAbove200kPriority, e.InputCostPerTokenPriority, input)
-			output = firstNonZero(e.OutputCostPerTokenAbove200kPriority, e.OutputCostPerTokenPriority, output)
-			cacheRead = firstNonZero(e.CacheReadInputTokenCostAbove200kPriority, e.CacheReadInputTokenCostPriority, cacheRead)
+			input = firstNonZero(e.InputCostPerTokenAbove200kPriority, input)
+			output = firstNonZero(e.OutputCostPerTokenAbove200kPriority, output)
+			cacheRead = firstNonZero(e.CacheReadInputTokenCostAbove200kPriority, cacheRead)
 		case ServiceTierFlex:
-			input = scaleLongRate(input, e.InputCostPerTokenFlex, e.InputCostPerToken)
-			output = scaleLongRate(output, e.OutputCostPerTokenFlex, e.OutputCostPerToken)
-			cacheRead = scaleLongRate(cacheRead, e.CacheReadInputTokenCostFlex, e.CacheReadInputTokenCost)
+			if !e.DisableLongFlexPricing {
+				input = firstNonZero(e.InputCostPerTokenAbove200kFlex, scaleLongRate(input, e.InputCostPerTokenFlex, e.InputCostPerToken))
+				output = firstNonZero(e.OutputCostPerTokenAbove200kFlex, scaleLongRate(output, e.OutputCostPerTokenFlex, e.OutputCostPerToken))
+				cacheRead = firstNonZero(e.CacheReadInputTokenCostAbove200kFlex, scaleLongRate(cacheRead, e.CacheReadInputTokenCostFlex, e.CacheReadInputTokenCost))
+			}
 		}
 		return longContextBand{
 			active:        true,
@@ -486,6 +603,67 @@ func (s *Service) getPricing(model string) (*PricingEntry, bool) {
 	}
 
 	return nil, false
+}
+
+func removeClosedPricing(raw map[string]PricingEntry) {
+	for key := range raw {
+		if isClosedModelKey(key) {
+			delete(raw, key)
+		}
+	}
+}
+
+func isClosedModelKey(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	for _, token := range closedModelTokens {
+		if containsModelToken(lower, token.ID, token.AllowSuffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsModelToken(key, token string, allowSuffix bool) bool {
+	token = strings.ToLower(token)
+	start := 0
+	for {
+		idx := strings.Index(key[start:], token)
+		if idx < 0 {
+			return false
+		}
+		idx += start
+		end := idx + len(token)
+		if isModelStartBoundary(key, idx) && isModelEndBoundary(key, end, allowSuffix) {
+			return true
+		}
+		start = idx + 1
+	}
+}
+
+func isModelStartBoundary(key string, idx int) bool {
+	if idx == 0 {
+		return true
+	}
+	switch key[idx-1] {
+	case '/', ':', '.', '@':
+		return true
+	default:
+		return false
+	}
+}
+
+func isModelEndBoundary(key string, end int, allowSuffix bool) bool {
+	if end >= len(key) {
+		return true
+	}
+	switch key[end] {
+	case '/', ':', '@', '[':
+		return true
+	case '-':
+		return allowSuffix
+	default:
+		return false
+	}
 }
 
 // buildCandidates 生成该模型名的所有等价候选(按优先级去重)。
@@ -558,6 +736,18 @@ func ensureCachePricing(entry *PricingEntry) {
 	if entry.CacheCreationInputTokenCost == 0 && entry.InputCostPerToken > 0 {
 		entry.CacheCreationInputTokenCost = entry.InputCostPerToken * 1.25
 	}
+	if entry.DisableCacheReadPricing {
+		entry.CacheReadInputTokenCost = 0
+		entry.CacheReadInputTokenCostAbove200k = 0
+		entry.CacheReadInputTokenCostAbove272k = 0
+		entry.CacheReadInputTokenCostAbove200kFlex = 0
+		entry.CacheReadInputTokenCostAbove272kFlex = 0
+		entry.CacheReadInputTokenCostFlex = 0
+		entry.CacheReadInputTokenCostPriority = 0
+		entry.CacheReadInputTokenCostAbove200kPriority = 0
+		entry.CacheReadInputTokenCostAbove272kPriority = 0
+		return
+	}
 	if entry.CacheReadInputTokenCost == 0 {
 		// DeepSeek/novita/zai 等用 cache_hit 命名缓存命中价,优先吃它再退回 10% 兜底
 		entry.CacheReadInputTokenCost = firstNonZero(entry.InputCostPerTokenCacheHit, entry.InputCostPerToken*0.1)
@@ -599,44 +789,16 @@ func resolveCacheTokens(usage UsageSnapshot) (fiveMin int, oneHour int) {
 
 func buildEphemeral1hPricing() map[string]float64 {
 	return map[string]float64{
-		"claude-opus-4-5":            0.00001,
-		"claude-opus-4-5-20251101":   0.00001,
-		"claude-opus-4-5-20250929":   0.00001,
-		"claude-opus-4-1":            0.00003,
-		"claude-opus-4-1-20250805":   0.00003,
-		"claude-opus-4":              0.00003,
-		"claude-opus-4-20250514":     0.00003,
-		"claude-3-opus":              0.00003,
-		"claude-3-opus-latest":       0.00003,
-		"claude-3-opus-20240229":     0.00003,
-		"claude-3-5-sonnet":          0.000006,
-		"claude-3-5-sonnet-latest":   0.000006,
-		"claude-3-5-sonnet-20241022": 0.000006,
-		"claude-3-5-sonnet-20240620": 0.000006,
-		"claude-3-sonnet":            0.000006,
-		"claude-3-sonnet-20240307":   0.000006,
-		"claude-sonnet-3":            0.000006,
-		"claude-sonnet-3-5":          0.000006,
-		"claude-sonnet-3-7":          0.000006,
-		"claude-sonnet-4":            0.000006,
-		"claude-sonnet-4-20250514":   0.000006,
-		"claude-3-5-haiku":           0.0000016,
-		"claude-3-5-haiku-latest":    0.0000016,
-		"claude-3-5-haiku-20241022":  0.0000016,
-		"claude-3-haiku":             0.0000016,
-		"claude-3-haiku-20240307":    0.0000016,
-		"claude-haiku-3":             0.0000016,
-		"claude-haiku-3-5":           0.0000016,
-		"claude-haiku-4-5":           0.000002,
-		"claude-haiku-4-5-20251001":  0.000002,
+		"claude-opus-4-5":           0.00001,
+		"claude-opus-4-5-20251101":  0.00001,
+		"claude-opus-4-5-20250929":  0.00001,
+		"claude-opus-4-1":           0.00003,
+		"claude-opus-4-1-20250805":  0.00003,
+		"claude-haiku-4-5":          0.000002,
+		"claude-haiku-4-5-20251001": 0.000002,
 	}
 }
 
 func buildLongContextPricing() map[string]LongContextPricing {
-	return map[string]LongContextPricing{
-		"claude-sonnet-4-20250514[1m]": {
-			Input:  0.000006,
-			Output: 0.0000225,
-		},
-	}
+	return map[string]LongContextPricing{}
 }

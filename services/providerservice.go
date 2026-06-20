@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -94,6 +95,15 @@ type ProviderService struct {
 	mu sync.Mutex
 }
 
+var safeCustomToolIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+func validateCustomToolID(toolID string) error {
+	if !safeCustomToolIDPattern.MatchString(toolID) {
+		return fmt.Errorf("invalid custom tool id: %s", toolID)
+	}
+	return nil
+}
+
 func NewProviderService() *ProviderService {
 	return &ProviderService{}
 }
@@ -120,8 +130,8 @@ func providerFilePath(kind string) (string, error) {
 		// 支持自定义 CLI 工具的供应商存储：custom:{tool-id}
 		if strings.HasPrefix(kind, "custom:") {
 			toolId := strings.TrimPrefix(kind, "custom:")
-			if toolId == "" {
-				return "", fmt.Errorf("invalid custom provider kind: %s", kind)
+			if err := validateCustomToolID(toolId); err != nil {
+				return "", err
 			}
 			// 存储在 providers 子目录下
 			providersDir := filepath.Join(dir, "providers")

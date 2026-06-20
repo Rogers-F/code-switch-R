@@ -37,10 +37,19 @@ jobs:
           node-version: '22'
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.38
 
       - name: Install frontend dependencies
-        run: cd frontend && npm install
+        run: cd frontend && npm ci
+
+      - name: Run backend tests
+        run: go test -timeout 60s ./...
+
+      - name: Run backend vet
+        run: go vet ./...
+
+      - name: Run frontend typecheck
+        run: cd frontend && npx vue-tsc --noEmit
 
       - name: Update build assets
         run: wails3 task common:update:build-assets
@@ -112,10 +121,19 @@ jobs:
           node-version: '22'
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.38
 
       - name: Install frontend dependencies
-        run: cd frontend && npm install
+        run: cd frontend && npm ci
+
+      - name: Run backend tests
+        run: go test -timeout 60s ./...
+
+      - name: Run backend vet
+        run: go vet ./...
+
+      - name: Run frontend typecheck
+        run: cd frontend && npx vue-tsc --noEmit
 
       - name: Install NSIS
         run: choco install nsis -y
@@ -226,10 +244,19 @@ jobs:
             libwebkit2gtk-4.1-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.38
 
       - name: Install frontend dependencies
-        run: cd frontend && npm install
+        run: cd frontend && npm ci
+
+      - name: Run backend tests
+        run: go test -timeout 60s ./...
+
+      - name: Run backend vet
+        run: go vet ./...
+
+      - name: Run frontend typecheck
+        run: cd frontend && npx vue-tsc --noEmit
 
       - name: Update build assets
         run: wails3 task common:update:build-assets

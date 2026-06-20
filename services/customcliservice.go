@@ -26,7 +26,7 @@ type ConfigFile struct {
 	ID        string `json:"id"`
 	Label     string `json:"label"`
 	Path      string `json:"path"`
-	Format    string `json:"format"`              // json | toml | env
+	Format    string `json:"format"` // json | toml | env
 	IsPrimary bool   `json:"isPrimary,omitempty"`
 }
 
@@ -203,7 +203,10 @@ func (s *CustomCliService) DeleteTool(id string) error {
 	}
 
 	// 删除对应的供应商文件
-	providersPath := s.getProvidersPath(id)
+	providersPath, err := s.getProvidersPath(id)
+	if err != nil {
+		return err
+	}
 	_ = os.Remove(providersPath) // 忽略错误（文件可能不存在）
 
 	return nil
@@ -491,8 +494,11 @@ func (s *CustomCliService) getProvidersDir() string {
 	return filepath.Join(home, ".code-switch", "providers")
 }
 
-func (s *CustomCliService) getProvidersPath(toolId string) string {
-	return filepath.Join(s.getProvidersDir(), toolId+".json")
+func (s *CustomCliService) getProvidersPath(toolId string) (string, error) {
+	if err := validateCustomToolID(toolId); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.getProvidersDir(), toolId+".json"), nil
 }
 
 func (s *CustomCliService) ensureProvidersDir() error {

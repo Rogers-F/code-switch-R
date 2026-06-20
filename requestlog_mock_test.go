@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"database/sql"
 	"math"
 	"math/rand"
 	"os"
@@ -15,23 +15,59 @@ import (
 
 const timeLayout = "2006-01-02 15:04:05"
 
-func init() {
-	home, _ := os.UserHomeDir()
+func setupRequestLogSeedTestDB(t *testing.T) *sql.DB {
+	t.Helper()
 
-	if err := xdb.Inits([]xdb.Config{
-		{
-			Name:   "default",
-			Driver: "sqlite",
-			DSN:    filepath.Join(home, ".code-switch", "app.db?cache=shared&mode=rwc&_busy_timeout=10000&_journal_mode=WAL"),
-		},
-	}); err != nil {
-		fmt.Printf("初始化 request_log 表失败: %v\n", err)
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+
+	configDir := filepath.Join(tmpHome, ".code-switch")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("create test config dir: %v", err)
 	}
+
+	dbPath := "file:request-log-seed-test?mode=memory&cache=shared"
+	if err := xdb.Inits([]xdb.Config{{Name: "default", Driver: "sqlite", DSN: dbPath}}); err != nil {
+		t.Fatalf("init test database: %v", err)
+	}
+
+	db, err := xdb.DB("default")
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+
+	schema := `CREATE TABLE IF NOT EXISTS request_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		platform TEXT,
+		model TEXT,
+		provider TEXT,
+		http_code INTEGER,
+		input_tokens INTEGER,
+		output_tokens INTEGER,
+		cache_create_tokens INTEGER,
+		cache_read_tokens INTEGER,
+		reasoning_tokens INTEGER,
+		is_stream INTEGER DEFAULT 0,
+		duration_sec REAL DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatalf("create request_log table: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	return db
 }
 
 func TestSeedMockRequestLogs(t *testing.T) {
-	db, _ := xdb.DB("default")
-	xdb.New("request_log").Delete()
+	db := setupRequestLogSeedTestDB(t)
+	if _, err := db.Exec("DELETE FROM request_log"); err != nil {
+		t.Fatalf("clear test rows: %v", err)
+	}
 	if err := SeedMockRequestLogs(16); err != nil {
 		t.Fatalf("seed failed: %v", err)
 	}
@@ -58,21 +94,19 @@ func SeedMockRequestLogs(months int) error {
 	maxDaily := 18
 	minDaily := 4
 	platModels := map[string][]string{
-		"claude": {
-			"claude-sonnet-4-5-20250929",
-			"claude-opus-4-1-20250805",
-			"claude-sonnet-4-20250514",
-			"claude-haiku-4-5-20251001",
-			"claude-3-5-haiku-20241022",
+		"tool_a": {
+			"model-a-fast",
+			"model-a-large",
+			"model-a-small",
 		},
-		"codex": {
-			"gpt-5-codex",
-			"gpt-5",
+		"tool_b": {
+			"model-b-fast",
+			"model-b-large",
 		},
 	}
 	providers := map[string][]string{
-		"claude": {"kimi", "deepseek", "AICoding.sh"},
-		"codex":  {"AICoding.sh"},
+		"tool_a": {"provider-a", "provider-b", "provider-c"},
+		"tool_b": {"provider-a"},
 	}
 	httpCodes := []int{200, 200, 200, 201, 400, 429, 500}
 	timeBands := []struct {

@@ -39,6 +39,31 @@ func TestSampleSpecSkipped(t *testing.T) {
 	}
 }
 
+func TestClosedModelKeysFiltered(t *testing.T) {
+	svc := newTestService(t)
+	cases := []string{
+		"chatgpt-4o-latest",
+		"codex-mini-latest",
+		"gpt-4-0125-preview",
+		"gpt-4o-realtime-preview-2025-06-03",
+		"text-moderation-007",
+		"gemini-3-pro-preview",
+		"gemini/gemini-3.1-flash-lite-preview",
+		"vertex_ai/imagen-3.0-generate-002",
+		"claude-sonnet-4-20250514",
+		"us.anthropic.claude-sonnet-4-20250514-v1:0",
+		"anthropic.claude-3-5-haiku-20241022-v1:0",
+	}
+	for _, model := range cases {
+		if _, ok := svc.pricingMap[model]; ok {
+			t.Errorf("%q 不应进入 pricingMap", model)
+		}
+		if entry, ok := svc.getPricing(model); ok && entry != nil {
+			t.Errorf("%q 不应通过候选匹配拿到定价", model)
+		}
+	}
+}
+
 // TestOverlayAliases 检验 overlay 映射的裸名能查到价格。
 func TestOverlayAliases(t *testing.T) {
 	svc := newTestService(t)
@@ -420,11 +445,9 @@ func TestPriorityServiceTier(t *testing.T) {
 	}
 }
 
-// TestPriorityLongContextNotBelowPriorityBase 验证:模型有 priority 基础字段但缺对应
-// above_Xk_priority 时,priority 长上下文请求不应低于 priority 基础价(防止 gpt-5.4 类陷阱)。
-func TestPriorityLongContextNotBelowPriorityBase(t *testing.T) {
-	svc := newTestService(t)
-
+// TestPriorityLongContextDoesNotInventTierPrice 验证:模型有 priority 基础字段但缺对应
+// above_Xk_priority 时,长上下文不应把短上下文 priority 基础价当作组合价。
+func TestPriorityLongContextDoesNotInventTierPrice(t *testing.T) {
 	// 构造一个合成 entry:有 output base/priority,有 above_272k default,无 above_272k priority
 	synthetic := &PricingEntry{
 		InputCostPerToken:           2.5e-6,
@@ -438,15 +461,13 @@ func TestPriorityLongContextNotBelowPriorityBase(t *testing.T) {
 	if !band.active {
 		t.Fatal("应该命中 >272k band")
 	}
-	// priority output 应该至少是 priority base 3e-5,而不是 default above_272k 2.25e-5
-	if band.outputPerTok < synthetic.OutputCostPerTokenPriority {
-		t.Errorf("priority+>272k 输出价不应低于 priority 基础价 %g,实际 %g",
-			synthetic.OutputCostPerTokenPriority, band.outputPerTok)
+	if band.inputPerTok != synthetic.InputCostPerTokenAbove272k {
+		t.Errorf("缺少 priority 长上下文字段时,input 应用 default 长上下文价 %g,实际 %g",
+			synthetic.InputCostPerTokenAbove272k, band.inputPerTok)
 	}
-	// input/cacheRead 同样验证不低于 priority 基础价
-	if band.inputPerTok < synthetic.InputCostPerTokenPriority {
-		t.Errorf("priority+>272k 输入价不应低于 priority 基础价 %g,实际 %g",
-			synthetic.InputCostPerTokenPriority, band.inputPerTok)
+	if band.outputPerTok != synthetic.OutputCostPerTokenAbove272k {
+		t.Errorf("缺少 priority 长上下文字段时,output 应用 default 长上下文价 %g,实际 %g",
+			synthetic.OutputCostPerTokenAbove272k, band.outputPerTok)
 	}
 
 	// 对比 default 请求仍吃 above_272k default
@@ -454,8 +475,6 @@ func TestPriorityLongContextNotBelowPriorityBase(t *testing.T) {
 	if bandDef.outputPerTok != synthetic.OutputCostPerTokenAbove272k {
 		t.Errorf("default+>272k 输出价应 = above_272k default,实际 %g", bandDef.outputPerTok)
 	}
-
-	_ = svc // 保留 svc 以复用 helper 风格
 }
 
 // TestLongContextTierStrictMatch 验证精确匹配 only,不再无序 fallback 到任意 tier。
@@ -593,9 +612,9 @@ func TestFlexLongContextScalesFromDefaultLongBand(t *testing.T) {
 	}
 
 	// 预期:长窗默认价 × (flex基础 / default基础)
-	expectedInput := 5e-06 * (1.25e-06 / 2.5e-06)       // = 2.5e-06
-	expectedOutput := 2.25e-05 * (7.5e-06 / 1.5e-05)    // = 1.125e-05
-	expectedCacheRead := 5e-07 * (1.3e-07 / 2.5e-07)    // = 2.6e-07
+	expectedInput := 5e-06 * (1.25e-06 / 2.5e-06)    // = 2.5e-06
+	expectedOutput := 2.25e-05 * (7.5e-06 / 1.5e-05) // = 1.125e-05
+	expectedCacheRead := 5e-07 * (1.3e-07 / 2.5e-07) // = 2.6e-07
 
 	assertApprox(t, band.inputPerTok, expectedInput)
 	assertApprox(t, band.outputPerTok, expectedOutput)
@@ -612,6 +631,96 @@ func TestFlexLongContextScalesFromDefaultLongBand(t *testing.T) {
 	if bandDef.inputPerTok != entry.InputCostPerTokenAbove272k {
 		t.Errorf("default 长窗 input 应 = above_272k default %g,实际 %g",
 			entry.InputCostPerTokenAbove272k, bandDef.inputPerTok)
+	}
+}
+
+func TestGpt54FlexLongContextUsesOfficialCacheReadRate(t *testing.T) {
+	svc := newTestService(t)
+	entry, ok := svc.pricingMap["gpt-5.4"]
+	if !ok {
+		t.Fatal("gpt-5.4 应存在于 pricingMap")
+	}
+
+	res := svc.CalculateCost("gpt-5.4", UsageSnapshot{
+		InputTokens:     300000,
+		OutputTokens:    1000,
+		CacheReadTokens: 10000,
+		ServiceTier:     ServiceTierFlex,
+	})
+	if !res.IsLongContext {
+		t.Fatal("gpt-5.4 300k prompt 应命中长上下文价")
+	}
+	assertApprox(t, res.CacheReadCost, float64(10000)*2.5e-7)
+	assertApprox(t, res.InputCost, float64(300000)*2.5e-6)
+	assertApprox(t, res.OutputCost, float64(1000)*1.125e-5)
+
+	if entry.CacheReadInputTokenCostFlex == 0 {
+		t.Fatal("前提失败:gpt-5.4 应保留短上下文 flex cache_read 价")
+	}
+}
+
+func TestGpt55ProPricingExists(t *testing.T) {
+	svc := newTestService(t)
+	cost := svc.CalculateCost("gpt-5.5-pro", UsageSnapshot{
+		InputTokens:  300000,
+		OutputTokens: 1000,
+	})
+	if !cost.HasPricing {
+		t.Fatal("gpt-5.5-pro 应有定价")
+	}
+	if !cost.IsLongContext {
+		t.Fatal("gpt-5.5-pro 300k prompt 应命中长上下文价")
+	}
+	assertApprox(t, cost.InputCost, float64(300000)*6e-5)
+	assertApprox(t, cost.OutputCost, float64(1000)*2.7e-4)
+}
+
+func TestGpt55ProFlexDoesNotInventLongContextPrice(t *testing.T) {
+	svc := newTestService(t)
+	short := svc.CalculateCost("gpt-5.5-pro", UsageSnapshot{
+		InputTokens:  1000,
+		OutputTokens: 100,
+		ServiceTier:  ServiceTierFlex,
+	})
+	if !short.HasPricing {
+		t.Fatal("gpt-5.5-pro flex 短上下文应有定价")
+	}
+	assertApprox(t, short.InputCost, float64(1000)*1.5e-5)
+	assertApprox(t, short.OutputCost, float64(100)*9e-5)
+
+	long := svc.CalculateCost("gpt-5.5-pro", UsageSnapshot{
+		InputTokens:  300000,
+		OutputTokens: 1000,
+		ServiceTier:  ServiceTierFlex,
+	})
+	if !long.IsLongContext {
+		t.Fatal("gpt-5.5-pro 300k prompt 应命中长上下文价")
+	}
+	assertApprox(t, long.InputCost, float64(300000)*6e-5)
+	assertApprox(t, long.OutputCost, float64(1000)*2.7e-4)
+}
+
+func TestProModelsDoNotSynthesizeCacheReadPricing(t *testing.T) {
+	svc := newTestService(t)
+	for _, model := range []string{
+		"gpt-5-pro",
+		"gpt-5-pro-2025-10-06",
+		"gpt-5.2-pro",
+		"gpt-5.2-pro-2025-12-11",
+		"gpt-5.4-pro",
+		"gpt-5.4-pro-2026-03-05",
+	} {
+		cost := svc.CalculateCost(model, UsageSnapshot{
+			InputTokens:     1000,
+			OutputTokens:    100,
+			CacheReadTokens: 1000,
+		})
+		if !cost.HasPricing {
+			t.Fatalf("%s 应有基础定价", model)
+		}
+		if cost.CacheReadCost != 0 {
+			t.Fatalf("%s 不应合成 cache_read 价格,实际 %g", model, cost.CacheReadCost)
+		}
 	}
 }
 

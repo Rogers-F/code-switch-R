@@ -130,11 +130,9 @@ func main() {
 	customCliService := services.NewCustomCliService(providerRelay.Addr())
 	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
 
-	go func() {
-		if err := providerRelay.Start(); err != nil {
-			log.Printf("provider relay start error: %v", err)
-		}
-	}()
+	if err := providerRelay.Start(); err != nil {
+		log.Fatalf("provider relay start error: %v", err)
+	}
 
 	// 启动黑名单自动恢复定时器（每分钟检查一次）
 	blacklistStopChan := make(chan struct{})
@@ -186,7 +184,7 @@ func main() {
 	// 'Mac' options tailor the application when running an macOS.
 	app := application.New(application.Options{
 		Name:        "AI Code Studio",
-		Description: "Claude Code and Codex provier manager",
+		Description: "Code Switch provider manager",
 		Services: []application.Service{
 			application.NewService(appservice),
 			application.NewService(suiService),
@@ -239,7 +237,9 @@ func main() {
 		log.Println("✅ 健康检查服务已停止")
 
 		// 3. 停止代理服务器
-		_ = providerRelay.Stop()
+		if err := providerRelay.Stop(); err != nil {
+			log.Printf("provider relay stop error: %v", err)
+		}
 
 		// 4. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {
@@ -334,25 +334,25 @@ func main() {
 
 	if runtime.GOOS == "darwin" {
 		trayWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Title:       "Code Switch Tray",
-			Name:        "tray",
-			Width:       trayWindowWidth,
-			Height:      trayWindowMinHeight,
-			MinWidth:    trayWindowWidth,
-			MaxWidth:    trayWindowWidth,
-			MinHeight:   trayWindowMinHeight,
-			MaxHeight:   trayWindowMaxHeight,
-			AlwaysOnTop: true,
-			DisableResize: true,
-			Frameless:     true,
-			Hidden:        true,
-			BackgroundType: application.BackgroundTypeTransparent,
+			Title:            "Code Switch Tray",
+			Name:             "tray",
+			Width:            trayWindowWidth,
+			Height:           trayWindowMinHeight,
+			MinWidth:         trayWindowWidth,
+			MaxWidth:         trayWindowWidth,
+			MinHeight:        trayWindowMinHeight,
+			MaxHeight:        trayWindowMaxHeight,
+			AlwaysOnTop:      true,
+			DisableResize:    true,
+			Frameless:        true,
+			Hidden:           true,
+			BackgroundType:   application.BackgroundTypeTransparent,
 			BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 			Mac: application.MacWindow{
-				Backdrop:     application.MacBackdropTransparent,
-				TitleBar:     application.MacTitleBarHidden,
+				Backdrop:      application.MacBackdropTransparent,
+				TitleBar:      application.MacTitleBarHidden,
 				DisableShadow: true,
-				WindowLevel:  application.MacWindowLevelPopUpMenu,
+				WindowLevel:   application.MacWindowLevelPopUpMenu,
 			},
 			URL: "/#/tray",
 		})
@@ -454,9 +454,9 @@ func handleDockVisibility(service *dock.DockService, show bool) {
 }
 
 const (
-	trayWindowWidth     = 360
-	trayWindowMinHeight = 120
-	trayWindowMaxHeight = 420
+	trayWindowWidth      = 360
+	trayWindowMinHeight  = 120
+	trayWindowMaxHeight  = 420
 	trayProgressBarWidth = 28
 )
 
@@ -536,4 +536,3 @@ func trayProgressLabel(used float64, total float64) string {
 func formatCurrency(value float64) string {
 	return fmt.Sprintf("$%.2f", value)
 }
-

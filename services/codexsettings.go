@@ -18,7 +18,7 @@ const (
 	codexAuthFileName     = "auth.json"
 	codexBackupAuthName   = "cc-studio.back.auth.json"
 	codexPreferredAuth    = "apikey"
-	codexDefaultModel     = "gpt-5-codex"
+	codexDefaultModel     = "gpt-5.5"
 	codexProviderKey      = "code-switch-r"
 	codexEnvKey           = "OPENAI_API_KEY"
 	codexWireAPI          = "responses"

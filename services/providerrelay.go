@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -259,15 +260,20 @@ func (prs *ProviderRelayService) Start() error {
 	router := gin.Default()
 	prs.registerRoutes(router)
 
+	listener, err := net.Listen("tcp", prs.addr)
+	if err != nil {
+		return fmt.Errorf("listen provider relay on %s: %w", prs.addr, err)
+	}
+
 	prs.server = &http.Server{
 		Addr:    prs.addr,
 		Handler: router,
 	}
 
-	fmt.Printf("provider relay server listening on %s\n", prs.addr)
+	fmt.Printf("provider relay server listening on %s\n", listener.Addr().String())
 
 	go func() {
-		if err := prs.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := prs.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("provider relay server error: %v\n", err)
 		}
 	}()

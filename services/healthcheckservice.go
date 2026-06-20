@@ -462,6 +462,23 @@ func (hcs *HealthCheckService) RunAllChecks() (map[string][]HealthCheckResult, e
 	return results, nil
 }
 
+func batchCheckTimeout(providers []Provider) time.Duration {
+	maxTimeout := DefaultTimeoutMs
+	for i := range providers {
+		if !providers[i].AvailabilityMonitorEnabled {
+			continue
+		}
+		timeout := DefaultTimeoutMs
+		if providers[i].AvailabilityConfig != nil && providers[i].AvailabilityConfig.Timeout > 0 {
+			timeout = providers[i].AvailabilityConfig.Timeout
+		}
+		if timeout > maxTimeout {
+			maxTimeout = timeout
+		}
+	}
+	return time.Duration(maxTimeout)*time.Millisecond + 5*time.Second
+}
+
 // checkAllProviders 检测指定平台的所有启用监控的供应商
 func (hcs *HealthCheckService) checkAllProviders(platform string) []HealthCheckResult {
 	providers, err := hcs.providerService.LoadProviders(platform)
@@ -475,7 +492,7 @@ func (hcs *HealthCheckService) checkAllProviders(platform string) []HealthCheckR
 	var mu sync.Mutex
 	sem := make(chan struct{}, MaxConcurrentChecks)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), batchCheckTimeout(providers))
 	defer cancel()
 
 	for _, provider := range providers {

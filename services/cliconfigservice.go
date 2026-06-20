@@ -69,14 +69,14 @@ type CLIConfigFile struct {
 
 // CLIConfig CLI 配置数据
 type CLIConfig struct {
-	Platform     CLIPlatform               `json:"platform"`
-	Fields       []CLIConfigField          `json:"fields"`
-	RawContent   string                    `json:"rawContent,omitempty"`   // 原始文件内容（用于高级编辑）
-	RawFiles     []CLIConfigFile           `json:"rawFiles,omitempty"`     // 多文件内容预览
-	ConfigFormat string                    `json:"configFormat,omitempty"` // "json" 或 "toml"
-	EnvContent   map[string]string         `json:"envContent,omitempty"`   // Gemini .env 内容
-	FilePath     string                    `json:"filePath,omitempty"`     // 配置文件路径
-	Editable     map[string]interface{}    `json:"editable,omitempty"`     // 可编辑字段的当前值
+	Platform     CLIPlatform            `json:"platform"`
+	Fields       []CLIConfigField       `json:"fields"`
+	RawContent   string                 `json:"rawContent,omitempty"`   // 原始文件内容（用于高级编辑）
+	RawFiles     []CLIConfigFile        `json:"rawFiles,omitempty"`     // 多文件内容预览
+	ConfigFormat string                 `json:"configFormat,omitempty"` // "json" 或 "toml"
+	EnvContent   map[string]string      `json:"envContent,omitempty"`   // Gemini .env 内容
+	FilePath     string                 `json:"filePath,omitempty"`     // 配置文件路径
+	Editable     map[string]interface{} `json:"editable,omitempty"`     // 可编辑字段的当前值
 }
 
 // CLIConfigSnapshots CLI 配置快照（用于前端对比：当前 vs 预览）
@@ -343,7 +343,7 @@ func (s *CliConfigService) GetConfigSnapshots(platform string, apiUrl string, ap
 			raw["model_provider"] = "code-switch-r"
 
 			if _, exists := raw["model"]; !exists {
-				raw["model"] = "gpt-5-codex"
+				raw["model"] = codexDefaultModel
 			}
 
 			modelProviders := ensureTomlTable(raw, "model_providers")
@@ -939,7 +939,7 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 	)
 
 	// 可编辑字段
-	model := "gpt-5-codex"
+	model := codexDefaultModel
 	if m, ok := data["model"].(string); ok {
 		model = m
 	}
@@ -1187,7 +1187,7 @@ func (s *CliConfigService) getGeminiConfig() (*CLIConfig, error) {
 
 	model := config.EnvContent["GEMINI_MODEL"]
 	if model == "" {
-		model = "gemini-3-pro-preview"
+		model = "gemini-3.1-pro-preview"
 	}
 	config.Fields = append(config.Fields, CLIConfigField{
 		Key:    "GEMINI_MODEL",

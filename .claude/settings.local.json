@@ -4,7 +4,9 @@
       "WebSearch",
       "Bash(find:*)",
       "mcp__exa__web_search_exa",
-      "mcp__ace-tool__search_context"
+      "mcp__ace-tool__search_context",
+      "Bash(rm -f /Users/kaufman/winshare/claude-lit/cc-r/.git/index.lock)",
+      "Bash(git add *)"
     ],
     "deny": [],
     "ask": []

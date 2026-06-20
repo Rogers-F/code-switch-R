@@ -600,6 +600,21 @@ func (us *UpdateService) fetchFromGitHubAPI() (*UpdateInfo, error) {
 	}, nil
 }
 
+func parseContentRange(value string) (int64, int64, int64, bool) {
+	var unit string
+	var start int64
+	var end int64
+	var total int64
+	n, err := fmt.Sscanf(value, "%s %d-%d/%d", &unit, &start, &end, &total)
+	if err != nil || n != 4 || unit != "bytes" {
+		return 0, 0, 0, false
+	}
+	if start < 0 || end < start || total <= 0 || end >= total {
+		return 0, 0, 0, false
+	}
+	return start, end, total, true
+}
+
 // doDownload 执行下载
 func (us *UpdateService) doDownload(ctx context.Context, info *UpdateInfo) {
 	// 准备下载路径
@@ -743,19 +758,19 @@ func (us *UpdateService) doDownload(ctx context.Context, info *UpdateInfo) {
 		// 验证 Content-Range
 		contentRange := resp.Header.Get("Content-Range")
 		if contentRange != "" {
-			// 格式: bytes start-end/total
-			var rangeStart, rangeEnd, rangeTotal int64
-			fmt.Sscanf(contentRange, "bytes %d-%d/%d", &rangeStart, &rangeEnd, &rangeTotal)
-			if rangeStart != startByte || rangeTotal != info.Size {
+			rangeStart, _, rangeTotal, ok := parseContentRange(contentRange)
+			if !ok || rangeStart != startByte || rangeTotal != info.Size {
 				// 不一致，全量重下
-				os.Remove(tempPath)
+				_ = os.Remove(tempPath)
 				file, err = os.Create(tempPath)
 				startByte = 0
 			} else {
 				file, err = os.OpenFile(tempPath, os.O_APPEND|os.O_WRONLY, 0644)
 			}
 		} else {
-			file, err = os.OpenFile(tempPath, os.O_APPEND|os.O_WRONLY, 0644)
+			_ = os.Remove(tempPath)
+			file, err = os.Create(tempPath)
+			startByte = 0
 		}
 	case http.StatusRequestedRangeNotSatisfiable:
 		// 416: Range 无法满足，全量重下
