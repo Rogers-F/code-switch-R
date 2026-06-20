@@ -1033,6 +1033,7 @@ import CLIConfigEditor from '../common/CLIConfigEditor.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider, RenameProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
+import type { GeminiProvider } from '../../../bindings/codeswitch/services/models'
 import { fetchProxyStatus, enableProxy, disableProxy } from '../../services/claudeSettings'
 import { fetchGeminiProxyStatus, enableGeminiProxy, disableGeminiProxy } from '../../services/geminiSettings'
 import { fetchProviderDailyStats, type ProviderDailyStat } from '../../services/logs'
@@ -1483,24 +1484,6 @@ const compareVersions = (current: string, remote: string) => {
     return cur < rem ? -1 : 1
   }
   return 0
-}
-
-// 本地 GeminiProvider 类型定义（避免依赖 CI 生成的 bindings）
-interface GeminiProvider {
-  id: string
-  name: string
-  websiteUrl?: string
-  apiKeyUrl?: string
-  baseUrl?: string
-  apiKey?: string
-  model?: string
-  description?: string
-  category?: string
-  partnerPromotionKey?: string
-  enabled: boolean
-  level?: number // 优先级分组 (1-10, 默认 1)
-  envConfig?: Record<string, string | undefined>
-  settingsConfig?: Record<string, any>
 }
 
 const tabs = [
