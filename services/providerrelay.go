@@ -1253,10 +1253,20 @@ func maxIntInto(dst *int, candidate int) {
 
 // codex usage parser(OpenAI Responses API)
 func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
-	usage.InputTokens += int(gjson.Get(data, "response.usage.input_tokens").Int())
-	usage.OutputTokens += int(gjson.Get(data, "response.usage.output_tokens").Int())
-	usage.CacheReadTokens += int(gjson.Get(data, "response.usage.input_tokens_details.cached_tokens").Int())
-	usage.ReasoningTokens += int(gjson.Get(data, "response.usage.output_tokens_details.reasoning_tokens").Int())
+	if usageResult := gjson.Get(data, "response.usage"); usageResult.Exists() {
+		inputTokens := int(usageResult.Get("input_tokens").Int())
+		outputTokens := int(usageResult.Get("output_tokens").Int())
+		cacheReadTokens := int(usageResult.Get("input_tokens_details.cached_tokens").Int())
+		reasoningTokens := int(usageResult.Get("output_tokens_details.reasoning_tokens").Int())
+		if cacheReadTokens > inputTokens {
+			cacheReadTokens = inputTokens
+		}
+		// Responses usage.input_tokens 含 cached_tokens;下游把两者分开计价,这里先拆成未缓存输入+缓存读取。
+		usage.InputTokens = inputTokens - cacheReadTokens
+		usage.OutputTokens = outputTokens
+		usage.CacheReadTokens = cacheReadTokens
+		usage.ReasoningTokens = reasoningTokens
+	}
 	// service_tier 可能在 response.service_tier 或 response.usage.service_tier,两路径都尝试
 	for _, path := range []string{"response.service_tier", "response.usage.service_tier"} {
 		if rawTier := gjson.Get(data, path).String(); strings.TrimSpace(rawTier) != "" {
@@ -1317,26 +1327,28 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 		return
 	}
 
-	// 取最大值（流式响应中后续 chunk 包含前面的累计值）
-	if v := int(usage.Get("promptTokenCount").Int()); v > reqLog.InputTokens {
-		reqLog.InputTokens = v
+	promptTokens := int(usage.Get("promptTokenCount").Int())
+	if usage.Get("promptTokenCount").Exists() || usage.Get("cachedContentTokenCount").Exists() {
+		cacheReadTokens := int(usage.Get("cachedContentTokenCount").Int())
+		if cacheReadTokens > promptTokens {
+			cacheReadTokens = promptTokens
+		}
+		reqLog.InputTokens = promptTokens - cacheReadTokens
+		reqLog.CacheReadTokens = cacheReadTokens
 	}
-	if v := int(usage.Get("candidatesTokenCount").Int()); v > reqLog.OutputTokens {
-		reqLog.OutputTokens = v
+	if v := usage.Get("candidatesTokenCount"); v.Exists() {
+		reqLog.OutputTokens = int(v.Int())
 	}
-	if v := int(usage.Get("cachedContentTokenCount").Int()); v > reqLog.CacheReadTokens {
-		reqLog.CacheReadTokens = v
-	}
-	// Gemini thinking/reasoning tokens (thoughtsTokenCount)
+	// thinking/reasoning tokens (thoughtsTokenCount)
 	// 参考: https://ai.google.dev/gemini-api/docs/thinking
-	if v := int(usage.Get("thoughtsTokenCount").Int()); v > reqLog.ReasoningTokens {
-		reqLog.ReasoningTokens = v
+	if v := usage.Get("thoughtsTokenCount"); v.Exists() {
+		reqLog.ReasoningTokens = int(v.Int())
 	}
 
 	// 若仅提供 totalTokenCount，按 total - input 估算输出 token
 	total := usage.Get("totalTokenCount").Int()
-	if total > 0 && reqLog.OutputTokens == 0 && reqLog.InputTokens > 0 && reqLog.InputTokens < int(total) {
-		reqLog.OutputTokens = int(total) - reqLog.InputTokens
+	if total > 0 && reqLog.OutputTokens == 0 && promptTokens > 0 && promptTokens < int(total) {
+		reqLog.OutputTokens = int(total) - promptTokens
 	}
 }
 

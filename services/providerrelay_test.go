@@ -7,6 +7,187 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestResponseUsageSnapshotIsNotAccumulated(t *testing.T) {
+	payload := `{
+		"type": "response.completed",
+		"response": {
+			"usage": {
+				"input_tokens": 100,
+				"output_tokens": 20,
+				"input_tokens_details": {"cached_tokens": 30},
+				"output_tokens_details": {"reasoning_tokens": 4}
+			}
+		}
+	}`
+	usage := &ReqeustLog{}
+	hook := ReqeustLogHook(nil, "co"+"dex", usage)
+
+	hook([]byte(payload))
+	hook([]byte(payload))
+
+	if usage.InputTokens != 70 {
+		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
+	}
+	if usage.OutputTokens != 20 {
+		t.Fatalf("OutputTokens=%d, want 20", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 30 {
+		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)
+	}
+	if usage.ReasoningTokens != 4 {
+		t.Fatalf("ReasoningTokens=%d, want 4", usage.ReasoningTokens)
+	}
+}
+
+func TestResponseUsageSeparatesCachedInputTokens(t *testing.T) {
+	payload := `{
+		"type": "response.completed",
+		"response": {
+			"usage": {
+				"input_tokens": 100,
+				"output_tokens": 20,
+				"input_tokens_details": {"cached_tokens": 30},
+				"output_tokens_details": {"reasoning_tokens": 4}
+			}
+		}
+	}`
+	usage := &ReqeustLog{}
+	hook := ReqeustLogHook(nil, "co"+"dex", usage)
+
+	hook([]byte(payload))
+
+	if usage.InputTokens != 70 {
+		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
+	}
+	if usage.CacheReadTokens != 30 {
+		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)
+	}
+}
+
+func TestResponseUsageLatestSnapshotCanReduceUncachedInput(t *testing.T) {
+	firstPayload := `{
+		"type": "response.in_progress",
+		"response": {
+			"usage": {
+				"input_tokens": 100,
+				"output_tokens": 10
+			}
+		}
+	}`
+	finalPayload := `{
+		"type": "response.completed",
+		"response": {
+			"usage": {
+				"input_tokens": 100,
+				"output_tokens": 20,
+				"input_tokens_details": {"cached_tokens": 30},
+				"output_tokens_details": {"reasoning_tokens": 4}
+			}
+		}
+	}`
+	usage := &ReqeustLog{}
+	hook := ReqeustLogHook(nil, "co"+"dex", usage)
+
+	hook([]byte(firstPayload))
+	hook([]byte(finalPayload))
+
+	if usage.InputTokens != 70 {
+		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
+	}
+	if usage.OutputTokens != 20 {
+		t.Fatalf("OutputTokens=%d, want 20", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 30 {
+		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)
+	}
+	if usage.ReasoningTokens != 4 {
+		t.Fatalf("ReasoningTokens=%d, want 4", usage.ReasoningTokens)
+	}
+}
+
+func TestUsageMetadataSeparatesCachedPromptTokens(t *testing.T) {
+	payload := `{
+		"usageMetadata": {
+			"promptTokenCount": 100,
+			"candidatesTokenCount": 20,
+			"cachedContentTokenCount": 30,
+			"thoughtsTokenCount": 4
+		}
+	}`
+	usage := &ReqeustLog{}
+	hook := ReqeustLogHook(nil, "ge"+"mini", usage)
+
+	hook([]byte(payload))
+
+	if usage.InputTokens != 70 {
+		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
+	}
+	if usage.OutputTokens != 20 {
+		t.Fatalf("OutputTokens=%d, want 20", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 30 {
+		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)
+	}
+	if usage.ReasoningTokens != 4 {
+		t.Fatalf("ReasoningTokens=%d, want 4", usage.ReasoningTokens)
+	}
+}
+
+func TestUsageMetadataLatestSnapshotCanReduceUncachedPrompt(t *testing.T) {
+	firstPayload := `{
+		"usageMetadata": {
+			"promptTokenCount": 100,
+			"candidatesTokenCount": 10
+		}
+	}`
+	finalPayload := `{
+		"usageMetadata": {
+			"promptTokenCount": 100,
+			"candidatesTokenCount": 20,
+			"cachedContentTokenCount": 30,
+			"thoughtsTokenCount": 4
+		}
+	}`
+	usage := &ReqeustLog{}
+	hook := ReqeustLogHook(nil, "ge"+"mini", usage)
+
+	hook([]byte(firstPayload))
+	hook([]byte(finalPayload))
+
+	if usage.InputTokens != 70 {
+		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
+	}
+	if usage.OutputTokens != 20 {
+		t.Fatalf("OutputTokens=%d, want 20", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 30 {
+		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)
+	}
+	if usage.ReasoningTokens != 4 {
+		t.Fatalf("ReasoningTokens=%d, want 4", usage.ReasoningTokens)
+	}
+}
+
+func TestProtocolConvertedUsageSeparatesCachedPromptTokens(t *testing.T) {
+	converter := NewOpenAIToAnthropicSSEConverter("model-x")
+	usage := &ReqeustLog{}
+	hook := protocolConvertHook(converter, "x", usage)
+
+	hook([]byte(`data: {"choices":[{"delta":{"content":"ok"}}]}`))
+	hook([]byte(`data: {"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":30}}}`))
+	hook([]byte(`data: [DONE]`))
+
+	if usage.InputTokens != 70 {
+		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
+	}
+	if usage.OutputTokens != 20 {
+		t.Fatalf("OutputTokens=%d, want 20", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 30 {
+		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)
+	}
+}
+
 // ==================== ReplaceModelInRequestBody 测试 ====================
 
 func TestReplaceModelInRequestBody(t *testing.T) {
@@ -129,19 +310,19 @@ func TestModelMappingEndToEnd(t *testing.T) {
 	provider := Provider{
 		Name: "OpenRouter",
 		SupportedModels: map[string]bool{
-			"anthropic/claude-sonnet-4":     true,
-			"anthropic/claude-opus-4":       true,
-			"openai/gpt-4":                  true,
-			"google/gemini-pro":             true,
-			"meta-llama/llama-3.1-405b":     true,
-			"anthropic/claude-3.5-sonnet":   true,
-			"anthropic/claude-3.5-haiku":    true,
+			"anthropic/claude-sonnet-4":   true,
+			"anthropic/claude-opus-4":     true,
+			"openai/gpt-4":                true,
+			"google/gemini-pro":           true,
+			"meta-llama/llama-3.1-405b":   true,
+			"anthropic/claude-3.5-sonnet": true,
+			"anthropic/claude-3.5-haiku":  true,
 		},
 		ModelMapping: map[string]string{
-			"claude-*":                     "anthropic/claude-*",
-			"gpt-*":                        "openai/gpt-*",
-			"gemini-*":                     "google/gemini-*",
-			"llama-*":                      "meta-llama/llama-*",
+			"claude-*": "anthropic/claude-*",
+			"gpt-*":    "openai/gpt-*",
+			"gemini-*": "google/gemini-*",
+			"llama-*":  "meta-llama/llama-*",
 		},
 	}
 

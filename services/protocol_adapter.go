@@ -237,7 +237,8 @@ type OpenAIToAnthropicSSEConverter struct {
 	finishReason        string // 捕获的 finish_reason
 	inputTokens         int64  // 捕获的 input tokens
 	outputTokens        int64  // 捕获的 output tokens
-	usageCaptured       bool   // 是否已捕获 usage
+	cacheReadTokens     int64
+	usageCaptured       bool // 是否已捕获 usage
 }
 
 // NewOpenAIToAnthropicSSEConverter 创建新的 SSE 转换器
@@ -282,7 +283,13 @@ func (c *OpenAIToAnthropicSSEConverter) ProcessLine(line string) string {
 
 	// 提取 usage（stream_options.include_usage 开启时）
 	if usage := parsed.Get("usage"); usage.Exists() && !c.usageCaptured {
-		c.inputTokens = usage.Get("prompt_tokens").Int()
+		promptTokens := usage.Get("prompt_tokens").Int()
+		cachedTokens := usage.Get("prompt_tokens_details.cached_tokens").Int()
+		if cachedTokens > promptTokens {
+			cachedTokens = promptTokens
+		}
+		c.inputTokens = promptTokens - cachedTokens
+		c.cacheReadTokens = cachedTokens
 		c.outputTokens = usage.Get("completion_tokens").Int()
 		c.usageCaptured = true
 	}
@@ -416,8 +423,9 @@ func (c *OpenAIToAnthropicSSEConverter) outputStopEvents() string {
 			"stop_sequence": nil,
 		},
 		"usage": map[string]interface{}{
-			"input_tokens":  c.inputTokens,
-			"output_tokens": c.outputTokens,
+			"input_tokens":            c.inputTokens,
+			"output_tokens":           c.outputTokens,
+			"cache_read_input_tokens": c.cacheReadTokens,
 		},
 	}
 	msgDeltaJSON, _ := json.Marshal(msgDelta)
