@@ -1352,6 +1352,10 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 	}
 }
 
+// geminiClientAbortMsg 标记 Gemini 转发中"客户端主动断开"的错误信息,
+// 调用方据此跳过 RecordFailure(与 Claude/Codex 的 errClientAbort 语义对齐)。
+const geminiClientAbortMsg = "client aborted"
+
 // streamGeminiResponseWithHook 流式传输 Gemini 响应并通过 Hook 提取 token 用量
 // 【修复】维护跨 chunk 缓冲，确保完整 SSE 事件解析
 // Gemini SSE 格式: "data: {json}\n\n" 或 "data: [DONE]\n\n"
@@ -1363,9 +1367,10 @@ func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *
 		n, err := body.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
-			// 写入客户端（优先保证数据传输）
+			// 写入客户端（优先保证数据传输）；写客户端失败=客户端主动断开,
+			// 用 errClientAbort 标记,避免被当作供应商故障计入拉黑
 			if _, writeErr := writer.Write(chunk); writeErr != nil {
-				return writeErr
+				return fmt.Errorf("%w: %v", errClientAbort, writeErr)
 			}
 			// 如果是 http.Flusher，立即刷新
 			if flusher, ok := writer.(http.Flusher); ok {
@@ -1642,8 +1647,18 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 						// 【关键修复】如果响应已写入客户端，不能重试或降级，直接返回
 						if responseWritten {
+							if errMsg == geminiClientAbortMsg {
+								fmt.Printf("[Gemini] ℹ️ 客户端中断: %s | 不计入供应商失败\n", provider.Name)
+								return
+							}
 							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errMsg)
 							_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+							return
+						}
+
+						// 客户端已取消:停止全部尝试,不计供应商失败
+						if errMsg == geminiClientAbortMsg {
+							fmt.Printf("[Gemini] ℹ️ 客户端取消请求,停止尝试\n")
 							return
 						}
 
@@ -1725,8 +1740,18 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 				// 【关键修复】如果响应已写入客户端，不能降级到其他 provider，直接返回
 				if responseWritten {
+					if errMsg == geminiClientAbortMsg {
+						fmt.Printf("[Gemini] ℹ️ 客户端中断: %s | 不计入供应商失败\n", provider.Name)
+						return
+					}
 					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errMsg)
 					_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+					return
+				}
+
+				// 客户端已取消:停止全部尝试,不计供应商失败
+				if errMsg == geminiClientAbortMsg {
+					fmt.Printf("[Gemini] ℹ️ 客户端取消请求,停止尝试\n")
 					return
 				}
 
@@ -1803,8 +1828,9 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		requestLog.Model = provider.Model
 	}
 
-	// 创建 HTTP 请求
-	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(bodyBytes))
+	// 创建 HTTP 请求（绑定客户端 context:客户端取消时立即释放上游连接,
+	// 配合 32h 长超时不至于让被放弃的请求占用资源）
+	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return false, fmt.Sprintf("创建请求失败: %v", err), false
 	}
@@ -1821,12 +1847,18 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		req.Header.Set("x-goog-api-key", provider.APIKey)
 	}
 
-	// 发送请求
-	client := &http.Client{Timeout: 300 * time.Second}
+	// 发送请求（与 Claude/Codex 转发同量级的超长超时，适配长推理/长输出任务；
+	// 原 300 秒会把 Gemini 长任务腰斩并误计为供应商失败）
+	client := &http.Client{Timeout: 32 * time.Hour}
 	resp, err := client.Do(req)
 	providerDuration := time.Since(providerStart).Seconds()
 
 	if err != nil {
+		// 客户端取消(context 已终止)不是供应商故障:立即止损,不计失败
+		if c.Request.Context().Err() != nil {
+			fmt.Printf("[Gemini]   ℹ️ 客户端已取消请求: %s | 耗时: %.2fs\n", provider.Name, providerDuration)
+			return false, geminiClientAbortMsg, false
+		}
 		fmt.Printf("[Gemini]   ✗ 失败: %s | 错误: %v | 耗时: %.2fs\n", provider.Name, err, providerDuration)
 		return false, fmt.Sprintf("请求失败: %v", err), false
 	}
@@ -1857,6 +1889,11 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		// 【重要】从 Flush() 开始，响应头已写入客户端，任何失败都不能重试
 		copyErr := streamGeminiResponseWithHook(resp.Body, c.Writer, requestLog)
 		if copyErr != nil {
+			// 客户端主动断开（如用户取消）不是供应商故障
+			if errors.Is(copyErr, errClientAbort) {
+				fmt.Printf("[Gemini]   ℹ️ 客户端中断流式连接: %s\n", provider.Name)
+				return false, geminiClientAbortMsg, true
+			}
 			fmt.Printf("[Gemini]   ⚠️ 流式传输中断: %s | 错误: %v\n", provider.Name, copyErr)
 			// 流式传输中断：已写入部分响应，客户端会收到不完整数据
 			return false, fmt.Sprintf("流式传输中断: %v", copyErr), true
@@ -2316,91 +2353,95 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 	}
 	sort.Ints(levels)
 
-	// 尝试第一个可用的 provider（按 Level 升序）
-	var selectedProvider *Provider
+	// 展平候选（Level 升序、组内保持用户顺序），逐个尝试直到成功——
+	// 与聊天转发一致的多 Provider 容错，避免首个供应商临时故障导致整体失败
+	ordered := make([]Provider, 0, len(activeProviders))
 	for _, level := range levels {
-		if len(levelGroups[level]) > 0 {
-			p := levelGroups[level][0]
-			selectedProvider = &p
-			break
-		}
+		ordered = append(ordered, levelGroups[level]...)
 	}
 
-	if selectedProvider == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
-		return fmt.Errorf("no providers available after filtering")
-	}
-
-	fmt.Printf("[%s] 使用 Provider: %s | URL: %s\n", logPrefix, selectedProvider.Name, selectedProvider.APIURL)
-
-	// 构建目标 URL（拼接 provider 的 APIURL 和 /v1/models）
-	targetURL := joinURL(selectedProvider.APIURL, "/v1/models")
-
-	// 创建 HTTP 请求
-	req, err := http.NewRequest("GET", targetURL, nil)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建请求失败: %v", err)})
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// 复制客户端请求头
-	for key, values := range c.Request.Header {
-		for _, value := range values {
-			req.Header.Add(key, value)
-		}
-	}
-
-	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-	authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
-	switch authType {
-	case "x-api-key":
-		req.Header.Set("x-api-key", selectedProvider.APIKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-	case "", "bearer":
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
-	default:
-		headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
-		if headerName == "" || strings.EqualFold(headerName, "custom") {
-			headerName = "Authorization"
-		}
-		req.Header.Set(headerName, selectedProvider.APIKey)
-	}
-
-	// 设置默认 Accept 头
-	if req.Header.Get("Accept") == "" {
-		req.Header.Set("Accept", "application/json")
-	}
-
-	// 发送请求
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("[%s] ✗ 请求失败: %s | 错误: %v\n", logPrefix, selectedProvider.Name, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("请求失败: %v", err)})
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for i := range ordered {
+		selectedProvider := &ordered[i]
+		fmt.Printf("[%s] 使用 Provider: %s | URL: %s\n", logPrefix, selectedProvider.Name, selectedProvider.APIURL)
 
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("[%s] ✗ 读取响应失败: %s | 错误: %v\n", logPrefix, selectedProvider.Name, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("读取响应失败: %v", err)})
-		return fmt.Errorf("failed to read response: %w", err)
-	}
+		// 构建目标 URL（拼接 provider 的 APIURL 和 /v1/models）
+		targetURL := joinURL(selectedProvider.APIURL, "/v1/models")
 
-	// 复制响应头
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Header(key, value)
+		req, err := http.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create request: %w", err)
+			continue
 		}
+
+		// 复制客户端请求头
+		for key, values := range c.Request.Header {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
+
+		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
+		authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
+		switch authType {
+		case "x-api-key":
+			req.Header.Set("x-api-key", selectedProvider.APIKey)
+			req.Header.Set("anthropic-version", "2023-06-01")
+		case "", "bearer":
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+		default:
+			headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
+			if headerName == "" || strings.EqualFold(headerName, "custom") {
+				headerName = "Authorization"
+			}
+			req.Header.Set(headerName, selectedProvider.APIKey)
+		}
+
+		// 设置默认 Accept 头
+		if req.Header.Get("Accept") == "" {
+			req.Header.Set("Accept", "application/json")
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("[%s] ✗ 请求失败: %s | 错误: %v | 尝试下一个\n", logPrefix, selectedProvider.Name, err)
+			lastErr = fmt.Errorf("request failed: %w", err)
+			continue
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			fmt.Printf("[%s] ✗ 读取响应失败: %s | 错误: %v | 尝试下一个\n", logPrefix, selectedProvider.Name, readErr)
+			lastErr = fmt.Errorf("failed to read response: %w", readErr)
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			fmt.Printf("[%s] ✗ HTTP %d: %s | 尝试下一个\n", logPrefix, resp.StatusCode, selectedProvider.Name)
+			lastErr = fmt.Errorf("provider %s HTTP %d", selectedProvider.Name, resp.StatusCode)
+			continue
+		}
+
+		// 复制响应头
+		for key, values := range resp.Header {
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
+
+		fmt.Printf("[%s] ✓ 成功: %s | HTTP %d\n", logPrefix, selectedProvider.Name, resp.StatusCode)
+		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+		return nil
 	}
 
-	fmt.Printf("[%s] ✓ 成功: %s | HTTP %d\n", logPrefix, selectedProvider.Name, resp.StatusCode)
-
-	// 返回响应
-	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
-	return nil
+	fmt.Printf("[%s] ✗ 所有 %d 个 provider 均失败 | 最后错误: %v\n", logPrefix, len(ordered), lastErr)
+	c.JSON(http.StatusBadGateway, gin.H{
+		"error":   "all providers failed for /v1/models",
+		"details": fmt.Sprintf("%v", lastErr),
+	})
+	return fmt.Errorf("all providers failed: %v", lastErr)
 }
 
 // modelsHandler 处理 /v1/models 请求（OpenAI-compatible API）

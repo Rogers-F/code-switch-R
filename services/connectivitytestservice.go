@@ -34,6 +34,8 @@ const (
 	SubStatusInvalidRequest  = "invalid_request"
 	SubStatusNetworkError    = "network_error"
 	SubStatusContentMismatch = "content_mismatch"
+	// SubStatusModelUnsupported 测试模型不受该供应商支持(非网络故障,不参与自动拉黑)
+	SubStatusModelUnsupported = "model_unsupported"
 )
 
 // ConnectivityResult 连通性测试结果
@@ -54,6 +56,7 @@ type ConnectivityTestService struct {
 	providerService  *ProviderService
 	blacklistService *BlacklistService
 	settingsService  *SettingsService
+	policy           *DefaultModelPolicy
 
 	mu      sync.RWMutex
 	results map[string]map[int64]*ConnectivityResult // platform -> providerID -> result
@@ -70,11 +73,13 @@ func NewConnectivityTestService(
 	providerService *ProviderService,
 	blacklistService *BlacklistService,
 	settingsService *SettingsService,
+	policy *DefaultModelPolicy,
 ) *ConnectivityTestService {
 	return &ConnectivityTestService{
 		providerService:  providerService,
 		blacklistService: blacklistService,
 		settingsService:  settingsService,
+		policy:           policy,
 		results: map[string]map[int64]*ConnectivityResult{
 			"claude": {},
 			"codex":  {},
@@ -183,7 +188,7 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 	}
 
 	// 第一阶段：HTTP 状态码 + 延迟判定
-	result.Status, result.SubStatus = cts.determineStatus(resp.StatusCode, latencyMs, 5000)
+	result.Status, result.SubStatus = cts.determineStatus(resp.StatusCode, latencyMs, 5000, body)
 
 	// 第二阶段：内容校验（仅对成功响应）
 	if result.Status != StatusUnavailable && contentField != "" {
@@ -233,13 +238,34 @@ func (cts *ConnectivityTestService) getEffectiveAuthType(provider *Provider, pla
 func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *Provider) ([]byte, string) {
 	model := strings.TrimSpace(provider.ConnectivityTestModel)
 	if model == "" {
-		// 仅 Claude 平台提供默认模型，其他平台需用户自行配置
-		if strings.ToLower(platform) == "claude" {
-			model = "claude-haiku-4-5-20251001"
-		} else {
+		// Claude/Codex 提供默认探测模型(动态解析+白名单交集);
+		// Gemini 平台默认端点为 OpenAI 兼容格式,原生 Google 端点形态各异,仍需用户显式配置
+		var fallback string
+		switch strings.ToLower(platform) {
+		case "claude":
+			fallback = FallbackClaudeProbeModel
+		case "codex":
+			fallback = FallbackCodexProbeModel
+		default:
 			return nil, ""
 		}
+		model = fallback
+		if cts.policy != nil {
+			// 候选链:动态解析值 → 静态兜底;声明了白名单的供应商取其支持的首个,
+			// 全不支持时仍用动态首选(配合模型拒绝分类,不会误拉黑)
+			if candidates := cts.policy.ProbeCandidates(platform); len(candidates) > 0 {
+				model = candidates[0]
+				for _, candidate := range candidates {
+					if provider.IsModelSupported(candidate) {
+						model = candidate
+						break
+					}
+				}
+			}
+		}
 	}
+	// 与真实转发一致:应用供应商的模型映射后再发起探测
+	model = provider.GetEffectiveModel(model)
 
 	// 获取有效端点（含平台默认值）
 	endpoint := strings.ToLower(cts.getEffectiveEndpoint(provider, platform))
@@ -257,17 +283,15 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 		return data, "content"
 	}
 
-	// Codex 格式: /responses
+	// Codex /responses 走 OpenAI Responses 协议(原先误发 Chat 体必然 400)
 	if strings.Contains(endpoint, "/responses") {
 		reqBody := map[string]interface{}{
-			"model":      model,
-			"max_tokens": 1,
-			"messages": []map[string]string{
-				{"role": "user", "content": "hi"},
-			},
+			"model":             model,
+			"input":             "hi",
+			"max_output_tokens": 16,
 		}
 		data, _ := json.Marshal(reqBody)
-		return data, "choices"
+		return data, "output"
 	}
 
 	// 默认 OpenAI 格式: /v1/chat/completions
@@ -283,7 +307,7 @@ func (cts *ConnectivityTestService) buildTestRequest(platform string, provider *
 }
 
 // determineStatus 根据 HTTP 状态码和延迟判定状态
-func (cts *ConnectivityTestService) determineStatus(statusCode, latencyMs, slowThresholdMs int) (int, string) {
+func (cts *ConnectivityTestService) determineStatus(statusCode, latencyMs, slowThresholdMs int, body []byte) (int, string) {
 	// 2xx = 成功
 	if statusCode >= 200 && statusCode < 300 {
 		if slowThresholdMs > 0 && latencyMs > slowThresholdMs {
@@ -298,7 +322,14 @@ func (cts *ConnectivityTestService) determineStatus(statusCode, latencyMs, slowT
 	}
 
 	// 特殊 4xx
-	if statusCode == 400 {
+	if statusCode == 400 || statusCode == 404 {
+		// 模型拒绝(不存在/不支持)不代表供应商网络故障,单独归类避免误拉黑
+		if isModelRejectionBody(body) {
+			return StatusUnavailable, SubStatusModelUnsupported
+		}
+		if statusCode == 404 {
+			return StatusUnavailable, SubStatusClientError
+		}
 		return StatusUnavailable, SubStatusInvalidRequest
 	}
 	if statusCode == 401 || statusCode == 403 {
@@ -454,6 +485,10 @@ func (cts *ConnectivityTestService) handleBlacklistIntegration(platform, provide
 			log.Printf("[ConnectivityTest] RecordSuccess 失败: %v", err)
 		}
 	case StatusUnavailable:
+		// 模型不受支持 ≠ 网络故障，不累计拉黑
+		if result.SubStatus == SubStatusModelUnsupported {
+			return
+		}
 		// 红色：调用 RecordFailure 累计失败
 		if err := cts.blacklistService.RecordFailure(platform, providerName); err != nil {
 			log.Printf("[ConnectivityTest] RecordFailure 失败: %v", err)

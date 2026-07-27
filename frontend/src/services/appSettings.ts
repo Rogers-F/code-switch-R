@@ -23,6 +23,7 @@ export type AppSettings = {
   budget_forecast_method_codex: string
   auto_start: boolean
   auto_update: boolean
+  auto_sync_models: boolean // 模型/价格数据自动同步开关
   auto_connectivity_test: boolean
   enable_switch_notify: boolean // 供应商切换通知开关
   enable_round_robin: boolean   // 同 Level 轮询负载均衡开关
@@ -51,7 +52,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   budget_forecast_method_codex: 'cycle',
   auto_start: false,
   auto_update: true,
-  auto_connectivity_test: false,
+  auto_sync_models: true, // 默认开启模型价格自动同步
+  auto_connectivity_test: true, // 与 Go 端 defaultSettings 保持一致(开箱默认开启)
+
   enable_switch_notify: true,  // 默认开启
   enable_round_robin: false,   // 默认关闭轮询
 }

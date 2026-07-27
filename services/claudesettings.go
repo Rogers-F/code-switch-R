@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const (
@@ -23,6 +24,9 @@ type ClaudeProxyStatus struct {
 
 type ClaudeSettingsService struct {
 	relayAddr string
+	// mu 串行化代理开关/单供应商应用的"读配置→记基线→写回"整段,
+	// 防止并发操作把代理值误存为用户原始基线导致原始 API Key 丢失
+	mu sync.Mutex
 }
 
 func NewClaudeSettingsService(relayAddr string) *ClaudeSettingsService {
@@ -67,6 +71,8 @@ func (css *ClaudeSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
 }
 
 func (css *ClaudeSettingsService) EnableProxy() error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
 	settingsPath, backupPath, err := css.paths()
 	if err != nil {
 		return err
@@ -154,6 +160,8 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 }
 
 func (css *ClaudeSettingsService) DisableProxy() error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
 	settingsPath, _, err := css.paths()
 	if err != nil {
 		return err
@@ -290,6 +298,8 @@ func anyToString(v any) string {
 // ApplySingleProvider 直连应用单一供应商（仅在代理关闭时可用）
 // 将指定 provider 的配置直接写入 Claude Code 的 settings.json
 func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
 	// 1. 检查代理状态：代理启用时禁止直连应用
 	proxyStatus, err := css.ProxyStatus()
 	if err != nil {

@@ -1,0 +1,2230 @@
+{
+  "doc": "https://platform.openai.com/docs/models",
+  "env": [
+    "OPENAI_API_KEY"
+  ],
+  "iconURL": "https://models.dev/logos/openai.svg",
+  "id": "openai",
+  "lobeIcon": "OpenAI.Color",
+  "models": {
+    "chatgpt-image-latest": {
+      "attachment": true,
+      "description": "Image model for prompt-driven generation, editing, and visual design workflows",
+      "family": "gpt-image",
+      "id": "chatgpt-image-latest",
+      "last_updated": "2025-12-16",
+      "limit": {
+        "context": 0,
+        "input": 0,
+        "output": 0
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "image"
+        ]
+      },
+      "name": "chatgpt-image-latest",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2025-12-16",
+      "temperature": false,
+      "tool_call": false
+    },
+    "dall-e-2": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.01,
+        "cache_write": 0.05,
+        "input": 0.02,
+        "output": 0.1
+      },
+      "description": "An AI model that generates images from textual descriptions.",
+      "id": "dall-e-2",
+      "knowledge": "2021-04",
+      "last_updated": "2022-06-15",
+      "limit": {
+        "context": 1024,
+        "output": 1
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "image"
+        ]
+      },
+      "name": "DALL-E 2",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2022-04-06",
+      "temperature": false,
+      "tool_call": true
+    },
+    "dall-e-3": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.01,
+        "cache_write": 0.05,
+        "input": 0.03,
+        "output": 0.15
+      },
+      "description": "The latest version of DALL-E for generating images from text.",
+      "id": "dall-e-3",
+      "knowledge": "2024-04",
+      "last_updated": "2024-08-15",
+      "limit": {
+        "context": 2048,
+        "output": 1
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "image"
+        ]
+      },
+      "name": "DALL-E 3",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2024-03-01",
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-3.5-turbo": {
+      "attachment": false,
+      "cost": {
+        "cache_read": 0,
+        "input": 0.5,
+        "output": 1.5
+      },
+      "description": "Compact GPT model for low-latency assistance and high-volume workloads",
+      "family": "gpt",
+      "id": "gpt-3.5-turbo",
+      "knowledge": "2021-09-01",
+      "last_updated": "2023-11-06",
+      "limit": {
+        "context": 16385,
+        "output": 4096
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-3.5-turbo",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2023-03-01",
+      "status": "deprecated",
+      "structured_output": false,
+      "temperature": true,
+      "tool_call": false
+    },
+    "gpt-4": {
+      "attachment": true,
+      "cost": {
+        "input": 30,
+        "output": 60
+      },
+      "description": "GPT model for general reasoning, writing, coding, and tool-assisted tasks",
+      "family": "gpt",
+      "id": "gpt-4",
+      "knowledge": "2023-11",
+      "last_updated": "2024-04-09",
+      "limit": {
+        "context": 8192,
+        "output": 8192
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2023-11-06",
+      "status": "deprecated",
+      "structured_output": false,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4-turbo": {
+      "attachment": true,
+      "cost": {
+        "input": 10,
+        "output": 30
+      },
+      "description": "Compact GPT model for low-latency assistance and high-volume workloads",
+      "family": "gpt",
+      "id": "gpt-4-turbo",
+      "knowledge": "2023-12",
+      "last_updated": "2024-04-09",
+      "limit": {
+        "context": 128000,
+        "output": 4096
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4 Turbo",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2023-11-06",
+      "status": "deprecated",
+      "structured_output": false,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4.1": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "input": 2,
+        "output": 8
+      },
+      "description": "Long-lived GPT workhorse for coding, instruction following, and production apps",
+      "family": "gpt",
+      "id": "gpt-4.1",
+      "knowledge": "2024-04",
+      "last_updated": "2025-04-14",
+      "limit": {
+        "context": 1047576,
+        "output": 32768
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4.1",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2025-04-14",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4.1-mini": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.1,
+        "input": 0.4,
+        "output": 1.6
+      },
+      "description": "Affordable GPT-4.1 lane for fast coding help and structured extraction",
+      "family": "gpt-mini",
+      "id": "gpt-4.1-mini",
+      "knowledge": "2024-04",
+      "last_updated": "2025-04-14",
+      "limit": {
+        "context": 1047576,
+        "output": 32768
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4.1 mini",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2025-04-14",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4.1-nano": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.025,
+        "input": 0.1,
+        "output": 0.4
+      },
+      "description": "Tiny GPT-4.1 option for classification, routing, and very high-volume tasks",
+      "family": "gpt-nano",
+      "id": "gpt-4.1-nano",
+      "knowledge": "2024-04",
+      "last_updated": "2025-04-14",
+      "limit": {
+        "context": 1047576,
+        "output": 32768
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4.1 nano",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2025-04-14",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4o": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 1.25,
+        "input": 2.5,
+        "output": 10
+      },
+      "description": "Omni-era GPT for multimodal chat, practical coding, and general assistants",
+      "family": "gpt",
+      "id": "gpt-4o",
+      "knowledge": "2023-09",
+      "last_updated": "2024-08-06",
+      "limit": {
+        "context": 128000,
+        "output": 16384
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4o",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2024-05-13",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4o-2024-05-13": {
+      "attachment": true,
+      "cost": {
+        "input": 5,
+        "output": 15
+      },
+      "description": "GPT model for general reasoning, writing, coding, and tool-assisted tasks",
+      "family": "gpt",
+      "id": "gpt-4o-2024-05-13",
+      "knowledge": "2023-09",
+      "last_updated": "2024-05-13",
+      "limit": {
+        "context": 128000,
+        "output": 4096
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4o (2024-05-13)",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2024-05-13",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4o-2024-08-06": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 1.25,
+        "input": 2.5,
+        "output": 10
+      },
+      "description": "GPT model for general reasoning, writing, coding, and tool-assisted tasks",
+      "family": "gpt",
+      "id": "gpt-4o-2024-08-06",
+      "knowledge": "2023-09",
+      "last_updated": "2024-08-06",
+      "limit": {
+        "context": 128000,
+        "output": 16384
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4o (2024-08-06)",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2024-08-06",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4o-2024-11-20": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 1.25,
+        "input": 2.5,
+        "output": 10
+      },
+      "description": "GPT model for general reasoning, writing, coding, and tool-assisted tasks",
+      "family": "gpt",
+      "id": "gpt-4o-2024-11-20",
+      "knowledge": "2023-09",
+      "last_updated": "2024-11-20",
+      "limit": {
+        "context": 128000,
+        "output": 16384
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4o (2024-11-20)",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2024-11-20",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-4o-mini": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.075,
+        "input": 0.15,
+        "output": 0.6
+      },
+      "description": "Small omni GPT for cheap multimodal assistance and production-scale traffic",
+      "family": "gpt-mini",
+      "id": "gpt-4o-mini",
+      "knowledge": "2023-09",
+      "last_updated": "2024-07-18",
+      "limit": {
+        "context": 128000,
+        "output": 16384
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-4o mini",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2024-07-18",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.125,
+        "input": 1.25,
+        "output": 10
+      },
+      "description": "Original GPT-5 workhorse for reasoning, coding, writing, and tool workflows",
+      "family": "gpt",
+      "id": "gpt-5",
+      "knowledge": "2024-09-30",
+      "last_updated": "2025-08-07",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-08-07",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5-mini": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.025,
+        "input": 0.25,
+        "output": 2
+      },
+      "description": "Small GPT-5 for responsive agents, coding help, and everyday automation",
+      "family": "gpt-mini",
+      "id": "gpt-5-mini",
+      "knowledge": "2024-05-30",
+      "last_updated": "2025-08-07",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5 Mini",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-08-07",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5-nano": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.005,
+        "input": 0.05,
+        "output": 0.4
+      },
+      "description": "Tiny GPT-5 lane for routing, extraction, classification, and bulk jobs",
+      "family": "gpt-nano",
+      "id": "gpt-5-nano",
+      "knowledge": "2024-05-30",
+      "last_updated": "2025-08-07",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5 Nano",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-08-07",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5-pro": {
+      "attachment": true,
+      "cost": {
+        "input": 15,
+        "output": 120
+      },
+      "description": "Higher-accuracy GPT-5 tier for tough analysis, coding reviews, and planning",
+      "family": "gpt-pro",
+      "id": "gpt-5-pro",
+      "knowledge": "2024-09-30",
+      "last_updated": "2025-10-06",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 272000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5 Pro",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-10-06",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.1": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.125,
+        "input": 1.25,
+        "output": 10
+      },
+      "description": "Sharper GPT-5 generation for coding, product work, and tool-assisted tasks",
+      "family": "gpt",
+      "id": "gpt-5.1",
+      "knowledge": "2024-09-30",
+      "last_updated": "2025-11-13",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.1",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-11-13",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.2": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.175,
+        "input": 1.75,
+        "output": 14
+      },
+      "description": "Reliable GPT generation for broad coding, writing, and tool-assisted product work",
+      "family": "gpt",
+      "id": "gpt-5.2",
+      "knowledge": "2025-08-31",
+      "last_updated": "2025-12-11",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.2",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2025-12-11",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.2-chat-latest": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.175,
+        "input": 1.75,
+        "output": 14
+      },
+      "description": "Chat-tuned GPT model for conversational assistance, writing, and tool workflows",
+      "family": "gpt-codex",
+      "id": "gpt-5.2-chat-latest",
+      "knowledge": "2025-08-31",
+      "last_updated": "2025-12-11",
+      "limit": {
+        "context": 128000,
+        "output": 16384
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.2 Chat",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "medium"
+          ]
+        }
+      ],
+      "release_date": "2025-12-11",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.2-pro": {
+      "attachment": true,
+      "cost": {
+        "input": 21,
+        "output": 168
+      },
+      "description": "Higher-accuracy GPT-5.2 variant for tougher reasoning and review workflows",
+      "family": "gpt-pro",
+      "id": "gpt-5.2-pro",
+      "knowledge": "2025-08-31",
+      "last_updated": "2025-12-11",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.2 Pro",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2025-12-11",
+      "structured_output": false,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.3-chat-latest": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.175,
+        "input": 1.75,
+        "output": 14
+      },
+      "description": "Chat-tuned GPT model for conversational assistance, writing, and tool workflows",
+      "family": "gpt",
+      "id": "gpt-5.3-chat-latest",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-03-03",
+      "limit": {
+        "context": 128000,
+        "output": 16384
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.3 Chat (latest)",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2026-03-03",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-5.3-codex": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.175,
+        "input": 1.75,
+        "output": 14
+      },
+      "description": "Coding-optimized GPT model for repository edits, reviews, and agentic software work",
+      "family": "gpt-codex",
+      "id": "gpt-5.3-codex",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-02-05",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.3 Codex",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-02-05",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.3-codex-spark": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.175,
+        "input": 1.75,
+        "output": 14
+      },
+      "description": "Coding-optimized GPT model for repository edits, reviews, and agentic software work",
+      "family": "gpt-codex-spark",
+      "id": "gpt-5.3-codex-spark",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-02-05",
+      "limit": {
+        "context": 128000,
+        "input": 100000,
+        "output": 32000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.3 Codex Spark",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-02-05",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.4": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.25,
+        "context_over_200k": {
+          "cache_read": 0.5,
+          "input": 5,
+          "output": 22.5
+        },
+        "input": 2.5,
+        "output": 15,
+        "tiers": [
+          {
+            "cache_read": 0.5,
+            "input": 5,
+            "output": 22.5,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "Agent-ready GPT for coding and computer-use workflows at a lower cost",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 0.5,
+              "input": 5,
+              "output": 30
+            },
+            "provider": {
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          }
+        }
+      },
+      "family": "gpt",
+      "id": "gpt-5.4",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-03-05",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.4",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-03-05",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.4-mini": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.075,
+        "input": 0.75,
+        "output": 4.5
+      },
+      "description": "Strong small GPT for coding subagents, quick tool use, and high-volume work",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 0.15,
+              "input": 1.5,
+              "output": 9
+            },
+            "provider": {
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          }
+        }
+      },
+      "family": "gpt-mini",
+      "id": "gpt-5.4-mini",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-03-17",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.4 mini",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-03-17",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.4-nano": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.02,
+        "input": 0.2,
+        "output": 1.25
+      },
+      "description": "Cheapest GPT-5.4 lane for simple routing, extraction, and bulk automation",
+      "family": "gpt-nano",
+      "id": "gpt-5.4-nano",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-03-17",
+      "limit": {
+        "context": 400000,
+        "input": 272000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.4 nano",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-03-17",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.4-pro": {
+      "attachment": true,
+      "cost": {
+        "context_over_200k": {
+          "input": 60,
+          "output": 270
+        },
+        "input": 30,
+        "output": 180,
+        "tiers": [
+          {
+            "input": 60,
+            "output": 270,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "More exact GPT-5.4 tier for demanding professional reasoning and agent tasks",
+      "family": "gpt-pro",
+      "id": "gpt-5.4-pro",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-03-05",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.4 Pro",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-03-05",
+      "structured_output": false,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "context_over_200k": {
+          "cache_read": 1,
+          "input": 10,
+          "output": 45
+        },
+        "input": 5,
+        "output": 30,
+        "tiers": [
+          {
+            "cache_read": 1,
+            "input": 10,
+            "output": 45,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "Default frontier GPT for coding, computer use, research, and knowledge work",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 1.25,
+              "input": 12.5,
+              "output": 75
+            },
+            "provider": {
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          }
+        }
+      },
+      "family": "gpt",
+      "id": "gpt-5.5",
+      "knowledge": "2025-12-01",
+      "last_updated": "2026-04-23",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-04-23",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.5-pro": {
+      "attachment": true,
+      "cost": {
+        "context_over_200k": {
+          "input": 60,
+          "output": 270
+        },
+        "input": 30,
+        "output": 180,
+        "tiers": [
+          {
+            "input": 60,
+            "output": 270,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "Highest-accuracy GPT-5.5 tier for slower, precision-heavy reasoning and coding",
+      "family": "gpt-pro",
+      "id": "gpt-5.5-pro",
+      "knowledge": "2025-12-01",
+      "last_updated": "2026-04-23",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.5 Pro",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-04-23",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.6": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "context_over_200k": {
+          "cache_read": 1,
+          "cache_write": 12.5,
+          "input": 10,
+          "output": 45
+        },
+        "input": 5,
+        "output": 30,
+        "tiers": [
+          {
+            "cache_read": 1,
+            "cache_write": 12.5,
+            "input": 10,
+            "output": 45,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "Frontier GPT-5.6 model for complex professional work, coding, and agentic workflows",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 1,
+              "cache_write": 12.5,
+              "input": 10,
+              "output": 60
+            },
+            "provider": {
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          },
+          "pro": {
+            "provider": {
+              "body": {
+                "reasoning": {
+                  "mode": "pro"
+                }
+              }
+            }
+          }
+        }
+      },
+      "family": "gpt-sol",
+      "id": "gpt-5.6",
+      "knowledge": "2026-02-16",
+      "last_updated": "2026-07-09",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.6",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-07-09",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.6-luna": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.1,
+        "cache_write": 1.25,
+        "context_over_200k": {
+          "cache_read": 0.2,
+          "cache_write": 2.5,
+          "input": 2,
+          "output": 9
+        },
+        "input": 1,
+        "output": 6,
+        "tiers": [
+          {
+            "cache_read": 0.2,
+            "cache_write": 2.5,
+            "input": 2,
+            "output": 9,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "Cost-efficient GPT-5.6 model for fast, high-volume workloads",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 0.2,
+              "cache_write": 2.5,
+              "input": 2,
+              "output": 12
+            },
+            "provider": {
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          },
+          "pro": {
+            "provider": {
+              "body": {
+                "reasoning": {
+                  "mode": "pro"
+                }
+              }
+            }
+          }
+        }
+      },
+      "family": "gpt-luna",
+      "id": "gpt-5.6-luna",
+      "knowledge": "2026-02-16",
+      "last_updated": "2026-07-09",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.6 Luna",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-07-09",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.6-sol": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "context_over_200k": {
+          "cache_read": 1,
+          "cache_write": 12.5,
+          "input": 10,
+          "output": 45
+        },
+        "input": 5,
+        "output": 30,
+        "tiers": [
+          {
+            "cache_read": 1,
+            "cache_write": 12.5,
+            "input": 10,
+            "output": 45,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "Frontier GPT-5.6 model for complex professional work, coding, and agentic workflows",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 1,
+              "cache_write": 12.5,
+              "input": 10,
+              "output": 60
+            },
+            "provider": {
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          },
+          "pro": {
+            "provider": {
+              "body": {
+                "reasoning": {
+                  "mode": "pro"
+                }
+              }
+            }
+          }
+        }
+      },
+      "family": "gpt-sol",
+      "id": "gpt-5.6-sol",
+      "knowledge": "2026-02-16",
+      "last_updated": "2026-07-09",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.6 Sol",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-07-09",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-5.6-terra": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.25,
+        "cache_write": 3.125,
+        "context_over_200k": {
+          "cache_read": 0.5,
+          "cache_write": 6.25,
+          "input": 5,
+          "output": 22.5
+        },
+        "input": 2.5,
+        "output": 15,
+        "tiers": [
+          {
+            "cache_read": 0.5,
+            "cache_write": 6.25,
+            "input": 5,
+            "output": 22.5,
+            "tier": {
+              "size": 272000,
+              "type": "context"
+            }
+          }
+        ]
+      },
+      "description": "Balanced GPT-5.6 model for capable, cost-efficient everyday work",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 0.5,
+              "cache_write": 6.25,
+              "input": 5,
+              "output": 30
+            },
+            "provider": {
+              "body": {
+                "service_tier": "priority"
+              }
+            }
+          },
+          "pro": {
+            "provider": {
+              "body": {
+                "reasoning": {
+                  "mode": "pro"
+                }
+              }
+            }
+          }
+        }
+      },
+      "family": "gpt-terra",
+      "id": "gpt-5.6-terra",
+      "knowledge": "2026-02-16",
+      "last_updated": "2026-07-09",
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "GPT-5.6 Terra",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-07-09",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "gpt-image-1": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.1,
+        "cache_write": 0.6,
+        "input": 10,
+        "output": 20
+      },
+      "description": "An advanced AI model for generating images from textual descriptions.",
+      "family": "gpt-image",
+      "id": "gpt-image-1",
+      "knowledge": "2023-10",
+      "last_updated": "2024-10-01",
+      "limit": {
+        "context": 1000,
+        "input": 0,
+        "output": 512
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "image"
+        ]
+      },
+      "name": "GPT-IMAGE-1",
+      "open_weights": true,
+      "reasoning": true,
+      "release_date": "2024-01-15",
+      "status": "deprecated",
+      "temperature": true,
+      "tool_call": true
+    },
+    "gpt-image-1-mini": {
+      "attachment": true,
+      "description": "Image model for prompt-driven generation, editing, and visual design workflows",
+      "family": "gpt-image",
+      "id": "gpt-image-1-mini",
+      "last_updated": "2025-09-26",
+      "limit": {
+        "context": 0,
+        "input": 0,
+        "output": 0
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "image"
+        ]
+      },
+      "name": "gpt-image-1-mini",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2025-09-26",
+      "temperature": false,
+      "tool_call": false
+    },
+    "gpt-image-1.5": {
+      "attachment": true,
+      "description": "Image model for prompt-driven generation, editing, and visual design workflows",
+      "family": "gpt-image",
+      "id": "gpt-image-1.5",
+      "last_updated": "2025-11-25",
+      "limit": {
+        "context": 0,
+        "input": 0,
+        "output": 0
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "image"
+        ]
+      },
+      "name": "gpt-image-1.5",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2025-11-25",
+      "temperature": false,
+      "tool_call": false
+    },
+    "gpt-image-2": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 1.25,
+        "input": 5,
+        "output": 30
+      },
+      "description": "Image model for prompt-driven generation, editing, and visual design workflows",
+      "family": "gpt-image",
+      "id": "gpt-image-2",
+      "last_updated": "2026-04-21",
+      "limit": {
+        "context": 0,
+        "input": 0,
+        "output": 0
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "image"
+        ]
+      },
+      "name": "gpt-image-2",
+      "open_weights": false,
+      "reasoning": false,
+      "release_date": "2026-04-21",
+      "temperature": false,
+      "tool_call": false
+    },
+    "gpt-realtime-2.1": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.4,
+        "input": 4,
+        "input_audio": 32,
+        "output": 24,
+        "output_audio": 64
+      },
+      "description": "Realtime speech-to-speech model with configurable reasoning, tool use, and robust voice-agent behavior",
+      "family": "gpt",
+      "id": "gpt-realtime-2.1",
+      "knowledge": "2024-09-30",
+      "last_updated": "2026-07-06",
+      "limit": {
+        "context": 128000,
+        "input": 96000,
+        "output": 32000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "audio",
+          "image"
+        ],
+        "output": [
+          "text",
+          "audio"
+        ]
+      },
+      "name": "GPT-Realtime-2.1",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "release_date": "2026-07-06",
+      "structured_output": false,
+      "temperature": false,
+      "tool_call": true
+    },
+    "o1": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 7.5,
+        "input": 15,
+        "output": 60
+      },
+      "description": "O-series reasoning model for hard analysis, math, coding, and planning",
+      "family": "o",
+      "id": "o1",
+      "knowledge": "2023-09",
+      "last_updated": "2024-12-05",
+      "limit": {
+        "context": 200000,
+        "output": 100000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "o1",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2024-12-05",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "o1-pro": {
+      "attachment": true,
+      "cost": {
+        "input": 150,
+        "output": 600
+      },
+      "description": "O-series reasoning model for hard analysis, math, coding, and planning",
+      "family": "o-pro",
+      "id": "o1-pro",
+      "knowledge": "2023-09",
+      "last_updated": "2025-03-19",
+      "limit": {
+        "context": 200000,
+        "output": 100000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "o1-pro",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-03-19",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "o3": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "input": 2,
+        "output": 8
+      },
+      "description": "Deliberate o-series reasoner for hard math, coding, and multi-step analysis",
+      "family": "o",
+      "id": "o3",
+      "knowledge": "2024-05",
+      "last_updated": "2025-04-16",
+      "limit": {
+        "context": 200000,
+        "output": 100000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "o3",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-04-16",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "o3-mini": {
+      "attachment": false,
+      "cost": {
+        "cache_read": 0.55,
+        "input": 1.1,
+        "output": 4.4
+      },
+      "description": "Smaller o-series reasoner for economical coding, math, and planning tasks",
+      "family": "o-mini",
+      "id": "o3-mini",
+      "knowledge": "2024-05",
+      "last_updated": "2025-01-29",
+      "limit": {
+        "context": 200000,
+        "output": 100000
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "o3-mini",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2024-12-20",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "o3-pro": {
+      "attachment": true,
+      "cost": {
+        "input": 20,
+        "output": 80
+      },
+      "description": "High-effort o3 tier for difficult technical reasoning and careful answers",
+      "family": "o-pro",
+      "id": "o3-pro",
+      "knowledge": "2024-05",
+      "last_updated": "2025-06-10",
+      "limit": {
+        "context": 200000,
+        "output": 100000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "o3-pro",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-06-10",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "o4-mini": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.275,
+        "input": 1.1,
+        "output": 4.4
+      },
+      "description": "Fast o-series model for compact reasoning, coding, and tool use",
+      "family": "o-mini",
+      "id": "o4-mini",
+      "knowledge": "2024-05",
+      "last_updated": "2025-04-16",
+      "limit": {
+        "context": 200000,
+        "output": 100000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "o4-mini",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "release_date": "2025-04-16",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "text-embedding-3-large": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.05,
+        "cache_write": 0.4,
+        "input": 7,
+        "output": 10
+      },
+      "description": "Large size text embedding model for extensive natural language processing tasks.",
+      "family": "text-embedding",
+      "id": "text-embedding-3-large",
+      "knowledge": "2023-10",
+      "last_updated": "2023-10-01",
+      "limit": {
+        "context": 64000,
+        "output": 2048
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "vector"
+        ]
+      },
+      "name": "TEXT-EMBEDDING-3-LARGE",
+      "open_weights": false,
+      "reasoning": true,
+      "release_date": "2023-12-15",
+      "temperature": true,
+      "tool_call": true
+    },
+    "text-embedding-3-small": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.04,
+        "cache_write": 0.3,
+        "input": 4,
+        "output": 8
+      },
+      "description": "Small size text embedding model for efficient processing.",
+      "family": "text-embedding",
+      "id": "text-embedding-3-small",
+      "knowledge": "2023-10",
+      "last_updated": "2023-10-01",
+      "limit": {
+        "context": 32000,
+        "output": 1024
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "vector"
+        ]
+      },
+      "name": "TEXT-EMBEDDING-3-SMALL",
+      "open_weights": false,
+      "reasoning": true,
+      "release_date": "2023-11-10",
+      "temperature": true,
+      "tool_call": true
+    },
+    "text-embedding-ada-002": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.06,
+        "cache_write": 0.45,
+        "input": 6,
+        "output": 12
+      },
+      "description": "Ada-based text embedding model optimized for various NLP tasks.",
+      "family": "text-embedding",
+      "id": "text-embedding-ada-002",
+      "knowledge": "2023-10",
+      "last_updated": "2023-10-01",
+      "limit": {
+        "context": 60000,
+        "output": 1500
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "vector"
+        ]
+      },
+      "name": "TEXT-EMBEDDING-ADA-002",
+      "open_weights": false,
+      "reasoning": true,
+      "release_date": "2023-11-20",
+      "temperature": true,
+      "tool_call": true
+    }
+  },
+  "name": "OpenAI",
+  "npm": "@ai-sdk/openai"
+}

@@ -165,43 +165,17 @@ func (ss *SettingsService) UpdateBlacklistSettings(threshold int, duration int) 
 		return fmt.Errorf("拉黑时长只支持 5/15/30/60 分钟")
 	}
 
-	// Saga 步骤 1：读取旧值（用于回滚）
-	db, err := xdb.DB("default")
+	// 单条语句原子更新两个键:SQLite 单语句自带原子性,
+	// 替代原先"两次写入+失败补偿"在二次失败时会留下阈值/时长不一致的手写 Saga
+	err := GlobalDBQueue.Exec(`
+		UPDATE app_settings SET value = CASE key
+			WHEN 'blacklist_failure_threshold' THEN ?
+			WHEN 'blacklist_duration_minutes' THEN ?
+		END
+		WHERE key IN ('blacklist_failure_threshold', 'blacklist_duration_minutes')
+	`, strconv.Itoa(threshold), strconv.Itoa(duration))
 	if err != nil {
-		return fmt.Errorf("获取数据库连接失败: %w", err)
-	}
-
-	var oldThresholdStr string
-	err = db.QueryRow(`SELECT value FROM app_settings WHERE key = 'blacklist_failure_threshold'`).Scan(&oldThresholdStr)
-	if err != nil {
-		return fmt.Errorf("读取旧失败阈值失败: %w", err)
-	}
-
-	// Saga 步骤 2：尝试第一次写入
-	err = GlobalDBQueue.Exec(`
-		UPDATE app_settings SET value = ? WHERE key = 'blacklist_failure_threshold'
-	`, strconv.Itoa(threshold))
-
-	if err != nil {
-		return fmt.Errorf("更新失败阈值失败: %w", err)
-	}
-
-	// Saga 步骤 3：尝试第二次写入
-	err = GlobalDBQueue.Exec(`
-		UPDATE app_settings SET value = ? WHERE key = 'blacklist_duration_minutes'
-	`, strconv.Itoa(duration))
-
-	if err != nil {
-		// 第二次失败，回滚第一次（补偿逻辑）
-		rollbackErr := GlobalDBQueue.Exec(`
-			UPDATE app_settings SET value = ? WHERE key = 'blacklist_failure_threshold'
-		`, oldThresholdStr)
-
-		if rollbackErr != nil {
-			return fmt.Errorf("更新拉黑时长失败且回滚失败: %w (原始错误: %v)", rollbackErr, err)
-		}
-
-		return fmt.Errorf("更新拉黑时长失败，已回滚失败阈值: %w", err)
+		return fmt.Errorf("更新拉黑配置失败: %w", err)
 	}
 
 	return nil

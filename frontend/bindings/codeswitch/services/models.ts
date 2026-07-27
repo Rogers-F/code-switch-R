@@ -7,6 +7,9 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as modelpricing$0 from "../resources/model-pricing/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as time$0 from "../../time/models.js";
 
 export class AppSettings {
@@ -32,6 +35,11 @@ export class AppSettings {
     "budget_forecast_method_codex": string;
     "auto_start": boolean;
     "auto_update": boolean;
+
+    /**
+     * 模型/价格数据自动同步开关
+     */
+    "auto_sync_models": boolean;
     "auto_connectivity_test": boolean;
 
     /**
@@ -111,6 +119,9 @@ export class AppSettings {
         }
         if (!("auto_update" in $$source)) {
             this["auto_update"] = false;
+        }
+        if (!("auto_sync_models" in $$source)) {
+            this["auto_sync_models"] = false;
         }
         if (!("auto_connectivity_test" in $$source)) {
             this["auto_connectivity_test"] = false;
@@ -1093,6 +1104,46 @@ export class DeepLinkImportRequest {
 }
 
 /**
+ * DefaultModels 各平台当前解析结果,供前端与配置写入方使用。
+ */
+export class DefaultModels {
+    "claudeProbe": string;
+    "codexDefault": string;
+    "codexProbe": string;
+    "geminiDefault": string;
+    "geminiProbe": string;
+
+    /** Creates a new DefaultModels instance. */
+    constructor($$source: Partial<DefaultModels> = {}) {
+        if (!("claudeProbe" in $$source)) {
+            this["claudeProbe"] = "";
+        }
+        if (!("codexDefault" in $$source)) {
+            this["codexDefault"] = "";
+        }
+        if (!("codexProbe" in $$source)) {
+            this["codexProbe"] = "";
+        }
+        if (!("geminiDefault" in $$source)) {
+            this["geminiDefault"] = "";
+        }
+        if (!("geminiProbe" in $$source)) {
+            this["geminiProbe"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DefaultModels instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DefaultModels {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DefaultModels($$parsedSource as Partial<DefaultModels>);
+    }
+}
+
+/**
  * EndpointLatency 端点延迟测试结果
  */
 export class EndpointLatency {
@@ -1897,6 +1948,115 @@ export class ManualTestResult {
 }
 
 /**
+ * ModelSyncProviderStatus 单厂商同步状态(前端展示)。
+ */
+export class ModelSyncProviderStatus {
+    "provider": string;
+
+    /**
+     * remote=已同步缓存 seed=内置种子
+     */
+    "source": string;
+    "modelCount": number;
+    "fetchedAt": time$0.Time;
+    "checkedAt": time$0.Time;
+    "nextDue": time$0.Time;
+    "lastError"?: string;
+
+    /** Creates a new ModelSyncProviderStatus instance. */
+    constructor($$source: Partial<ModelSyncProviderStatus> = {}) {
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("source" in $$source)) {
+            this["source"] = "";
+        }
+        if (!("modelCount" in $$source)) {
+            this["modelCount"] = 0;
+        }
+        if (!("fetchedAt" in $$source)) {
+            this["fetchedAt"] = null;
+        }
+        if (!("checkedAt" in $$source)) {
+            this["checkedAt"] = null;
+        }
+        if (!("nextDue" in $$source)) {
+            this["nextDue"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelSyncProviderStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelSyncProviderStatus {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ModelSyncProviderStatus($$parsedSource as Partial<ModelSyncProviderStatus>);
+    }
+}
+
+/**
+ * ModelSyncStatus 同步总体状态(前端展示)。
+ */
+export class ModelSyncStatus {
+    "autoSyncEnabled": boolean;
+    "running": boolean;
+    "generation": number;
+    "lastSuccess": time$0.Time;
+    "providers": ModelSyncProviderStatus[];
+    "pricing": modelpricing$0.RebuildStats;
+    "defaultModels": DefaultModels;
+
+    /** Creates a new ModelSyncStatus instance. */
+    constructor($$source: Partial<ModelSyncStatus> = {}) {
+        if (!("autoSyncEnabled" in $$source)) {
+            this["autoSyncEnabled"] = false;
+        }
+        if (!("running" in $$source)) {
+            this["running"] = false;
+        }
+        if (!("generation" in $$source)) {
+            this["generation"] = 0;
+        }
+        if (!("lastSuccess" in $$source)) {
+            this["lastSuccess"] = null;
+        }
+        if (!("providers" in $$source)) {
+            this["providers"] = [];
+        }
+        if (!("pricing" in $$source)) {
+            this["pricing"] = (new modelpricing$0.RebuildStats());
+        }
+        if (!("defaultModels" in $$source)) {
+            this["defaultModels"] = (new DefaultModels());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ModelSyncStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ModelSyncStatus {
+        const $$createField4_0 = $$createType20;
+        const $$createField5_0 = $$createType21;
+        const $$createField6_0 = $$createType22;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("providers" in $$parsedSource) {
+            $$parsedSource["providers"] = $$createField4_0($$parsedSource["providers"]);
+        }
+        if ("pricing" in $$parsedSource) {
+            $$parsedSource["pricing"] = $$createField5_0($$parsedSource["pricing"]);
+        }
+        if ("defaultModels" in $$parsedSource) {
+            $$parsedSource["defaultModels"] = $$createField6_0($$parsedSource["defaultModels"]);
+        }
+        return new ModelSyncStatus($$parsedSource as Partial<ModelSyncStatus>);
+    }
+}
+
+/**
  * NetworkSettings 网络设置
  */
 export class NetworkSettings {
@@ -1925,7 +2085,7 @@ export class NetworkSettings {
      * Creates a new NetworkSettings instance from a string or object.
      */
     static createFrom($$source: any = {}): NetworkSettings {
-        const $$createField4_0 = $$createType19;
+        const $$createField4_0 = $$createType23;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("targetCli" in $$parsedSource) {
             $$parsedSource["targetCli"] = $$createField4_0($$parsedSource["targetCli"]);
@@ -2096,9 +2256,9 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField10_0 = $$createType20;
+        const $$createField10_0 = $$createType24;
         const $$createField11_0 = $$createType4;
-        const $$createField15_0 = $$createType22;
+        const $$createField15_0 = $$createType26;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("supportedModels" in $$parsedSource) {
             $$parsedSource["supportedModels"] = $$createField10_0($$parsedSource["supportedModels"]);
@@ -2246,7 +2406,7 @@ export class ProviderTimeline {
      * Creates a new ProviderTimeline instance from a string or object.
      */
     static createFrom($$source: any = {}): ProviderTimeline {
-        const $$createField5_0 = $$createType22;
+        const $$createField5_0 = $$createType26;
         const $$createField6_0 = $$createType12;
         const $$createField7_0 = $$createType13;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
@@ -2853,7 +3013,11 @@ const $$createType15 = $Create.Array($$createType14);
 const $$createType16 = MCPServer.createFrom;
 const $$createType17 = $Create.Array($$createType16);
 const $$createType18 = $Create.Array($Create.Any);
-const $$createType19 = TargetCli.createFrom;
-const $$createType20 = $Create.Map($Create.Any, $Create.Any);
-const $$createType21 = AvailabilityConfig.createFrom;
-const $$createType22 = $Create.Nullable($$createType21);
+const $$createType19 = ModelSyncProviderStatus.createFrom;
+const $$createType20 = $Create.Array($$createType19);
+const $$createType21 = modelpricing$0.RebuildStats.createFrom;
+const $$createType22 = DefaultModels.createFrom;
+const $$createType23 = TargetCli.createFrom;
+const $$createType24 = $Create.Map($Create.Any, $Create.Any);
+const $$createType25 = AvailabilityConfig.createFrom;
+const $$createType26 = $Create.Nullable($$createType25);

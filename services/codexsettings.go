@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -18,7 +19,6 @@ const (
 	codexAuthFileName     = "auth.json"
 	codexBackupAuthName   = "cc-studio.back.auth.json"
 	codexPreferredAuth    = "apikey"
-	codexDefaultModel     = "gpt-5.5"
 	codexProviderKey      = "code-switch-r"
 	codexEnvKey           = "OPENAI_API_KEY"
 	codexWireAPI          = "responses"
@@ -27,10 +27,24 @@ const (
 
 type CodexSettingsService struct {
 	relayAddr string
+	policy    *DefaultModelPolicy
+	// mu 串行化代理开关/单供应商应用的"读配置→记基线→写回"整段,
+	// 防止并发操作把代理值误存为用户原始基线导致原始 API Key 丢失
+	mu sync.Mutex
 }
 
-func NewCodexSettingsService(relayAddr string) *CodexSettingsService {
-	return &CodexSettingsService{relayAddr: relayAddr}
+func NewCodexSettingsService(relayAddr string, policy *DefaultModelPolicy) *CodexSettingsService {
+	return &CodexSettingsService{relayAddr: relayAddr, policy: policy}
+}
+
+// defaultModel 当前 Codex 默认模型:随同步数据自动更新,数据不可用时退回静态兜底。
+func (css *CodexSettingsService) defaultModel() string {
+	if css.policy != nil {
+		if m := css.policy.CodexDefaultModel(); m != "" {
+			return m
+		}
+	}
+	return FallbackCodexDefaultModel
 }
 
 func (css *CodexSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
@@ -62,6 +76,8 @@ func (css *CodexSettingsService) ProxyStatus() (ClaudeProxyStatus, error) {
 }
 
 func (css *CodexSettingsService) EnableProxy() error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
 	settingsPath, backupPath, err := css.paths()
 	if err != nil {
 		return err
@@ -174,7 +190,7 @@ func (css *CodexSettingsService) EnableProxy() error {
 
 	// 保留用户的 model 设置，只在不存在时才使用默认值
 	if _, exists := raw["model"]; !exists {
-		raw["model"] = codexDefaultModel
+		raw["model"] = css.defaultModel()
 	}
 
 	modelProviders := ensureTomlTable(raw, "model_providers")
@@ -199,6 +215,8 @@ func (css *CodexSettingsService) EnableProxy() error {
 }
 
 func (css *CodexSettingsService) DisableProxy() error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
 	settingsPath, _, err := css.paths()
 	if err != nil {
 		return err
@@ -599,6 +617,8 @@ func (css *CodexSettingsService) restoreAuthFile() error {
 // ApplySingleProvider 直连应用单一供应商（仅在代理关闭时可用）
 // 将指定 provider 的配置直接写入 Codex 的 config.toml 和 auth.json
 func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
+	css.mu.Lock()
+	defer css.mu.Unlock()
 	// 1. 检查代理状态：代理启用时禁止直连应用
 	proxyStatus, err := css.ProxyStatus()
 	if err != nil {

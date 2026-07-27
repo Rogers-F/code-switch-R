@@ -225,7 +225,7 @@
 
         <label class="form-field">
           <span>{{ t('components.gemini.form.model') }}</span>
-          <BaseInput v-model="modalState.form.model" type="text" :disabled="saving" placeholder="gemini-3.1-pro-preview" />
+          <BaseInput v-model="modalState.form.model" type="text" :disabled="saving" :placeholder="defaultGeminiModel" />
         </label>
 
         <footer class="form-actions">
@@ -279,6 +279,7 @@ import {
   SwitchProvider,
   CreateProviderFromPreset,
 } from '../../../bindings/codeswitch/services/geminiservice'
+import { GetDefaultModels } from '../../../bindings/codeswitch/services/modelsyncservice'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -372,6 +373,22 @@ const getPresetIcon = (preset: BindingGeminiPreset) => {
   return geminiIcon
 }
 
+// 默认 Gemini 模型:从后端解析结果获取(随同步数据自动更新),失败时用静态兜底
+const defaultGeminiModel = ref('gemini-3.1-pro-preview')
+const loadDefaultGeminiModel = async () => {
+  try {
+    const models = await GetDefaultModels()
+    if (models?.geminiDefault) {
+      defaultGeminiModel.value = models.geminiDefault
+    }
+  } catch (error) {
+    console.error('failed to load default gemini model', error)
+  }
+}
+onMounted(() => {
+  void loadDefaultGeminiModel()
+})
+
 const openPresetModal = (preset: BindingGeminiPreset) => {
   modalState.open = true
   modalState.editing = false
@@ -380,7 +397,7 @@ const openPresetModal = (preset: BindingGeminiPreset) => {
   modalState.form.name = preset.name
   modalState.form.baseUrl = preset.baseUrl ?? ''
   modalState.form.apiKey = ''
-  modalState.form.model = preset.model ?? 'gemini-3.1-pro-preview'
+  modalState.form.model = preset.model ?? defaultGeminiModel.value
 }
 
 const openCreateModal = () => {
@@ -390,7 +407,7 @@ const openCreateModal = () => {
   modalState.form.name = ''
   modalState.form.baseUrl = ''
   modalState.form.apiKey = ''
-  modalState.form.model = 'gemini-3.1-pro-preview'
+  modalState.form.model = defaultGeminiModel.value
 }
 
 const openEditModal = (provider: BindingGeminiProvider) => {
@@ -420,6 +437,25 @@ const submitModal = async () => {
       const newProvider = await CreateProviderFromPreset(modalState.presetName, modalState.form.apiKey)
       if (!newProvider) {
         throw new Error('创建供应商失败')
+      }
+      // 预设仅作初始值:用户在弹窗中对名称/BaseURL/模型的修改同样生效
+      const edited =
+        modalState.form.name !== newProvider.name ||
+        modalState.form.baseUrl !== (newProvider.baseUrl ?? '') ||
+        modalState.form.model !== (newProvider.model ?? '')
+      if (edited) {
+        await UpdateProvider({
+          ...newProvider,
+          name: modalState.form.name || newProvider.name,
+          baseUrl: modalState.form.baseUrl,
+          model: modalState.form.model,
+          envConfig: {
+            ...(newProvider.envConfig ?? {}),
+            GOOGLE_GEMINI_BASE_URL: modalState.form.baseUrl,
+            GEMINI_API_KEY: modalState.form.apiKey,
+            GEMINI_MODEL: modalState.form.model,
+          },
+        })
       }
     } else if (modalState.editing) {
       // 更新：基于原始对象合并，保留 partnerPromotionKey/category 等字段

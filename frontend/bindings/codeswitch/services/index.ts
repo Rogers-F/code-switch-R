@@ -16,6 +16,7 @@ import * as HealthCheckService from "./healthcheckservice.js";
 import * as ImportService from "./importservice.js";
 import * as LogService from "./logservice.js";
 import * as MCPService from "./mcpservice.js";
+import * as ModelSyncService from "./modelsyncservice.js";
 import * as NetworkService from "./networkservice.js";
 import * as PromptService from "./promptservice.js";
 import * as ProviderService from "./providerservice.js";
@@ -40,6 +41,7 @@ export {
     ImportService,
     LogService,
     MCPService,
+    ModelSyncService,
     NetworkService,
     PromptService,
     ProviderService,
@@ -72,6 +74,7 @@ export {
     CustomCliProxyStatus,
     CustomCliTool,
     DeepLinkImportRequest,
+    DefaultModels,
     EndpointLatency,
     EnvConflict,
     GeminiAuthType,
@@ -89,6 +92,8 @@ export {
     MCPParseResult,
     MCPServer,
     ManualTestResult,
+    ModelSyncProviderStatus,
+    ModelSyncStatus,
     NetworkSettings,
     Prompt,
     Provider,

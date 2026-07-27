@@ -34,7 +34,7 @@ func newTestService(t *testing.T) *Service {
 // TestSampleSpecSkipped 确保 JSON 里的 sample_spec 文档条目不污染 pricingMap。
 func TestSampleSpecSkipped(t *testing.T) {
 	svc := newTestService(t)
-	if _, ok := svc.pricingMap["sample_spec"]; ok {
+	if _, ok := svc.currentSnapshot().pricingMap["sample_spec"]; ok {
 		t.Fatal("sample_spec 应该被跳过,当前仍在 pricingMap 中")
 	}
 }
@@ -55,10 +55,10 @@ func TestClosedModelKeysFiltered(t *testing.T) {
 		"anthropic.claude-3-5-haiku-20241022-v1:0",
 	}
 	for _, model := range cases {
-		if _, ok := svc.pricingMap[model]; ok {
+		if _, ok := svc.currentSnapshot().pricingMap[model]; ok {
 			t.Errorf("%q 不应进入 pricingMap", model)
 		}
-		if entry, ok := svc.getPricing(model); ok && entry != nil {
+		if entry, ok := svc.currentSnapshot().getPricing(model); ok && entry != nil {
 			t.Errorf("%q 不应通过候选匹配拿到定价", model)
 		}
 	}
@@ -74,7 +74,7 @@ func TestOverlayAliases(t *testing.T) {
 		"glm-4.5", "glm-4.5-air", "glm-4.6",
 	}
 	for _, m := range cases {
-		entry, ok := svc.getPricing(m)
+		entry, ok := svc.currentSnapshot().getPricing(m)
 		if !ok || entry == nil {
 			t.Errorf("overlay 别名 %q 应该有定价", m)
 		}
@@ -91,12 +91,12 @@ func TestFamilyFallback(t *testing.T) {
 		"kimi-thinking-preview": "moonshot/kimi-thinking-preview",
 	}
 	for input, expectedKey := range cases {
-		entry, ok := svc.getPricing(input)
+		entry, ok := svc.currentSnapshot().getPricing(input)
 		if !ok || entry == nil {
 			t.Errorf("family fallback 应该为 %q 命中 %q", input, expectedKey)
 		}
 		// 验证 expectedKey 在 pricingMap 中存在(前提校验)
-		if _, exists := svc.pricingMap[expectedKey]; !exists {
+		if _, exists := svc.currentSnapshot().pricingMap[expectedKey]; !exists {
 			t.Errorf("前提失败:%q 不在 pricingMap,测试用例需更新", expectedKey)
 		}
 	}
@@ -107,10 +107,10 @@ func TestFamilyFallback(t *testing.T) {
 func TestSubstringFallbackRemoved(t *testing.T) {
 	svc := newTestService(t)
 	// "grok" 裸名不应该命中任何 xai/grok-*(之前的 substring 会随机命中一个)
-	if entry, ok := svc.getPricing("grok"); ok && entry != nil {
+	if entry, ok := svc.currentSnapshot().getPricing("grok"); ok && entry != nil {
 		t.Errorf("裸名 'grok' 不应该命中任何条目(意味着 substring fallback 未删除)")
 	}
-	if entry, ok := svc.getPricing("totally-nonexistent-model-xyz"); ok && entry != nil {
+	if entry, ok := svc.currentSnapshot().getPricing("totally-nonexistent-model-xyz"); ok && entry != nil {
 		t.Errorf("不存在的模型不应该命中,得到:%v", entry)
 	}
 }
@@ -120,18 +120,18 @@ func TestExactAndAliasCandidates(t *testing.T) {
 	svc := newTestService(t)
 
 	// gpt-5 本身必须存在
-	if _, ok := svc.getPricing("gpt-5"); !ok {
+	if _, ok := svc.currentSnapshot().getPricing("gpt-5"); !ok {
 		t.Fatal("前提失败:gpt-5 应存在于 pricingMap")
 	}
 	// gpt-5-codex 应该通过 alias 候选命中 gpt-5(如果 pricingMap 里没有直接定义)
-	if _, ok := svc.getPricing("gpt-5-codex"); !ok {
+	if _, ok := svc.currentSnapshot().getPricing("gpt-5-codex"); !ok {
 		t.Error("gpt-5-codex 应该通过 alias 回退到 gpt-5")
 	}
 
 	// anthropic 前缀去除
-	if _, ok := svc.pricingMap["anthropic.claude-sonnet-4-5-20250929-v1:0"]; ok {
+	if _, ok := svc.currentSnapshot().pricingMap["anthropic.claude-sonnet-4-5-20250929-v1:0"]; ok {
 		// 已经带前缀,测试去掉 us. 前缀应命中
-		if _, ok := svc.getPricing("us.anthropic.claude-sonnet-4-5-20250929-v1:0"); !ok {
+		if _, ok := svc.currentSnapshot().getPricing("us.anthropic.claude-sonnet-4-5-20250929-v1:0"); !ok {
 			t.Error("region 前缀去除应命中 anthropic.claude-sonnet-4-5-20250929-v1:0")
 		}
 	}
@@ -142,7 +142,7 @@ func TestExactAndAliasCandidates(t *testing.T) {
 func TestTieredPricing(t *testing.T) {
 	svc := newTestService(t)
 
-	entry, ok := svc.pricingMap["dashscope/qwen-flash"]
+	entry, ok := svc.currentSnapshot().pricingMap["dashscope/qwen-flash"]
 	if !ok {
 		t.Skip("dashscope/qwen-flash 不在当前 JSON 中,跳过")
 	}
@@ -185,7 +185,7 @@ func TestAbove200kPricing(t *testing.T) {
 
 	// 找一个带 above_200k 的 anthropic 模型
 	var target string
-	for k, v := range svc.pricingMap {
+	for k, v := range svc.currentSnapshot().pricingMap {
 		if v.InputCostPerTokenAbove200k > 0 && v.InputCostPerToken > 0 &&
 			v.InputCostPerTokenAbove200k > v.InputCostPerToken {
 			target = k
@@ -301,7 +301,7 @@ func TestAbove272kPricing(t *testing.T) {
 	svc := newTestService(t)
 
 	var target string
-	for k, v := range svc.pricingMap {
+	for k, v := range svc.currentSnapshot().pricingMap {
 		if v.InputCostPerTokenAbove272k > 0 && v.InputCostPerToken > 0 &&
 			v.InputCostPerTokenAbove272k > v.InputCostPerToken {
 			target = k
@@ -331,7 +331,7 @@ func TestAbove272kPricing(t *testing.T) {
 func TestAbove200kCacheTokenRates(t *testing.T) {
 	svc := newTestService(t)
 	target := "anthropic.claude-3-5-sonnet-20240620-v1:0"
-	entry, ok := svc.pricingMap[target]
+	entry, ok := svc.currentSnapshot().pricingMap[target]
 	if !ok {
 		t.Skip(target + " 不在 JSON 中")
 	}
@@ -362,7 +362,7 @@ func TestAbove200kCacheTokenRates(t *testing.T) {
 func TestCache1hFromJSONFirst(t *testing.T) {
 	svc := newTestService(t)
 	target := "claude-3-haiku-20240307"
-	entry, ok := svc.pricingMap[target]
+	entry, ok := svc.currentSnapshot().pricingMap[target]
 	if !ok {
 		t.Skip(target + " 不在 JSON 中")
 	}
@@ -404,7 +404,7 @@ func TestOverlayMissingTargetFailFast(t *testing.T) {
 // ensureCachePricing 会把它当作 cache_read 价,不再掉到 0.1x 兜底。
 func TestCacheHitFallback(t *testing.T) {
 	svc := newTestService(t)
-	entry, ok := svc.pricingMap["deepseek/deepseek-r1"]
+	entry, ok := svc.currentSnapshot().pricingMap["deepseek/deepseek-r1"]
 	if !ok {
 		t.Skip("deepseek/deepseek-r1 不在 JSON 中")
 	}
@@ -422,7 +422,7 @@ func TestPriorityServiceTier(t *testing.T) {
 	svc := newTestService(t)
 
 	var target string
-	for k, v := range svc.pricingMap {
+	for k, v := range svc.currentSnapshot().pricingMap {
 		if v.InputCostPerTokenPriority > 0 && v.InputCostPerTokenPriority > v.InputCostPerToken {
 			target = k
 			break
@@ -490,7 +490,7 @@ func TestLongContextTierStrictMatch(t *testing.T) {
 func TestCacheCreationSplit(t *testing.T) {
 	svc := newTestService(t)
 	target := "claude-3-haiku-20240307"
-	entry, ok := svc.pricingMap[target]
+	entry, ok := svc.currentSnapshot().pricingMap[target]
 	if !ok {
 		t.Skip(target + " 不在 JSON 中")
 	}
@@ -524,7 +524,7 @@ func TestFlexServiceTier(t *testing.T) {
 	svc := newTestService(t)
 	var model string
 	var entry *PricingEntry
-	for k, v := range svc.pricingMap {
+	for k, v := range svc.currentSnapshot().pricingMap {
 		if v.InputCostPerTokenFlex > 0 && v.OutputCostPerTokenFlex > 0 && v.CacheReadInputTokenCostFlex > 0 {
 			model = k
 			entry = v
@@ -561,7 +561,7 @@ func TestFlexServiceTier(t *testing.T) {
 func TestStandardServiceTierAliasesDefault(t *testing.T) {
 	svc := newTestService(t)
 	var model string
-	for k, v := range svc.pricingMap {
+	for k, v := range svc.currentSnapshot().pricingMap {
 		if v.InputCostPerTokenFlex > 0 && v.InputCostPerToken > 0 {
 			model = k
 			break
@@ -636,7 +636,7 @@ func TestFlexLongContextScalesFromDefaultLongBand(t *testing.T) {
 
 func TestGpt54FlexLongContextUsesOfficialCacheReadRate(t *testing.T) {
 	svc := newTestService(t)
-	entry, ok := svc.pricingMap["gpt-5.4"]
+	entry, ok := svc.currentSnapshot().pricingMap["gpt-5.4"]
 	if !ok {
 		t.Fatal("gpt-5.4 应存在于 pricingMap")
 	}

@@ -1,11 +1,14 @@
 package modelpricing
 
 import (
+	"embed"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 //go:embed model_prices_and_context_window.json
@@ -13,6 +16,9 @@ var pricingFile []byte
 
 //go:embed model_prices_overlay.json
 var overlayFile []byte
+
+//go:embed seed/*.json
+var seedFS embed.FS
 
 var (
 	defaultOnce    sync.Once
@@ -136,14 +142,33 @@ var familyRules = []struct {
 	{Prefix: "qwen-", Replacement: "dashscope/qwen-"},
 	{Prefix: "kimi-", Replacement: "moonshot/kimi-"},
 	{Prefix: "moonshot-v1-", Replacement: "moonshot/moonshot-v1-"},
+	{Prefix: "glm-", Replacement: "zai/glm-"},
 }
 
-// Service 提供模型价格相关的计算能力。
-type Service struct {
+// snapshot 是一份不可变的价格表视图。Rebuild 整体替换,单次计算全程持同一份,
+// 避免重建过程中新旧表混用。
+type snapshot struct {
 	pricingMap   map[string]*PricingEntry
 	normalized   map[string]string
 	ephemeral1h  map[string]float64
 	longContexts map[string]LongContextPricing
+	stats        RebuildStats
+}
+
+// Service 提供模型价格相关的计算能力。
+// 门面指针在进程内保持稳定(消费方可长期持有),数据通过内部快照原子替换热更新。
+type Service struct {
+	mu   sync.Mutex // 序列化 Rebuild,防止交错构建
+	snap atomic.Pointer[snapshot]
+}
+
+// RebuildStats 记录一次快照构建中远程数据的合并结果。
+type RebuildStats struct {
+	TotalModels     int `json:"totalModels"`
+	RemoteAdded     int `json:"remoteAdded"`
+	RemoteUpdated   int `json:"remoteUpdated"`
+	KeptComplex     int `json:"keptComplex"`     // embedded 含扩展档位规则,远程基础价被忽略
+	DroppedConflict int `json:"droppedConflict"` // normalized 与既有 canonical key 冲突被拒收
 }
 
 // PricingEntry 映射 JSON 内的字段。
@@ -279,9 +304,13 @@ type TieredPricingBand struct {
 	CacheReadInputTokenCost float64    `json:"cache_read_input_token_cost,omitempty"`
 }
 
-// overlayConfig 描述 overlay 文件的结构,目前仅支持 aliases。
+// overlayConfig 描述 overlay 文件的结构:
+//   - aliases: 模型别名 -> 已存在 key,共享同一 entry 指针;
+//   - entries: 按字段深度覆盖(json.RawMessage 区分"缺失"与"显式 0"),优先级最高,
+//     可修正远程/嵌入数据的错误价,也可新增完整条目。
 type overlayConfig struct {
-	Aliases map[string]string `json:"aliases"`
+	Aliases map[string]string                     `json:"aliases"`
+	Entries map[string]map[string]json.RawMessage `json:"entries"`
 }
 
 // UsageSnapshot 描述一次请求的 token 用量。
@@ -323,7 +352,8 @@ type LongContextPricing struct {
 	Output float64
 }
 
-// DefaultService 返回单例。
+// DefaultService 返回单例。门面指针进程内稳定,消费方可长期持有;
+// 数据热更新通过 Rebuild 在内部原子替换快照完成。
 func DefaultService() (*Service, error) {
 	defaultOnce.Do(func() {
 		defaultService, defaultErr = NewService()
@@ -331,8 +361,101 @@ func DefaultService() (*Service, error) {
 	return defaultService, defaultErr
 }
 
-// NewService 从嵌入的 JSON 创建服务实例。
+// NewService 从嵌入的 JSON 创建服务实例(仅内置数据,不含远程层)。
 func NewService() (*Service, error) {
+	snap, err := buildSnapshot(nil)
+	if err != nil {
+		return nil, err
+	}
+	s := &Service{}
+	s.snap.Store(snap)
+	return s, nil
+}
+
+// Rebuild 以"嵌入 base + 远程条目 + overlay"重建价格快照并原子替换。
+// remote 为 nil 等价于恢复内置数据;构建失败保留旧快照。
+func (s *Service) Rebuild(remote map[string]RemoteEntry) (RebuildStats, error) {
+	if s == nil {
+		return RebuildStats{}, fmt.Errorf("pricing service is nil")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap, err := buildSnapshot(remote)
+	if err != nil {
+		return RebuildStats{}, err
+	}
+	s.snap.Store(snap)
+	return snap.stats, nil
+}
+
+// ResetToEmbedded 丢弃远程层,恢复纯内置价格表。
+func (s *Service) ResetToEmbedded() (RebuildStats, error) {
+	return s.Rebuild(nil)
+}
+
+// currentSnapshot 返回当前生效快照(内部/测试用)。
+func (s *Service) currentSnapshot() *snapshot {
+	if s == nil {
+		return nil
+	}
+	return s.snap.Load()
+}
+
+// Stats 返回当前快照的合并统计。
+func (s *Service) Stats() RebuildStats {
+	if s == nil {
+		return RebuildStats{}
+	}
+	if snap := s.snap.Load(); snap != nil {
+		return snap.stats
+	}
+	return RebuildStats{}
+}
+
+// ModelCount 返回当前快照内条目数(含别名)。
+func (s *Service) ModelCount() int {
+	if s == nil {
+		return 0
+	}
+	if snap := s.snap.Load(); snap != nil {
+		return len(snap.pricingMap)
+	}
+	return 0
+}
+
+// HasPositivePricing 判断模型能否命中一条 input 或 output 为正的价格,
+// 供默认模型解析器过滤"有目录无价格"的候选。
+func (s *Service) HasPositivePricing(model string) bool {
+	if s == nil {
+		return false
+	}
+	snap := s.snap.Load()
+	if snap == nil {
+		return false
+	}
+	entry, ok := snap.getPricing(model)
+	if !ok || entry == nil {
+		return false
+	}
+	return entry.InputCostPerToken > 0 || entry.OutputCostPerToken > 0
+}
+
+// isRichEntry 判断 embedded 条目是否携带扩展档位规则(tiered/长上下文/flex/priority/1h/开关)。
+// 远程源缺少这些维度,若只覆盖基础价会与绝对值档位失配,故此类条目整条保留本地。
+func isRichEntry(e *PricingEntry) bool {
+	if e == nil {
+		return false
+	}
+	return len(e.TieredPricing) > 0 ||
+		e.InputCostPerTokenAbove128k > 0 || e.OutputCostPerTokenAbove128k > 0 ||
+		e.InputCostPerTokenAbove200k > 0 || e.InputCostPerTokenAbove272k > 0 ||
+		e.InputCostPerTokenPriority > 0 || e.OutputCostPerTokenPriority > 0 ||
+		e.InputCostPerTokenFlex > 0 || e.OutputCostPerTokenFlex > 0 ||
+		e.CacheCreationInputTokenCostAbove1Hr > 0 ||
+		e.DisableCacheReadPricing || e.DisableLongFlexPricing
+}
+
+func buildSnapshot(remote map[string]RemoteEntry) (*snapshot, error) {
 	raw := make(map[string]PricingEntry)
 	if err := json.Unmarshal(pricingFile, &raw); err != nil {
 		return nil, fmt.Errorf("parse pricing file: %w", err)
@@ -341,47 +464,162 @@ func NewService() (*Service, error) {
 	delete(raw, "sample_spec")
 	removeClosedPricing(raw)
 
-	pricing := make(map[string]*PricingEntry, len(raw))
-	normalized := make(map[string]string, len(raw))
+	stats := RebuildStats{}
+	pricing := make(map[string]*PricingEntry, len(raw)+len(remote))
 	for key, entry := range raw {
 		item := entry
+		// 缓存价推导仅作用于嵌入层(既有行为);远程条目不做通用推导,
+		// "源未提供"保持未知,显式 0 保持 0。
 		ensureCachePricing(&item)
 		pricing[key] = &item
-		norm := normalizeName(key)
-		if _, exists := normalized[norm]; !exists {
-			normalized[norm] = key
-		}
 	}
 
-	// 合并 overlay aliases:裸名指向真实键的同一 entry 指针。
+	// normalized 冲突检测视图:嵌入层 + 已接受的远程 key,
+	// 远程-远程之间的归一化冲突同样拒收(保持确定性并可观测)。
+	normIndex := buildNormalizedIndex(pricing)
+
+	for _, key := range sortedKeys(remote) {
+		if isClosedModelKey(key) {
+			continue
+		}
+		r := remote[key]
+		if base, ok := pricing[key]; ok {
+			if isRichEntry(base) {
+				stats.KeptComplex++
+				continue
+			}
+			clone := *base
+			applyRemoteEntry(&clone, r)
+			pricing[key] = &clone
+			stats.RemoteUpdated++
+			continue
+		}
+		// 新增条目要求至少一项正的基础价,否则无定价意义。
+		if !r.hasPositiveBase() {
+			continue
+		}
+		norm := normalizeName(key)
+		if canonical, exists := normIndex[norm]; exists && canonical != key {
+			stats.DroppedConflict++
+			continue
+		}
+		item := &PricingEntry{}
+		applyRemoteEntry(item, r)
+		pricing[key] = item
+		normIndex[norm] = key
+		stats.RemoteAdded++
+	}
+
+	// overlay:entries 深度字段覆盖(优先级最高),aliases 共享指针。
 	var overlay overlayConfig
 	if len(overlayFile) > 0 {
 		if err := json.Unmarshal(overlayFile, &overlay); err != nil {
 			return nil, fmt.Errorf("parse overlay file: %w", err)
 		}
-		for alias, target := range overlay.Aliases {
-			entry, ok := pricing[target]
-			if !ok {
-				return nil, fmt.Errorf("overlay alias %q -> %q: target not found in base pricing", alias, target)
-			}
-			pricing[alias] = entry
-			normAlias := normalizeName(alias)
-			if _, exists := normalized[normAlias]; !exists {
-				normalized[normAlias] = alias
-			}
+	}
+	for _, model := range sortedKeys(overlay.Entries) {
+		merged, err := applyOverlayPatch(pricing[model], overlay.Entries[model])
+		if err != nil {
+			return nil, fmt.Errorf("overlay entry %q: %w", model, err)
 		}
+		pricing[model] = merged
+	}
+	for _, alias := range sortedKeys(overlay.Aliases) {
+		target := overlay.Aliases[alias]
+		entry, ok := pricing[target]
+		if !ok {
+			return nil, fmt.Errorf("overlay alias %q -> %q: target not found in base pricing", alias, target)
+		}
+		pricing[alias] = entry
 	}
 
-	return &Service{
+	stats.TotalModels = len(pricing)
+	return &snapshot{
 		pricingMap:   pricing,
-		normalized:   normalized,
+		normalized:   buildNormalizedIndex(pricing),
 		ephemeral1h:  buildEphemeral1hPricing(),
 		longContexts: buildLongContextPricing(),
+		stats:        stats,
 	}, nil
 }
 
+// buildNormalizedIndex 以 key 排序后首见即胜,保证跨进程确定性。
+func buildNormalizedIndex(pricing map[string]*PricingEntry) map[string]string {
+	normalized := make(map[string]string, len(pricing))
+	for _, key := range sortedKeys(pricing) {
+		norm := normalizeName(key)
+		if _, exists := normalized[norm]; !exists {
+			normalized[norm] = key
+		}
+	}
+	return normalized
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// applyRemoteEntry 按 presence 覆盖基础四价:字段存在才覆盖,显式 0 保留为 0。
+func applyRemoteEntry(dst *PricingEntry, r RemoteEntry) {
+	if r.Input != nil {
+		dst.InputCostPerToken = *r.Input
+	}
+	if r.Output != nil {
+		dst.OutputCostPerToken = *r.Output
+	}
+	if r.CacheRead != nil {
+		dst.CacheReadInputTokenCost = *r.CacheRead
+	}
+	if r.CacheWrite != nil {
+		dst.CacheCreationInputTokenCost = *r.CacheWrite
+	}
+}
+
+// applyOverlayPatch 把 overlay 字段补丁合并到条目;base 为 nil 时从零条目新建。
+func applyOverlayPatch(base *PricingEntry, patch map[string]json.RawMessage) (*PricingEntry, error) {
+	m := make(map[string]json.RawMessage, len(patch)+8)
+	if base != nil {
+		buf, err := json.Marshal(base)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(buf, &m); err != nil {
+			return nil, err
+		}
+	}
+	for k, v := range patch {
+		m[k] = v
+	}
+	buf, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	out := &PricingEntry{}
+	if err := json.Unmarshal(buf, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CalculateCost 根据模型与 token 用量返回费用明细(美元)。
+// 入口加载一次快照并贯穿整次计算,保证同一请求内价格版本一致。
 func (s *Service) CalculateCost(model string, usage UsageSnapshot) CostBreakdown {
+	if s == nil || model == "" {
+		return CostBreakdown{}
+	}
+	snap := s.snap.Load()
+	if snap == nil {
+		return CostBreakdown{}
+	}
+	return snap.calculateCost(model, usage)
+}
+
+func (s *snapshot) calculateCost(model string, usage UsageSnapshot) CostBreakdown {
 	if s == nil || model == "" {
 		return CostBreakdown{}
 	}
@@ -569,7 +807,7 @@ func firstNonZero(values ...float64) float64 {
 
 // getPricing 按确定性顺序查找模型定价,不再使用无序 substring 模糊匹配。
 // 顺序:exact → region-stripped → anthropic-stripped → 别名(gpt-5-codex→gpt-5)→ normalized → family fallback。
-func (s *Service) getPricing(model string) (*PricingEntry, bool) {
+func (s *snapshot) getPricing(model string) (*PricingEntry, bool) {
 	if model == "" {
 		return nil, false
 	}
@@ -702,7 +940,7 @@ func familyFallbackCandidates(model string) []string {
 // longContextTier 根据 [1m] 后缀匹配用户自定义的 1M 长上下文价目。
 // 严格精确匹配,不再无序 fallback 到任意 tier(避免未来加新模型被随机命中)。
 // 优先级:JSON 的 above_200k/272k 字段 > 此机制,见 CalculateCost。
-func (s *Service) longContextTier(model string, usage UsageSnapshot) (LongContextPricing, bool) {
+func (s *snapshot) longContextTier(model string, usage UsageSnapshot) (LongContextPricing, bool) {
 	totalInput := usage.InputTokens + usage.CacheCreateTokens + usage.CacheReadTokens
 	if strings.Contains(strings.ToLower(model), "[1m]") && totalInput > 200000 {
 		if tier, ok := s.longContexts[model]; ok {
@@ -712,7 +950,7 @@ func (s *Service) longContextTier(model string, usage UsageSnapshot) (LongContex
 	return LongContextPricing{}, false
 }
 
-func (s *Service) getEphemeral1hPricing(model string) float64 {
+func (s *snapshot) getEphemeral1hPricing(model string) float64 {
 	if price, ok := s.ephemeral1h[model]; ok {
 		return price
 	}

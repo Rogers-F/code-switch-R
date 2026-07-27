@@ -103,12 +103,16 @@ func main() {
 	autoStartService := services.NewAutoStartService()
 	appSettings := services.NewAppSettingsService(autoStartService)
 	notificationService := services.NewNotificationService(appSettings) // 通知服务
+	// 模型元数据同步:载入本地缓存/内置种子并完成首次定价快照重建,
+	// 默认模型策略从同步目录动态解析
+	defaultModelPolicy := services.NewDefaultModelPolicy()
+	modelSyncService := services.NewModelSyncService(appSettings, defaultModelPolicy)
 	blacklistService := services.NewBlacklistService(settingsService, notificationService)
-	geminiService := services.NewGeminiService("127.0.0.1:18100")
+	geminiService := services.NewGeminiService("127.0.0.1:18100", defaultModelPolicy)
 	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, ":18100")
 	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
-	codexSettings := services.NewCodexSettingsService(providerRelay.Addr())
-	cliConfigService := services.NewCliConfigService(providerRelay.Addr())
+	codexSettings := services.NewCodexSettingsService(providerRelay.Addr(), defaultModelPolicy)
+	cliConfigService := services.NewCliConfigService(providerRelay.Addr(), defaultModelPolicy)
 	logService := services.NewLogService()
 	mcpService := services.NewMCPService()
 	skillService := services.NewSkillService()
@@ -117,8 +121,8 @@ func main() {
 	importService := services.NewImportService(providerService, mcpService)
 	deeplinkService := services.NewDeepLinkService(providerService)
 	speedTestService := services.NewSpeedTestService()
-	connectivityTestService := services.NewConnectivityTestService(providerService, blacklistService, settingsService)
-	healthCheckService := services.NewHealthCheckService(providerService, blacklistService, settingsService)
+	connectivityTestService := services.NewConnectivityTestService(providerService, blacklistService, settingsService, defaultModelPolicy)
+	healthCheckService := services.NewHealthCheckService(providerService, blacklistService, settingsService, defaultModelPolicy)
 	// 初始化健康检查数据库表
 	if err := healthCheckService.Start(); err != nil {
 		log.Fatalf("初始化健康检查服务失败: %v", err)
@@ -133,6 +137,9 @@ func main() {
 	if err := providerRelay.Start(); err != nil {
 		log.Fatalf("provider relay start error: %v", err)
 	}
+
+	// 启动模型元数据后台同步调度（延迟首查 + 每小时检查到期厂商）
+	modelSyncService.Start()
 
 	// 启动黑名单自动恢复定时器（每分钟检查一次）
 	blacklistStopChan := make(chan struct{})
@@ -212,6 +219,7 @@ func main() {
 			application.NewService(consoleService),
 			application.NewService(customCliService),
 			application.NewService(networkService),
+			application.NewService(modelSyncService),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -225,6 +233,8 @@ func main() {
 	notificationService.SetApp(app)
 	// 设置 UpdateService 的 App 引用，用于发送更新事件
 	updateService.SetApp(app)
+	// 设置 ModelSyncService 的 App 引用，用于广播同步完成事件
+	modelSyncService.SetApp(app)
 
 	app.OnShutdown(func() {
 		log.Println("🛑 应用正在关闭，停止后台服务...")
@@ -235,6 +245,10 @@ func main() {
 		// 2. 停止健康检查轮询
 		healthCheckService.StopBackgroundPolling()
 		log.Println("✅ 健康检查服务已停止")
+
+		// 2.5 停止模型元数据同步（取消在途请求并等待退出）
+		modelSyncService.Stop()
+		log.Println("✅ 模型数据同步已停止")
 
 		// 3. 停止代理服务器
 		if err := providerRelay.Stop(); err != nil {

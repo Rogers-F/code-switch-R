@@ -393,6 +393,16 @@ func (q *DBWriteQueue) Exec(sql string, args ...interface{}) error {
 		select {
 		case err := <-task.Result:
 			return err
+		case <-q.shutdownChan:
+			// 关闭窗口内恰好入队:worker 可能仍在排空,给短暂宽限等待结果,
+			// 避免无消费者时空等满 30 秒
+			select {
+			case err := <-task.Result:
+				return err
+			case <-time.After(2 * time.Second):
+				go func() { <-task.Result }()
+				return fmt.Errorf("写入队列已关闭")
+			}
 		case <-timeout:
 			// 超时，但任务已入队，无法撤销，需等待结果以避免 goroutine 泄漏
 			go func() { <-task.Result }()
@@ -508,6 +518,15 @@ func (q *DBWriteQueue) ExecBatchCtx(ctx context.Context, sql string, args ...int
 		select {
 		case err := <-task.Result:
 			return err
+		case <-q.shutdownChan:
+			// 关闭窗口内恰好入队:给短暂宽限等待排空结果
+			select {
+			case err := <-task.Result:
+				return err
+			case <-time.After(2 * time.Second):
+				go func() { <-task.Result }()
+				return fmt.Errorf("写入队列已关闭")
+			}
 		case <-ctx.Done():
 			// 超时或取消，但任务已入队，无法撤销
 			go func() { <-task.Result }()

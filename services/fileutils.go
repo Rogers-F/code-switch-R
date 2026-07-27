@@ -38,25 +38,9 @@ func AtomicWriteBytes(path string, data []byte) error {
 		return fmt.Errorf("写入临时文件失败 %s: %w", tmpPath, err)
 	}
 
-	// Windows: rename 目标存在时会失败，需要先删除
-	if runtime.GOOS == "windows" {
-		if _, err := os.Stat(path); err == nil {
-			if err := os.Remove(path); err != nil {
-				// 删除失败，清理临时文件
-				os.Remove(tmpPath)
-				return fmt.Errorf("删除目标文件失败 %s: %w", path, err)
-			}
-		}
-	}
-
-	// 原子重命名
-	if err := os.Rename(tmpPath, path); err != nil {
-		// 重命名失败，清理临时文件
-		os.Remove(tmpPath)
-		return fmt.Errorf("原子替换失败 %s -> %s: %w", tmpPath, path, err)
-	}
-
-	return nil
+	// 原子重命名（平台特定实现：Windows 走 MoveFileEx 覆盖替换，
+	// 消除旧实现"先删目标再改名"造成的文件短暂不存在窗口）
+	return atomicRename(tmpPath, path)
 }
 
 // AtomicWriteText 原子写入文本文件

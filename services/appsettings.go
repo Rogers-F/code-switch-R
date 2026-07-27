@@ -40,6 +40,7 @@ type AppSettings struct {
 	BudgetForecastMethodCodex string `json:"budget_forecast_method_codex"`
 	AutoStart            bool `json:"auto_start"`
 	AutoUpdate           bool `json:"auto_update"`
+	AutoSyncModels       bool `json:"auto_sync_models"`       // 模型/价格数据自动同步开关
 	AutoConnectivityTest bool `json:"auto_connectivity_test"`
 	EnableSwitchNotify   bool `json:"enable_switch_notify"`   // 供应商切换通知开关
 	EnableRoundRobin     bool `json:"enable_round_robin"`     // 同 Level 轮询负载均衡开关（默认关闭）
@@ -177,6 +178,7 @@ func (as *AppSettingsService) defaultSettings() AppSettings {
 		BudgetForecastMethodCodex: "cycle",
 		AutoStart:            autoStartEnabled,
 		AutoUpdate:           true,  // 默认开启自动更新
+		AutoSyncModels:       true,  // 默认开启模型价格自动同步
 		AutoConnectivityTest: true,  // 默认开启自动可用性监控（开箱即用）
 		EnableSwitchNotify:   true,  // 默认开启切换通知
 		EnableRoundRobin:     false, // 默认关闭轮询（使用顺序降级）
@@ -195,19 +197,45 @@ func (as *AppSettingsService) SaveAppSettings(settings AppSettings) (AppSettings
 	as.mu.Lock()
 	defer as.mu.Unlock()
 
-	// 同步开机自启动状态
+	// 先执行开机自启的 OS 操作;失败时把该字段回退为系统实际状态
+	// (探测也失败则回退保存前的持久化值),其余设置字段照常落盘——
+	// 既不丢其他修改,也不把"未生效"的自启状态写进磁盘
+	var autoStartErr error
 	if as.autoStartService != nil {
 		if settings.AutoStart {
-			if err := as.autoStartService.Enable(); err != nil {
-				return settings, err
-			}
+			autoStartErr = as.autoStartService.Enable()
 		} else {
-			if err := as.autoStartService.Disable(); err != nil {
-				return settings, err
+			autoStartErr = as.autoStartService.Disable()
+		}
+		if autoStartErr != nil {
+			if enabled, probeErr := as.autoStartService.IsEnabled(); probeErr == nil {
+				settings.AutoStart = enabled
+			} else if prev, loadErr := as.loadLocked(); loadErr == nil {
+				settings.AutoStart = prev.AutoStart
 			}
 		}
 	}
 
+	if err := as.saveLocked(settings); err != nil {
+		return settings, err
+	}
+	if autoStartErr != nil {
+		return settings, fmt.Errorf("其他设置已保存,但开机自启动设置失败: %w", autoStartErr)
+	}
+	return settings, nil
+}
+
+// mutateAppSettings 锁内整段"读→改→写盘",不触碰开机自启动等外部副作用。
+// 供服务内部只改个别字段的场景使用(如恢复内置数据时关闭自动同步),
+// 避免经 SaveAppSettings 与自启动操作纠缠出部分完成状态。
+func (as *AppSettingsService) mutateAppSettings(mutate func(*AppSettings)) (AppSettings, error) {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	settings, err := as.loadLocked()
+	if err != nil {
+		return settings, err
+	}
+	mutate(&settings)
 	if err := as.saveLocked(settings); err != nil {
 		return settings, err
 	}
@@ -233,13 +261,10 @@ func (as *AppSettingsService) loadLocked() (AppSettings, error) {
 }
 
 func (as *AppSettingsService) saveLocked(settings AppSettings) error {
-	dir := filepath.Dir(as.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(as.path, data, 0o644)
+	// 原子写入:避免写入途中崩溃把 app.json 截断成非法 JSON、全部设置被静默重置
+	return AtomicWriteBytes(as.path, data)
 }

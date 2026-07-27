@@ -1,0 +1,174 @@
+{
+  "api": "https://api.deepseek.com",
+  "doc": "https://api-docs.deepseek.com/quick_start/pricing",
+  "env": [
+    "DEEPSEEK_API_KEY"
+  ],
+  "iconURL": "https://models.dev/logos/deepseek.svg",
+  "id": "deepseek",
+  "lobeIcon": "DeepSeek.Color",
+  "models": {
+    "deepseek-chat": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.0028,
+        "input": 0.14,
+        "output": 0.28
+      },
+      "description": "DeepSeek chat model for instruction following, coding, and analysis",
+      "family": "deepseek",
+      "id": "deepseek-chat",
+      "knowledge": "2025-09",
+      "last_updated": "2026-02-28",
+      "limit": {
+        "context": 1000000,
+        "output": 384000
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "DeepSeek Chat",
+      "open_weights": true,
+      "reasoning": false,
+      "release_date": "2025-12-01",
+      "temperature": true,
+      "tool_call": true
+    },
+    "deepseek-reasoner": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.0028,
+        "input": 0.14,
+        "output": 0.28
+      },
+      "description": "DeepSeek reasoning model for multi-step analysis, math, coding, and tools",
+      "family": "deepseek-thinking",
+      "id": "deepseek-reasoner",
+      "interleaved": {
+        "field": "reasoning_content"
+      },
+      "knowledge": "2025-09",
+      "last_updated": "2026-02-28",
+      "limit": {
+        "context": 1000000,
+        "output": 384000
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "DeepSeek Reasoner",
+      "open_weights": true,
+      "reasoning": true,
+      "reasoning_options": [],
+      "release_date": "2025-12-01",
+      "temperature": true,
+      "tool_call": true
+    },
+    "deepseek-v4-flash": {
+      "attachment": false,
+      "cost": {
+        "cache_read": 0.0028,
+        "input": 0.14,
+        "output": 0.28
+      },
+      "description": "Fast DeepSeek V4 lane for economical reasoning, coding, and long-context work",
+      "family": "deepseek-flash",
+      "id": "deepseek-v4-flash",
+      "interleaved": {
+        "field": "reasoning_content"
+      },
+      "knowledge": "2025-05",
+      "last_updated": "2026-04-24",
+      "limit": {
+        "context": 1000000,
+        "output": 384000
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "DeepSeek V4 Flash",
+      "open_weights": true,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "high",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-04-24",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "deepseek-v4-pro": {
+      "attachment": false,
+      "cost": {
+        "cache_read": 0.003625,
+        "input": 0.435,
+        "output": 0.87
+      },
+      "description": "Open MoE flagship with million-token context for coding and long agent runs",
+      "family": "deepseek-thinking",
+      "id": "deepseek-v4-pro",
+      "interleaved": {
+        "field": "reasoning_content"
+      },
+      "knowledge": "2025-05",
+      "last_updated": "2026-04-24",
+      "limit": {
+        "context": 1000000,
+        "output": 384000
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "DeepSeek V4 Pro",
+      "open_weights": true,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "high",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-04-24",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    }
+  },
+  "name": "DeepSeek",
+  "npm": "@ai-sdk/openai-compatible"
+}

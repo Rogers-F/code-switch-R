@@ -151,6 +151,28 @@ func (ps *ProviderService) SaveProviders(kind string, providers []Provider) erro
 	return ps.saveProvidersLocked(kind, providers)
 }
 
+// mutateProviders 在锁内完成"加载→修改→保存"的整段读改写。
+// 供跨调用修改 provider 字段的场景使用(如健康检查开关),
+// 避免调用方拆分 Load/Save 导致并发保存相互覆盖丢失更新。
+func (ps *ProviderService) mutateProviders(kind string, mutate func(providers []Provider) ([]Provider, error)) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	providers, err := ps.loadProvidersRaw(kind)
+	if err != nil {
+		return err
+	}
+	// 原样读取不含旧字段迁移,而 saveProvidersLocked 会清除旧字段;
+	// 必须先迁移再修改,否则旧配置里的连通性设置会在保存时丢失
+	for i := range providers {
+		providers[i].migrateFromLegacy()
+	}
+	updated, err := mutate(providers)
+	if err != nil {
+		return err
+	}
+	return ps.saveProvidersLocked(kind, updated)
+}
+
 // loadProvidersRaw 原样读取配置文件（不迁移、不保存）
 // 用于内部需要读取现有配置但不触发迁移的场景（如名称校验）
 func (ps *ProviderService) loadProvidersRaw(kind string) ([]Provider, error) {

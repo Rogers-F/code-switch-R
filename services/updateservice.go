@@ -947,18 +947,20 @@ func (us *UpdateService) launchWindowsUpdater(pending *PendingApply) error {
 	}
 
 	pid := os.Getpid()
+	// 注意：$pid 是 PowerShell 只读自动变量，赋值会在 Stop 模式下直接终止脚本；
+	// 路径必须单引号转义，否则含引号的用户名/目录会破坏脚本。
 	script := fmt.Sprintf(`
 $ErrorActionPreference = 'Stop'
-$oldExe = '%s'
-$newExe = '%s'
-$pid = %d
+$oldExe = %s
+$newExe = %s
+$targetPid = %d
 $maxWait = 60
 
 # 等待旧进程退出
 $waited = 0
 while ($waited -lt $maxWait) {
     try {
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
         if (-not $proc) { break }
     } catch { break }
     Start-Sleep -Milliseconds 500
@@ -1008,7 +1010,7 @@ Start-Process -FilePath $oldExe -WorkingDirectory (Split-Path $oldExe)
 Start-Sleep -Seconds 2
 Remove-Item $backupPath -Force -ErrorAction SilentlyContinue
 Remove-Item $newExe -Force -ErrorAction SilentlyContinue
-`, exePath, pending.FilePath, pid)
+`, psSingleQuote(exePath), psSingleQuote(pending.FilePath), pid)
 
 	scriptPath := filepath.Join(us.dataDir, "update.ps1")
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
@@ -1046,8 +1048,8 @@ func (us *UpdateService) launchMacOSUpdater(pending *PendingApply) error {
 	script := fmt.Sprintf(`#!/bin/bash
 set -e
 
-OLD_APP="%s"
-NEW_APP="%s"
+OLD_APP=%s
+NEW_APP=%s
 PID=%d
 MAX_WAIT=60
 
@@ -1088,7 +1090,7 @@ open "$OLD_APP"
 sleep 2
 rm -rf "$BACKUP_PATH"
 rm -rf "$NEW_APP"
-`, appPath, pending.FilePath, pid)
+`, shSingleQuote(appPath), shSingleQuote(pending.FilePath), pid)
 
 	scriptPath := filepath.Join(us.dataDir, "update.sh")
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
@@ -1100,6 +1102,16 @@ rm -rf "$NEW_APP"
 	cmd.Stderr = os.Stderr
 
 	return cmd.Start()
+}
+
+// psSingleQuote 生成 PowerShell 单引号字面量（内嵌单引号翻倍转义）。
+func psSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// shSingleQuote 生成 POSIX shell 单引号字面量（'\'' 转义内嵌单引号）。
+func shSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // launchLinuxUpdater Linux 更新器
@@ -1114,8 +1126,8 @@ func (us *UpdateService) launchLinuxUpdater(pending *PendingApply) error {
 	script := fmt.Sprintf(`#!/bin/bash
 set -e
 
-OLD_APP="%s"
-NEW_APP="%s"
+OLD_APP=%s
+NEW_APP=%s
 PID=%d
 MAX_WAIT=60
 
@@ -1147,7 +1159,7 @@ chmod +x "$OLD_APP"
 sleep 2
 rm -f "$BACKUP_PATH"
 rm -f "$NEW_APP"
-`, exePath, pending.FilePath, pid)
+`, shSingleQuote(exePath), shSingleQuote(pending.FilePath), pid)
 
 	scriptPath := filepath.Join(us.dataDir, "update.sh")
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {

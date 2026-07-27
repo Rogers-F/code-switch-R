@@ -65,17 +65,17 @@ type GeminiStatus struct {
 type GeminiService struct {
 	mu        sync.Mutex
 	providers []GeminiProvider
-	presets   []GeminiPreset
+	policy    *DefaultModelPolicy
 	relayAddr string
 }
 
 // NewGeminiService 创建 Gemini 服务
-func NewGeminiService(relayAddr string) *GeminiService {
+func NewGeminiService(relayAddr string, policy *DefaultModelPolicy) *GeminiService {
 	if relayAddr == "" {
 		relayAddr = ":18100"
 	}
 	svc := &GeminiService{
-		presets:   getGeminiPresets(),
+		policy:    policy,
 		relayAddr: relayAddr,
 	}
 	// 加载已保存的供应商配置
@@ -83,8 +83,19 @@ func NewGeminiService(relayAddr string) *GeminiService {
 	return svc
 }
 
+// currentPresets 基于当前解析出的默认模型即时生成预设(随同步数据自动更新)。
+func (s *GeminiService) currentPresets() []GeminiPreset {
+	model := FallbackGeminiDefaultModel
+	if s.policy != nil {
+		if m := s.policy.GeminiDefaultModel(); m != "" {
+			model = m
+		}
+	}
+	return getGeminiPresets(model)
+}
+
 // getGeminiPresets 获取预设供应商列表
-func getGeminiPresets() []GeminiPreset {
+func getGeminiPresets(defaultModel string) []GeminiPreset {
 	return []GeminiPreset{
 		{
 			Name:                "Google Official",
@@ -100,13 +111,13 @@ func getGeminiPresets() []GeminiPreset {
 			WebsiteURL:          "https://www.packyapi.com",
 			APIKeyURL:           "https://www.packyapi.com/register?aff=cc-switch",
 			BaseURL:             "https://www.packyapi.com",
-			Model:               "gemini-3.1-pro-preview",
+			Model:               defaultModel,
 			Description:         "PackyCode 中转服务",
 			Category:            "third_party",
 			PartnerPromotionKey: "packycode",
 			EnvConfig: map[string]string{
 				"GOOGLE_GEMINI_BASE_URL": "https://www.packyapi.com",
-				"GEMINI_MODEL":           "gemini-3.1-pro-preview",
+				"GEMINI_MODEL":           defaultModel,
 			},
 		},
 		{
@@ -116,7 +127,7 @@ func getGeminiPresets() []GeminiPreset {
 			Category:    "custom",
 			EnvConfig: map[string]string{
 				"GOOGLE_GEMINI_BASE_URL": "",
-				"GEMINI_MODEL":           "gemini-3.1-pro-preview",
+				"GEMINI_MODEL":           defaultModel,
 			},
 		},
 	}
@@ -134,7 +145,7 @@ func (s *GeminiService) Stop() error {
 
 // GetPresets 获取预设供应商列表
 func (s *GeminiService) GetPresets() []GeminiPreset {
-	return s.presets
+	return s.currentPresets()
 }
 
 // GetProviders 获取已配置的供应商列表
@@ -259,7 +270,7 @@ func (s *GeminiService) SwitchProvider(id string) error {
 		envConfig := make(map[string]string)
 
 		// 1. 先查找预设并复制其 EnvConfig
-		for _, preset := range s.presets {
+		for _, preset := range s.currentPresets() {
 			if preset.Name == provider.Name || preset.PartnerPromotionKey == provider.PartnerPromotionKey {
 				for k, v := range preset.EnvConfig {
 					if v != "" {
@@ -655,9 +666,10 @@ func (s *GeminiService) saveProviders() error {
 // CreateProviderFromPreset 从预设创建供应商
 func (s *GeminiService) CreateProviderFromPreset(presetName string, apiKey string) (*GeminiProvider, error) {
 	var preset *GeminiPreset
-	for i := range s.presets {
-		if s.presets[i].Name == presetName {
-			preset = &s.presets[i]
+	presets := s.currentPresets()
+	for i := range presets {
+		if presets[i].Name == presetName {
+			preset = &presets[i]
 			break
 		}
 	}

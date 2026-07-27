@@ -5,7 +5,7 @@ import (
 )
 
 func TestGeminiService_GetPresets(t *testing.T) {
-	svc := NewGeminiService("127.0.0.1:18100")
+	svc := NewGeminiService("127.0.0.1:18100", nil)
 	presets := svc.GetPresets()
 
 	if len(presets) == 0 {
@@ -230,7 +230,7 @@ func TestGeminiProvider_DeepCopyMaps(t *testing.T) {
 }
 
 func TestGeminiPreset_Fields(t *testing.T) {
-	svc := NewGeminiService("127.0.0.1:18100")
+	svc := NewGeminiService("127.0.0.1:18100", nil)
 	presets := svc.GetPresets()
 
 	for _, p := range presets {

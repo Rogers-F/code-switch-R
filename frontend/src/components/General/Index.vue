@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Call } from '@wailsio/runtime'
+import { GetSyncStatus, SyncNow, RestoreBuiltinPricing } from '../../../bindings/codeswitch/services/modelsyncservice'
+import type { ModelSyncStatus } from '../../../bindings/codeswitch/services/models'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
 import ThemeSetting from '../Setting/ThemeSetting.vue'
@@ -33,10 +35,13 @@ const getCachedString = (key: string, defaultValue: string): string => {
 const heatmapEnabled = ref(getCachedValue('heatmap', true))
 const homeTitleVisible = ref(getCachedValue('homeTitle', true))
 const autoStartEnabled = ref(getCachedValue('autoStart', false))
-const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', false))
+const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', true))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))     // 自动更新开关
+const autoSyncModelsEnabled = ref(getCachedValue('autoSyncModels', true)) // 模型价格自动同步开关
+const modelSyncStatus = ref<ModelSyncStatus | null>(null)
+const modelSyncBusy = ref(false)
 const budgetTotal = ref(getCachedNumber('budgetTotal', 0))
 const budgetUsedAdjustment = ref(getCachedNumber('budgetUsedAdjustment', 0))
 const budgetForecastMethod = ref(getCachedString('budgetForecastMethod', 'cycle'))
@@ -113,6 +118,7 @@ const loadAppSettings = async () => {
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
     autoUpdateEnabled.value = data?.auto_update ?? true
+    autoSyncModelsEnabled.value = data?.auto_sync_models ?? true
 
     // 缓存到 localStorage，下次打开时直接显示正确状态
     localStorage.setItem('app-settings-heatmap', String(heatmapEnabled.value))
@@ -140,6 +146,7 @@ const loadAppSettings = async () => {
     localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
     localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
     localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+    localStorage.setItem('app-settings-autoSyncModels', String(autoSyncModelsEnabled.value))
   } catch (error) {
     console.error('failed to load app settings', error)
     heatmapEnabled.value = true
@@ -163,16 +170,92 @@ const loadAppSettings = async () => {
     budgetShowCountdownCodex.value = false
     budgetShowForecastCodex.value = false
     autoStartEnabled.value = false
-    autoConnectivityTestEnabled.value = false
+    autoConnectivityTestEnabled.value = true
     switchNotifyEnabled.value = true
     roundRobinEnabled.value = false
+    autoUpdateEnabled.value = true
+    autoSyncModelsEnabled.value = true
   } finally {
     settingsLoading.value = false
   }
+  void refreshModelSyncStatus()
 }
 
+// —— 模型数据同步 ——
+
+const refreshModelSyncStatus = async () => {
+  try {
+    modelSyncStatus.value = await GetSyncStatus()
+  } catch (error) {
+    console.error('failed to load model sync status', error)
+  }
+}
+
+const syncModelDataNow = async () => {
+  if (modelSyncBusy.value) return
+  modelSyncBusy.value = true
+  try {
+    modelSyncStatus.value = await SyncNow()
+  } catch (error) {
+    console.error('model data sync failed', error)
+    alert(t('components.general.label.modelSyncFailed') + extractErrorMessage(error))
+  } finally {
+    modelSyncBusy.value = false
+  }
+}
+
+const restoreBuiltinModelData = async () => {
+  // 与常规设置保存互斥:恢复动作在服务端会改写 AppSettings(关闭自动同步),
+  // 若与保存并发会用旧快照覆盖用户刚保存的设置
+  if (modelSyncBusy.value || saveBusy.value || settingsLoading.value) return
+  if (!window.confirm(t('components.general.label.modelRestoreConfirm'))) return
+  modelSyncBusy.value = true
+  saveBusy.value = true
+  try {
+    modelSyncStatus.value = await RestoreBuiltinPricing()
+    // 恢复内置会同时关闭自动同步(可再手动开启)
+    autoSyncModelsEnabled.value = false
+    localStorage.setItem('app-settings-autoSyncModels', 'false')
+  } catch (error) {
+    console.error('restore builtin model data failed', error)
+    alert(t('components.general.label.modelRestoreFailed') + extractErrorMessage(error))
+  } finally {
+    saveBusy.value = false
+    modelSyncBusy.value = false
+    if (pendingSave.value) {
+      pendingSave.value = false
+      void persistAppSettings()
+    }
+  }
+}
+
+const modelSyncStatusText = computed(() => {
+  const status = modelSyncStatus.value
+  if (!status) return '—'
+  const last = status.lastSuccess ? new Date(status.lastSuccess as unknown as string) : null
+  const never = !last || Number.isNaN(last.getTime()) || last.getFullYear() < 2000
+  const timeText = never ? t('components.general.label.modelSyncNever') : last!.toLocaleString()
+  return t('components.general.label.modelSyncSummary', {
+    time: timeText,
+    count: status.pricing?.totalModels ?? 0,
+  })
+})
+
+const modelSyncDefaultsText = computed(() => {
+  const models = modelSyncStatus.value?.defaultModels
+  if (!models) return '—'
+  return `Codex: ${models.codexDefault} · Gemini: ${models.geminiDefault} · Claude(探测): ${models.claudeProbe}`
+})
+
+const pendingSave = ref(false)
+
 const persistAppSettings = async () => {
-  if (settingsLoading.value || saveBusy.value) return
+  if (settingsLoading.value) return
+  if (saveBusy.value) {
+    // 保存进行中:排队一次尾随保存,避免连续切换时后一次改动被静默丢弃
+    pendingSave.value = true
+    return
+  }
   saveBusy.value = true
   try {
     const normalizedBudgetTotal = Number.isFinite(budgetTotal.value) ? Math.max(0, budgetTotal.value) : 0
@@ -231,6 +314,7 @@ const persistAppSettings = async () => {
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
       auto_update: autoUpdateEnabled.value,
+      auto_sync_models: autoSyncModelsEnabled.value,
     }
     await saveAppSettings(payload)
 
@@ -266,12 +350,18 @@ const persistAppSettings = async () => {
     localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
     localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
     localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
+    localStorage.setItem('app-settings-autoSyncModels', String(autoSyncModelsEnabled.value))
 
     window.dispatchEvent(new CustomEvent('app-settings-updated'))
   } catch (error) {
     console.error('failed to save app settings', error)
+    alert(t('components.general.label.settingsSaveFailed') + extractErrorMessage(error))
   } finally {
     saveBusy.value = false
+    if (pendingSave.value) {
+      pendingSave.value = false
+      void persistAppSettings()
+    }
   }
 }
 
@@ -766,6 +856,48 @@ onMounted(async () => {
                 <span></span>
               </label>
               <span class="hint-text">{{ $t('components.general.label.autoConnectivityTestHint') }}</span>
+            </div>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title">{{ $t('components.general.title.modelData') }}</h2>
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.label.autoSyncModels')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy || modelSyncBusy"
+                  v-model="autoSyncModelsEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.autoSyncModelsHint') }}</span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.modelSyncStatus')">
+            <span class="info-text">{{ modelSyncStatusText }}</span>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.modelSyncDefaults')">
+            <span class="info-text">{{ modelSyncDefaultsText }}</span>
+          </ListItem>
+          <ListItem :label="$t('components.general.label.modelSyncActions')">
+            <div class="toggle-with-hint">
+              <button
+                @click="syncModelDataNow"
+                :disabled="settingsLoading || modelSyncBusy"
+                class="primary-btn">
+                {{ modelSyncBusy ? $t('components.general.label.modelSyncRunning') : $t('components.general.label.modelSyncNow') }}
+              </button>
+              <button
+                @click="restoreBuiltinModelData"
+                :disabled="settingsLoading || saveBusy || modelSyncBusy"
+                class="action-btn">
+                {{ $t('components.general.label.modelRestoreBuiltin') }}
+              </button>
             </div>
           </ListItem>
         </div>

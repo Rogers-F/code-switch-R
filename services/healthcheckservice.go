@@ -91,6 +91,7 @@ type HealthCheckService struct {
 	providerService  *ProviderService
 	blacklistService *BlacklistService
 	settingsService  *SettingsService
+	policy           *DefaultModelPolicy
 
 	mu            sync.RWMutex
 	failCounters  map[string]*AvailabilityFailureCounter  // key: platform:providerName
@@ -110,11 +111,13 @@ func NewHealthCheckService(
 	providerService *ProviderService,
 	blacklistService *BlacklistService,
 	settingsService *SettingsService,
+	policy *DefaultModelPolicy,
 ) *HealthCheckService {
 	return &HealthCheckService{
 		providerService:  providerService,
 		blacklistService: blacklistService,
 		settingsService:  settingsService,
+		policy:           policy,
 		failCounters:     make(map[string]*AvailabilityFailureCounter),
 		latestResults: map[string]map[int64]*HealthCheckResult{
 			"claude": {},
@@ -464,10 +467,12 @@ func (hcs *HealthCheckService) RunAllChecks() (map[string][]HealthCheckResult, e
 
 func batchCheckTimeout(providers []Provider) time.Duration {
 	maxTimeout := DefaultTimeoutMs
+	enabled := 0
 	for i := range providers {
 		if !providers[i].AvailabilityMonitorEnabled {
 			continue
 		}
+		enabled++
 		timeout := DefaultTimeoutMs
 		if providers[i].AvailabilityConfig != nil && providers[i].AvailabilityConfig.Timeout > 0 {
 			timeout = providers[i].AvailabilityConfig.Timeout
@@ -476,7 +481,13 @@ func batchCheckTimeout(providers []Provider) time.Duration {
 			maxTimeout = timeout
 		}
 	}
-	return time.Duration(maxTimeout)*time.Millisecond + 5*time.Second
+	// 并发上限为 MaxConcurrentChecks,超出的供应商要排队;
+	// 整体超时按波次数放大,避免排队靠后的健康供应商被共享 deadline 误杀进而误拉黑
+	waves := (enabled + MaxConcurrentChecks - 1) / MaxConcurrentChecks
+	if waves < 1 {
+		waves = 1
+	}
+	return time.Duration(maxTimeout)*time.Millisecond*time.Duration(waves) + 5*time.Second
 }
 
 // checkAllProviders 检测指定平台的所有启用监控的供应商
@@ -545,6 +556,8 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 
 	// 获取有效的测试参数
 	model := hcs.getEffectiveModel(&provider, platform)
+	// 与真实转发一致:应用供应商的模型映射后再发起探测
+	model = provider.GetEffectiveModel(model)
 	endpoint := hcs.getEffectiveEndpoint(&provider, platform)
 	timeout := hcs.getEffectiveTimeout(&provider)
 
@@ -552,7 +565,7 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	result.Endpoint = endpoint
 
 	// 构建请求体
-	reqBody := hcs.buildTestRequest(platform, model)
+	reqBody := hcs.buildTestRequest(platform, model, endpoint)
 	if reqBody == nil {
 		result.ErrorMessage = "无法构建测试请求"
 		return result
@@ -665,7 +678,15 @@ func (hcs *HealthCheckService) determineStatus(statusCode, latencyMs int, body [
 		return HealthStatusFailed, "认证失败"
 	case 429:
 		return HealthStatusFailed, "请求频率限制"
-	case 400:
+	case 400, 404:
+		// 模型拒绝(不存在/不支持)不代表供应商网络故障:
+		// 记为 validation_failed,不进入自动拉黑计数
+		if isModelRejectionBody(body) {
+			return HealthStatusValidationError, "测试模型不受支持(可在供应商可用性配置中指定测试模型)"
+		}
+		if statusCode == 404 {
+			return HealthStatusFailed, "端点不存在"
+		}
 		return HealthStatusFailed, "请求无效"
 	}
 
@@ -682,21 +703,59 @@ func (hcs *HealthCheckService) determineStatus(statusCode, latencyMs int, body [
 	return HealthStatusFailed, fmt.Sprintf("异常状态码 (%d)", statusCode)
 }
 
+// isModelRejectionBody 识别"模型不存在/不支持"类错误响应。
+func isModelRejectionBody(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	if !strings.Contains(text, "model") && !strings.Contains(text, "模型") {
+		return false
+	}
+	for _, marker := range []string{
+		"not found", "not_found", "notfound",
+		"unsupported", "not supported", "not_supported",
+		"does not exist", "doesn't exist", "unknown model", "no such model",
+		"invalid model", "invalid_model", "model_not_found",
+		"不支持", "不存在", "无效的模型", "未找到",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // getEffectiveModel 获取有效的测试模型
+// 优先级:用户配置 → 候选链中供应商白名单支持的首个 → 动态解析值(30 天稳定窗) → 静态兜底。
 func (hcs *HealthCheckService) getEffectiveModel(provider *Provider, platform string) string {
 	// 优先使用用户配置
 	if provider.AvailabilityConfig != nil && provider.AvailabilityConfig.TestModel != "" {
 		return provider.AvailabilityConfig.TestModel
 	}
 
-	// 平台默认模型
+	if hcs.policy != nil {
+		candidates := hcs.policy.ProbeCandidates(platform)
+		for _, candidate := range candidates {
+			// 未声明白名单的供应商视为全支持,命中首个(即动态解析值)
+			if provider.IsModelSupported(candidate) {
+				return candidate
+			}
+		}
+		// 声明了白名单但全不支持:仍用首个候选,配合 400 模型拒绝分类避免误拉黑
+		if len(candidates) > 0 {
+			return candidates[0]
+		}
+	}
+
+	// 平台静态兜底
 	switch strings.ToLower(platform) {
 	case "claude":
-		return "claude-haiku-4-5-20251001"
+		return FallbackClaudeProbeModel
 	case "codex":
-		return "gpt-5.1"
+		return FallbackCodexProbeModel
 	case "gemini":
-		return "gemini-2.5-flash"
+		return FallbackGeminiProbeModel
 	default:
 		return "gpt-3.5-turbo"
 	}
@@ -734,10 +793,26 @@ func (hcs *HealthCheckService) getEffectiveTimeout(provider *Provider) int {
 	return DefaultTimeoutMs
 }
 
-// buildTestRequest 构建测试请求体
-func (hcs *HealthCheckService) buildTestRequest(platform, model string) []byte {
+// buildTestRequest 按端点协议构建测试请求体
+// /responses 走 OpenAI Responses 协议(input/max_output_tokens),
+// /messages 走 Anthropic 协议,其余按 Chat Completions。
+func (hcs *HealthCheckService) buildTestRequest(platform, model, endpoint string) []byte {
+	lowerEndpoint := strings.ToLower(endpoint)
+
+	// OpenAI Responses 格式(Codex 默认端点);claude 平台优先按 Anthropic 处理,
+	// 避免自定义端点路径恰好包含 /responses 时发错协议体
+	if platform != "claude" && strings.Contains(lowerEndpoint, "/responses") {
+		reqBody := map[string]interface{}{
+			"model":             model,
+			"input":             "hi",
+			"max_output_tokens": 16,
+		}
+		data, _ := json.Marshal(reqBody)
+		return data
+	}
+
 	// Anthropic 格式
-	if platform == "claude" {
+	if platform == "claude" || strings.Contains(lowerEndpoint, "/messages") {
 		reqBody := map[string]interface{}{
 			"model":      model,
 			"max_tokens": 1,
@@ -749,7 +824,7 @@ func (hcs *HealthCheckService) buildTestRequest(platform, model string) []byte {
 		return data
 	}
 
-	// OpenAI/Codex 格式
+	// Chat Completions 格式
 	reqBody := map[string]interface{}{
 		"model":      model,
 		"max_tokens": 1,
@@ -966,27 +1041,19 @@ func (hcs *HealthCheckService) runAllPlatformChecks() {
 }
 
 // SetAvailabilityMonitorEnabled 启用/禁用指定 Provider 的可用性监控
+// 走锁内整段读改写,避免与其他配置保存并发时相互覆盖丢失更新
 func (hcs *HealthCheckService) SetAvailabilityMonitorEnabled(platform string, providerID int64, enabled bool) error {
-	providers, err := hcs.providerService.LoadProviders(platform)
-	if err != nil {
-		return fmt.Errorf("加载供应商失败: %w", err)
-	}
-
-	found := false
-	for i := range providers {
-		if providers[i].ID == providerID {
-			providers[i].AvailabilityMonitorEnabled = enabled
-			found = true
-			break
+	err := hcs.providerService.mutateProviders(platform, func(providers []Provider) ([]Provider, error) {
+		for i := range providers {
+			if providers[i].ID == providerID {
+				providers[i].AvailabilityMonitorEnabled = enabled
+				return providers, nil
+			}
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("未找到供应商 ID: %d", providerID)
-	}
-
-	if err := hcs.providerService.SaveProviders(platform, providers); err != nil {
-		return fmt.Errorf("保存供应商配置失败: %w", err)
+		return nil, fmt.Errorf("未找到供应商 ID: %d", providerID)
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Printf("[HealthCheck] Provider %d 可用性监控已%s", providerID, map[bool]string{true: "启用", false: "禁用"}[enabled])
@@ -995,30 +1062,21 @@ func (hcs *HealthCheckService) SetAvailabilityMonitorEnabled(platform string, pr
 
 // SetConnectivityAutoBlacklist 启用/禁用指定 Provider 的连通性自动拉黑
 func (hcs *HealthCheckService) SetConnectivityAutoBlacklist(platform string, providerID int64, enabled bool) error {
-	providers, err := hcs.providerService.LoadProviders(platform)
-	if err != nil {
-		return fmt.Errorf("加载供应商失败: %w", err)
-	}
-
-	found := false
-	for i := range providers {
-		if providers[i].ID == providerID {
-			// 前置条件检查：必须先启用可用性监控
-			if enabled && !providers[i].AvailabilityMonitorEnabled {
-				return fmt.Errorf("请先在可用性页面启用监控")
+	err := hcs.providerService.mutateProviders(platform, func(providers []Provider) ([]Provider, error) {
+		for i := range providers {
+			if providers[i].ID == providerID {
+				// 前置条件检查：必须先启用可用性监控
+				if enabled && !providers[i].AvailabilityMonitorEnabled {
+					return nil, fmt.Errorf("请先在可用性页面启用监控")
+				}
+				providers[i].ConnectivityAutoBlacklist = enabled
+				return providers, nil
 			}
-			providers[i].ConnectivityAutoBlacklist = enabled
-			found = true
-			break
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("未找到供应商 ID: %d", providerID)
-	}
-
-	if err := hcs.providerService.SaveProviders(platform, providers); err != nil {
-		return fmt.Errorf("保存供应商配置失败: %w", err)
+		return nil, fmt.Errorf("未找到供应商 ID: %d", providerID)
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Printf("[HealthCheck] Provider %d 自动拉黑已%s", providerID, map[bool]string{true: "启用", false: "禁用"}[enabled])
@@ -1027,26 +1085,17 @@ func (hcs *HealthCheckService) SetConnectivityAutoBlacklist(platform string, pro
 
 // SaveAvailabilityConfig 保存 Provider 的可用性高级配置
 func (hcs *HealthCheckService) SaveAvailabilityConfig(platform string, providerID int64, config *AvailabilityConfig) error {
-	providers, err := hcs.providerService.LoadProviders(platform)
-	if err != nil {
-		return fmt.Errorf("加载供应商失败: %w", err)
-	}
-
-	found := false
-	for i := range providers {
-		if providers[i].ID == providerID {
-			providers[i].AvailabilityConfig = config
-			found = true
-			break
+	err := hcs.providerService.mutateProviders(platform, func(providers []Provider) ([]Provider, error) {
+		for i := range providers {
+			if providers[i].ID == providerID {
+				providers[i].AvailabilityConfig = config
+				return providers, nil
+			}
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("未找到供应商 ID: %d", providerID)
-	}
-
-	if err := hcs.providerService.SaveProviders(platform, providers); err != nil {
-		return fmt.Errorf("保存供应商配置失败: %w", err)
+		return nil, fmt.Errorf("未找到供应商 ID: %d", providerID)
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Printf("[HealthCheck] Provider %d 高级配置已保存", providerID)

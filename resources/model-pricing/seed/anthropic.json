@@ -1,0 +1,776 @@
+{
+  "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
+  "env": [
+    "ANTHROPIC_API_KEY"
+  ],
+  "iconURL": "https://models.dev/logos/anthropic.svg",
+  "id": "anthropic",
+  "lobeIcon": "Claude.Color",
+  "models": {
+    "claude-fable-5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 1,
+        "cache_write": 12.5,
+        "input": 10,
+        "output": 50
+      },
+      "description": "Claude model for creative writing, analysis, and controlled agent workflows",
+      "family": "claude-fable",
+      "id": "claude-fable-5",
+      "last_updated": "2026-06-09",
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Fable 5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-06-07",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "claude-haiku-4-5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.1,
+        "cache_write": 1.25,
+        "input": 1,
+        "output": 5
+      },
+      "description": "Fast Claude lane for lightweight agents, office tasks, and responsive chat",
+      "family": "claude-haiku",
+      "id": "claude-haiku-4-5",
+      "knowledge": "2025-02-28",
+      "last_updated": "2025-10-15",
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Haiku 4.5 (latest)",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-10-15",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-haiku-4-5-20251001": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.1,
+        "cache_write": 1.25,
+        "input": 1,
+        "output": 5
+      },
+      "description": "Fast Claude model for responsive assistance, classification, and lightweight agents",
+      "family": "claude-haiku",
+      "id": "claude-haiku-4-5-20251001",
+      "knowledge": "2025-02-28",
+      "last_updated": "2025-10-15",
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Haiku 4.5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-10-15",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-opus-4-1": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 1.5,
+        "cache_write": 18.75,
+        "input": 15,
+        "output": 75
+      },
+      "description": "Flagship Claude model for deep reasoning, coding, and long-horizon agents",
+      "family": "claude-opus",
+      "id": "claude-opus-4-1",
+      "knowledge": "2025-03-31",
+      "last_updated": "2025-08-05",
+      "limit": {
+        "context": 200000,
+        "output": 32000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 4.1 (latest)",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-08-05",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-opus-4-1-20250805": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 1.5,
+        "cache_write": 18.75,
+        "input": 15,
+        "output": 75
+      },
+      "description": "Flagship Claude model for deep reasoning, coding, and long-horizon agents",
+      "family": "claude-opus",
+      "id": "claude-opus-4-1-20250805",
+      "knowledge": "2025-03-31",
+      "last_updated": "2025-08-05",
+      "limit": {
+        "context": 200000,
+        "output": 32000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 4.1",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-08-05",
+      "status": "deprecated",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-opus-4-5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "input": 5,
+        "output": 25
+      },
+      "description": "Flagship Claude model for deep reasoning, coding, and long-horizon agents",
+      "family": "claude-opus",
+      "id": "claude-opus-4-5",
+      "knowledge": "2025-05",
+      "last_updated": "2025-11-24",
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 4.5 (latest)",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-11-24",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-opus-4-5-20251101": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "input": 5,
+        "output": 25
+      },
+      "description": "Flagship Claude model for deep reasoning, coding, and long-horizon agents",
+      "family": "claude-opus",
+      "id": "claude-opus-4-5-20251101",
+      "knowledge": "2025-05",
+      "last_updated": "2025-11-01",
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 4.5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-11-24",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-opus-4-6": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "input": 5,
+        "output": 25
+      },
+      "description": "High-end Claude for difficult coding, planning, and slower expert reasoning",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 3,
+              "cache_write": 37.5,
+              "input": 30,
+              "output": 150
+            },
+            "provider": {
+              "body": {
+                "speed": "fast"
+              },
+              "headers": {
+                "anthropic-beta": "fast-mode-2026-02-01"
+              }
+            }
+          }
+        }
+      },
+      "family": "claude-opus",
+      "id": "claude-opus-4-6",
+      "knowledge": "2025-05-31",
+      "last_updated": "2026-03-13",
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 4.6",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ]
+        },
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2026-02-04",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-opus-4-7": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "input": 5,
+        "output": 25
+      },
+      "description": "Stronger Opus tier for advanced software work and high-stakes reasoning",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 3,
+              "cache_write": 37.5,
+              "input": 30,
+              "output": 150
+            },
+            "provider": {
+              "body": {
+                "speed": "fast"
+              },
+              "headers": {
+                "anthropic-beta": "fast-mode-2026-02-01"
+              }
+            }
+          }
+        }
+      },
+      "family": "claude-opus",
+      "id": "claude-opus-4-7",
+      "knowledge": "2026-01-31",
+      "last_updated": "2026-04-16",
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 4.7",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-04-14",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "claude-opus-4-8": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "input": 5,
+        "output": 25
+      },
+      "description": "Top Claude Opus tier for the hardest reasoning, coding, and long-horizon agents",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 1,
+              "cache_write": 12.5,
+              "input": 10,
+              "output": 50
+            },
+            "provider": {
+              "body": {
+                "speed": "fast"
+              },
+              "headers": {
+                "anthropic-beta": "fast-mode-2026-02-01"
+              }
+            }
+          }
+        }
+      },
+      "family": "claude-opus",
+      "id": "claude-opus-4-8",
+      "knowledge": "2026-01",
+      "last_updated": "2026-05-28",
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 4.8",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-05-28",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "claude-opus-5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "input": 5,
+        "output": 25
+      },
+      "description": "Strongest Claude Opus model for coding, agents, and professional work",
+      "experimental": {
+        "modes": {
+          "fast": {
+            "cost": {
+              "cache_read": 1,
+              "cache_write": 12.5,
+              "input": 10,
+              "output": 50
+            },
+            "provider": {
+              "body": {
+                "speed": "fast"
+              },
+              "headers": {
+                "anthropic-beta": "fast-mode-2026-02-01"
+              }
+            }
+          }
+        }
+      },
+      "family": "claude-opus",
+      "id": "claude-opus-5",
+      "knowledge": "2026-05",
+      "last_updated": "2026-07-24",
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Opus 5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-07-24",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    },
+    "claude-sonnet-4-5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.3,
+        "cache_write": 3.75,
+        "input": 3,
+        "output": 15
+      },
+      "description": "Balanced Claude model for coding, analysis, agent workflows, and cost control",
+      "family": "claude-sonnet",
+      "id": "claude-sonnet-4-5",
+      "knowledge": "2025-07-31",
+      "last_updated": "2025-09-29",
+      "limit": {
+        "context": 1000000,
+        "output": 64000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Sonnet 4.5 (latest)",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-09-29",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-sonnet-4-5-20250929": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.3,
+        "cache_write": 3.75,
+        "input": 3,
+        "output": 15
+      },
+      "description": "Balanced Claude model for coding, analysis, agent workflows, and cost control",
+      "family": "claude-sonnet",
+      "id": "claude-sonnet-4-5-20250929",
+      "knowledge": "2025-07-31",
+      "last_updated": "2025-09-29",
+      "limit": {
+        "context": 1000000,
+        "output": 64000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Sonnet 4.5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2025-09-29",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-sonnet-4-6": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.3,
+        "cache_write": 3.75,
+        "input": 3,
+        "output": 15
+      },
+      "description": "Claude workhorse for coding agents, careful analysis, and production cost control",
+      "family": "claude-sonnet",
+      "id": "claude-sonnet-4-6",
+      "knowledge": "2025-08-31",
+      "last_updated": "2026-03-13",
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Sonnet 4.6",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ]
+        },
+        {
+          "min": 1024,
+          "type": "budget_tokens"
+        }
+      ],
+      "release_date": "2026-02-17",
+      "structured_output": true,
+      "temperature": true,
+      "tool_call": true
+    },
+    "claude-sonnet-5": {
+      "attachment": true,
+      "cost": {
+        "cache_read": 0.2,
+        "cache_write": 2.5,
+        "input": 2,
+        "output": 10
+      },
+      "description": "Everyday Claude agent model for coding, planning, browsing, and general work",
+      "family": "claude-sonnet",
+      "id": "claude-sonnet-5",
+      "knowledge": "2026-01-31",
+      "last_updated": "2026-06-30",
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "name": "Claude Sonnet 5",
+      "open_weights": false,
+      "reasoning": true,
+      "reasoning_options": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ],
+      "release_date": "2026-06-29",
+      "structured_output": true,
+      "temperature": false,
+      "tool_call": true
+    }
+  },
+  "name": "Anthropic",
+  "npm": "@ai-sdk/anthropic"
+}

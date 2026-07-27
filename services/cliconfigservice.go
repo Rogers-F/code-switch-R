@@ -18,16 +18,38 @@ type CliConfigService struct {
 	relayAddr string
 	homeDir   string // 缓存的用户家目录（已校验）
 	homeErr   error  // 家目录获取错误
+	policy    *DefaultModelPolicy
 }
 
 // NewCliConfigService 创建 CLI 配置服务
-func NewCliConfigService(relayAddr string) *CliConfigService {
+func NewCliConfigService(relayAddr string, policy *DefaultModelPolicy) *CliConfigService {
 	home, err := getUserHomeDir()
 	return &CliConfigService{
 		relayAddr: relayAddr,
 		homeDir:   home,
 		homeErr:   err,
+		policy:    policy,
 	}
+}
+
+// codexDefaultModel 当前 Codex 默认模型(随同步数据自动更新)。
+func (s *CliConfigService) codexDefaultModel() string {
+	if s.policy != nil {
+		if m := s.policy.CodexDefaultModel(); m != "" {
+			return m
+		}
+	}
+	return FallbackCodexDefaultModel
+}
+
+// geminiDefaultModel 当前 Gemini 默认模型(随同步数据自动更新)。
+func (s *CliConfigService) geminiDefaultModel() string {
+	if s.policy != nil {
+		if m := s.policy.GeminiDefaultModel(); m != "" {
+			return m
+		}
+	}
+	return FallbackGeminiDefaultModel
 }
 
 // requireHome 校验家目录是否可用
@@ -343,7 +365,7 @@ func (s *CliConfigService) GetConfigSnapshots(platform string, apiUrl string, ap
 			raw["model_provider"] = "code-switch-r"
 
 			if _, exists := raw["model"]; !exists {
-				raw["model"] = codexDefaultModel
+				raw["model"] = s.codexDefaultModel()
 			}
 
 			modelProviders := ensureTomlTable(raw, "model_providers")
@@ -939,7 +961,7 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 	)
 
 	// 可编辑字段
-	model := codexDefaultModel
+	model := s.codexDefaultModel()
 	if m, ok := data["model"].(string); ok {
 		model = m
 	}
@@ -1187,7 +1209,7 @@ func (s *CliConfigService) getGeminiConfig() (*CLIConfig, error) {
 
 	model := config.EnvContent["GEMINI_MODEL"]
 	if model == "" {
-		model = "gemini-3.1-pro-preview"
+		model = s.geminiDefaultModel()
 	}
 	config.Fields = append(config.Fields, CLIConfigField{
 		Key:    "GEMINI_MODEL",
