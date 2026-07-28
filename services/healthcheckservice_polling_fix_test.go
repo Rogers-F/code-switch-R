@@ -29,19 +29,8 @@ func TestHealthCheckPolling_StopStartLeavesSinglePoller(t *testing.T) {
 	hcs.StartBackgroundPolling()
 
 	// jitter 最长 10s；等两个协程都完成初始检测（无供应商配置，检测本身极快）后，
-	// 巡检协程数应收敛为 1（旧协程读到已关闭的捕获 channel 后退出）
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		if countGoroutinesContaining(t, "StartBackgroundPolling.func") <= 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("Stop→Start 切换后仍有 %d 个巡检协程存活（应为 1）",
-				countGoroutinesContaining(t, "StartBackgroundPolling.func"))
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	if got := countGoroutinesContaining(t, "StartBackgroundPolling.func"); got != 1 {
-		t.Errorf("巡检开启中应恰有 1 个巡检协程，实际 %d", got)
+	// 巡检协程数应稳定收敛为 1（旧协程读到已关闭的捕获 channel 后退出）
+	if got := waitForStableGoroutineCount(t, "StartBackgroundPolling.func", 1, 25*time.Second); got != 1 {
+		t.Errorf("巡检开启中应恰有 1 个巡检协程，实际 %d（旧协程未退出说明 Stop→Start 竞态仍在）", got)
 	}
 }

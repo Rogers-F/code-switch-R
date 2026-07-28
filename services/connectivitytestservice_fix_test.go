@@ -69,6 +69,37 @@ func countGoroutinesContaining(t *testing.T, fragment string) int {
 	return strings.Count(string(buf[:n]), fragment)
 }
 
+// waitForStableGoroutineCount 等待匹配的协程数稳定在 want。
+//
+// 不能只等"数量首次达标"就下结论：刚 go 出来的协程可能还没被调度，
+// 此刻计数会短暂偏低（甚至为 0），把"尚未启动"误判成"已收敛"，
+// 随后协程被调度就又变多了——CI 这类负载高的机器上尤其容易踩到。
+// 因此要求连续多次采样都等于 want 才认定稳定。
+func waitForStableGoroutineCount(t *testing.T, fragment string, want int, timeout time.Duration) int {
+	t.Helper()
+
+	const requiredStableSamples = 3
+	deadline := time.Now().Add(timeout)
+	stable := 0
+	last := -1
+
+	for {
+		last = countGoroutinesContaining(t, fragment)
+		if last == want {
+			stable++
+			if stable >= requiredStableSamples {
+				return last
+			}
+		} else {
+			stable = 0
+		}
+		if time.Now().After(deadline) {
+			return last
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // TestConnectivityAutoTest_StopStartLeavesSinglePoller 验证快速关-开自动测试后只剩一个轮询协程：
 // 旧实现协程每轮无锁重读 cts.stopChan，旧协程忙于 TestAll 时错过 close，
 // 回到 select 读到新 channel 后与新协程并存双跑。
@@ -106,19 +137,8 @@ func TestConnectivityAutoTest_StopStartLeavesSinglePoller(t *testing.T) {
 		t.Fatalf("重新开启自动测试失败: %v", err)
 	}
 
-	// 等两轮初始 TestAll 都结束后，轮询协程数应收敛为 1
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if countGoroutinesContaining(t, "startAutoTest.func") <= 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("关-开切换后仍有 %d 个轮询协程存活（应为 1）",
-				countGoroutinesContaining(t, "startAutoTest.func"))
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if got := countGoroutinesContaining(t, "startAutoTest.func"); got != 1 {
-		t.Errorf("自动测试开启中应恰有 1 个轮询协程，实际 %d", got)
+	// 等两轮初始 TestAll 都结束后，轮询协程数应稳定收敛为 1
+	if got := waitForStableGoroutineCount(t, "startAutoTest.func", 1, 20*time.Second); got != 1 {
+		t.Errorf("自动测试开启中应恰有 1 个轮询协程，实际 %d（旧协程未退出说明 Stop→Start 竞态仍在）", got)
 	}
 }

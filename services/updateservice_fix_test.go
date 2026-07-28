@@ -197,15 +197,10 @@ func TestLaunchLinuxUpdaterUsesAppImagePath(t *testing.T) {
 	const appImagePath = "/opt/apps/CodeSwitch.AppImage"
 	t.Setenv("APPIMAGE", appImagePath)
 
-	us := &UpdateService{dataDir: t.TempDir()}
-	// 非 Linux 平台上 /bin/bash 启动会失败，但脚本在启动前已写盘，仅校验脚本内容
-	_ = us.launchLinuxUpdater(&PendingApply{FilePath: "/tmp/CodeSwitch-new.AppImage", Method: "swap"})
+	// 只校验脚本内容，不调用 launchLinuxUpdater：后者会真的 exec 一个后台脚本，
+	// 该脚本会等待本进程退出后覆写可执行文件，在 CI 上还会遗留孤儿进程
+	script := buildLinuxUpdateScript(appImagePath, "/tmp/CodeSwitch-new.AppImage", os.Getpid())
 
-	data, err := os.ReadFile(filepath.Join(us.dataDir, "update.sh"))
-	if err != nil {
-		t.Fatalf("更新脚本未写入: %v", err)
-	}
-	script := string(data)
 	if !strings.Contains(script, appImagePath) {
 		t.Fatalf("脚本未使用 APPIMAGE 路径作为替换目标:\n%s", script)
 	}

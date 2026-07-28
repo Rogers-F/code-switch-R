@@ -1245,8 +1245,25 @@ func (us *UpdateService) launchLinuxUpdater(pending *PendingApply) error {
 		}
 	}
 
-	pid := os.Getpid()
-	script := fmt.Sprintf(`#!/bin/bash
+	script := buildLinuxUpdateScript(exePath, pending.FilePath, os.Getpid())
+
+	scriptPath := filepath.Join(us.dataDir, "update.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("/bin/bash", scriptPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Start()
+}
+
+// buildLinuxUpdateScript 生成 Linux 自替换脚本内容。
+// 单独抽出来是为了让单测能校验替换目标与脚本内容，
+// 而不必真的拉起一个会等待本进程退出、随后覆写可执行文件的后台脚本。
+func buildLinuxUpdateScript(exePath string, newAppPath string, pid int) string {
+	return fmt.Sprintf(`#!/bin/bash
 set -e
 
 OLD_APP=%s
@@ -1282,18 +1299,7 @@ chmod +x "$OLD_APP"
 sleep 2
 rm -f "$BACKUP_PATH"
 rm -f "$NEW_APP"
-`, shSingleQuote(exePath), shSingleQuote(pending.FilePath), pid)
-
-	scriptPath := filepath.Join(us.dataDir, "update.sh")
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
-		return err
-	}
-
-	cmd := exec.Command("/bin/bash", scriptPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Start()
+`, shSingleQuote(exePath), shSingleQuote(newAppPath), pid)
 }
 
 // checkPendingApply 启动时检查待应用的更新
