@@ -108,7 +108,10 @@ type claudeDesktopServer struct {
 func (ms *MCPService) ListServers() ([]MCPServer, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	return ms.listServersLocked()
+}
 
+func (ms *MCPService) listServersLocked() ([]MCPServer, error) {
 	config, err := ms.loadConfig()
 	if err != nil {
 		return nil, err
@@ -153,7 +156,10 @@ func (ms *MCPService) ListServers() ([]MCPServer, error) {
 func (ms *MCPService) SaveServers(servers []MCPServer) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	return ms.saveServersLocked(servers)
+}
 
+func (ms *MCPService) saveServersLocked(servers []MCPServer) error {
 	normalized := make([]MCPServer, len(servers))
 	raw := make(map[string]rawMCPServer, len(servers))
 	for i := range servers {
@@ -230,6 +236,23 @@ func (ms *MCPService) SaveServers(servers []MCPServer) error {
 		return err
 	}
 	return nil
+}
+
+// mutateServers 在锁内完成"读取→修改→保存"的整段读改写。
+// 供跨调用合并 server 列表的场景使用(如批量导入),
+// 避免调用方拆分 ListServers/SaveServers 导致并发保存相互覆盖丢失更新。
+func (ms *MCPService) mutateServers(mutate func(existing []MCPServer) ([]MCPServer, error)) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	existing, err := ms.listServersLocked()
+	if err != nil {
+		return err
+	}
+	updated, err := mutate(existing)
+	if err != nil {
+		return err
+	}
+	return ms.saveServersLocked(updated)
 }
 
 func (ms *MCPService) configPath() (string, error) {
@@ -375,7 +398,9 @@ func (ms *MCPService) saveStore(servers map[string]rawMCPServer, deletedBuiltins
 
 func normalizeServerType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "http":
+	case "http", "sse", "streamable-http", "streamable_http", "streamablehttp":
+		// sse / streamable-http 等基于 url 的远程类型内部统一按 http 管理，
+		// 否则会被归为 stdio 并因缺少 command 被拒绝
 		return "http"
 	default:
 		return "stdio"
@@ -633,7 +658,9 @@ func (ms *MCPService) syncClaudeServers(servers []MCPServer) error {
 	payload := make(map[string]any)
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		if err := json.Unmarshal(data, &payload); err != nil {
-			payload = make(map[string]any)
+			// 解析失败说明现有文件已损坏，若按空配置重建会把 mcpServers
+			// 之外的全部内容清空，必须中止同步交由用户处理
+			return fmt.Errorf("解析 %s 失败，已中止同步以免覆盖现有配置: %w", path, err)
 		}
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -643,7 +670,7 @@ func (ms *MCPService) syncClaudeServers(servers []MCPServer) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	return AtomicWriteBytes(path, data)
 }
 
 func (ms *MCPService) syncCodexServers(servers []MCPServer) error {
@@ -661,7 +688,9 @@ func (ms *MCPService) syncCodexServers(servers []MCPServer) error {
 	payload := make(map[string]any)
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		if err := toml.Unmarshal(data, &payload); err != nil {
-			payload = make(map[string]any)
+			// 解析失败说明现有文件已损坏，若按空配置重建会把 mcp_servers
+			// 之外的全部内容清空，必须中止同步交由用户处理
+			return fmt.Errorf("解析 %s 失败，已中止同步以免覆盖现有配置: %w", path, err)
 		}
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -671,7 +700,7 @@ func (ms *MCPService) syncCodexServers(servers []MCPServer) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return AtomicWriteBytes(path, data)
 }
 
 func (ms *MCPService) syncGeminiServers(servers []MCPServer) error {
@@ -689,7 +718,9 @@ func (ms *MCPService) syncGeminiServers(servers []MCPServer) error {
 	payload := make(map[string]any)
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		if err := json.Unmarshal(data, &payload); err != nil {
-			payload = make(map[string]any)
+			// 解析失败说明现有文件已损坏，若按空配置重建会把 mcpServers
+			// 之外的全部内容清空，必须中止同步交由用户处理
+			return fmt.Errorf("解析 %s 失败，已中止同步以免覆盖现有配置: %w", path, err)
 		}
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -699,7 +730,7 @@ func (ms *MCPService) syncGeminiServers(servers []MCPServer) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return AtomicWriteBytes(path, data)
 }
 
 func platformContains(platforms []string, target string) bool {

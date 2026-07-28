@@ -74,6 +74,7 @@ export function RequestRestart(): $CancellablePromise<void> {
 
 /**
  * SetApp 设置 Wails App 引用
+ * 注册为 Wails 服务后该方法可被前端 RPC 调用，传 nil 会让更新事件广播失效，忽略之。
  */
 export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
     return $Call.ByID(2055329212, app);

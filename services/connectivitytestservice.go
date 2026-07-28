@@ -435,8 +435,9 @@ func (cts *ConnectivityTestService) TestAll(platform string) []ConnectivityResul
 	defer cancel()
 
 	for _, provider := range providers {
-		// 只测试启用了连通性检测的供应商
-		if !provider.ConnectivityCheck {
+		// 只测试启用了可用性监控的供应商
+		// 旧字段 ConnectivityCheck 已废弃且保存时会被 clearLegacyFields 清零，不能再作过滤依据
+		if !provider.AvailabilityMonitorEnabled {
 			continue
 		}
 
@@ -603,7 +604,10 @@ func (cts *ConnectivityTestService) startAutoTest() {
 	cts.stopChan = make(chan struct{})
 	cts.running = true
 
-	go func() {
+	// 以参数捕获本轮的 stop channel：
+	// 协程内若直接读 cts.stopChan，关-开快速切换时旧协程会读到新 channel 而永不退出，
+	// 造成双协程测试；且无锁读字段与持锁写构成数据竞争
+	go func(stop chan struct{}) {
 		// 启动时立即执行一次
 		cts.runAllPlatformTests()
 
@@ -614,12 +618,12 @@ func (cts *ConnectivityTestService) startAutoTest() {
 			select {
 			case <-ticker.C:
 				cts.runAllPlatformTests()
-			case <-cts.stopChan:
+			case <-stop:
 				log.Println("[ConnectivityTest] 自动测试定时器已停止")
 				return
 			}
 		}
-	}()
+	}(cts.stopChan)
 
 	log.Println("[ConnectivityTest] 自动测试定时器已启动（间隔: 1分钟）")
 }

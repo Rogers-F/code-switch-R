@@ -268,7 +268,7 @@ const handleSaveFile = async (fileId: string) => {
   } catch (err) {
     console.error(`Failed to save config file ${fileId}:`, err)
     fileErrors.value[fileId] = extractErrorMessage(err)
-    showToast(t('components.cliConfig.loadError'), 'error')
+    showToast(t('components.cliConfig.saveError'), 'error')
   } finally {
     saving.value = false
   }

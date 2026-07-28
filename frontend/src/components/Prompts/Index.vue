@@ -43,15 +43,26 @@ const promptList = computed(() => Object.values(prompts.value))
 const enabledPrompt = computed(() => promptList.value.find(p => p.enabled))
 const promptCount = computed(() => promptList.value.length)
 
+// 加载请求序号：快速切换平台时慢的旧请求会在新请求之后返回，
+// 不做序号保护会用旧平台的数据覆盖当前平台的列表
+let loadSeq = 0
+
 async function loadPrompts() {
+  const seq = ++loadSeq
+  const platform = activePlatform.value
   loading.value = true
   try {
-    prompts.value = await GetPrompts(activePlatform.value) as Record<string, Prompt>
-    currentFileContent.value = await GetCurrentFileContent(activePlatform.value)
+    const loaded = await GetPrompts(platform) as Record<string, Prompt>
+    const fileContent = await GetCurrentFileContent(platform)
+    if (seq !== loadSeq) return // 已有更新的请求发出，丢弃本次过期结果
+    prompts.value = loaded
+    currentFileContent.value = fileContent
   } catch (e) {
     console.error('Failed to load prompts:', e)
   } finally {
-    loading.value = false
+    if (seq === loadSeq) {
+      loading.value = false
+    }
   }
 }
 

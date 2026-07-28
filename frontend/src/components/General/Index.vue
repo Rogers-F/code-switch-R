@@ -61,6 +61,7 @@ const budgetRefreshDayCodex = ref(getCachedNumber('budgetRefreshDayCodex', 1))
 const budgetShowCountdownCodex = ref(getCachedValue('budgetShowCountdownCodex', false))
 const budgetShowForecastCodex = ref(getCachedValue('budgetShowForecastCodex', false))
 const settingsLoading = ref(true)
+const settingsLoadFailed = ref(false)  // 设置加载失败标记：为 true 时禁止整对象保存，防止用默认值覆盖后端配置
 const saveBusy = ref(false)
 
 // 拉黑配置相关状态
@@ -147,34 +148,12 @@ const loadAppSettings = async () => {
     localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
     localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
     localStorage.setItem('app-settings-autoSyncModels', String(autoSyncModelsEnabled.value))
+    settingsLoadFailed.value = false
   } catch (error) {
     console.error('failed to load app settings', error)
-    heatmapEnabled.value = true
-    homeTitleVisible.value = true
-    budgetTotal.value = 0
-    budgetUsedAdjustment.value = 0
-    budgetForecastMethod.value = 'cycle'
-    budgetCycleEnabled.value = false
-    budgetCycleMode.value = 'daily'
-    budgetRefreshTime.value = '00:00'
-    budgetRefreshDay.value = 1
-    budgetShowCountdown.value = false
-    budgetShowForecast.value = false
-    budgetTotalCodex.value = 0
-    budgetUsedAdjustmentCodex.value = 0
-    budgetForecastMethodCodex.value = 'cycle'
-    budgetCycleEnabledCodex.value = false
-    budgetCycleModeCodex.value = 'daily'
-    budgetRefreshTimeCodex.value = '00:00'
-    budgetRefreshDayCodex.value = 1
-    budgetShowCountdownCodex.value = false
-    budgetShowForecastCodex.value = false
-    autoStartEnabled.value = false
-    autoConnectivityTestEnabled.value = true
-    switchNotifyEnabled.value = true
-    roundRobinEnabled.value = false
-    autoUpdateEnabled.value = true
-    autoSyncModelsEnabled.value = true
+    // 加载失败时保留当前值（初始值来自 localStorage 缓存，是最接近真实的状态），
+    // 不重置为硬编码默认值；同时置失败标记，禁止整对象保存覆盖后端配置
+    settingsLoadFailed.value = true
   } finally {
     settingsLoading.value = false
   }
@@ -251,6 +230,12 @@ const pendingSave = ref(false)
 
 const persistAppSettings = async () => {
   if (settingsLoading.value) return
+  if (settingsLoadFailed.value) {
+    // 设置尚未成功加载，此时整对象保存会把缓存/默认值写回后端，静默清空真实配置
+    alert(t('components.general.label.settingsLoadFailed'))
+    void loadAppSettings()
+    return
+  }
   if (saveBusy.value) {
     // 保存进行中:排队一次尾随保存,避免连续切换时后一次改动被静默丢弃
     pendingSave.value = true

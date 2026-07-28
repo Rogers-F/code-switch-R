@@ -30,6 +30,6 @@ else
     ./linuxdeploy-aarch64.AppImage --appdir "${APP_DIR}" --output appimage
 fi
 
-# Rename the generated AppImage
-mv "${APP_NAME}*.AppImage" "${APP_NAME}.AppImage"
+# Rename the generated AppImage（通配符必须放在引号外才会展开）
+mv "${APP_NAME}"*.AppImage "${APP_NAME}.AppImage"
 

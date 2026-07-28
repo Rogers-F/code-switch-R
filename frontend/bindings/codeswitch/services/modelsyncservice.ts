@@ -51,6 +51,7 @@ export function GetSyncStatus(): $CancellablePromise<$models.ModelSyncStatus> {
 /**
  * RestoreBuiltinPricing 恢复内置数据:关闭自动同步(可再开启)、清空缓存与状态、
  * 立即以"嵌入 base + 内置种子"重建生效快照。
+ * restoring 预约标志保证与同步批次互斥,不存在"已关自动同步但恢复被拒"的部分完成。
  */
 export function RestoreBuiltinPricing(): $CancellablePromise<$models.ModelSyncStatus> {
     return $Call.ByID(664433879).then(($result: any) => {
@@ -60,6 +61,7 @@ export function RestoreBuiltinPricing(): $CancellablePromise<$models.ModelSyncSt
 
 /**
  * SetApp 注入 Wails App 引用,用于向前端广播同步事件。
+ * 注册为 Wails 服务后该方法可被前端 RPC 调用，传 nil 会让同步完成事件广播失效，忽略之。
  */
 export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
     return $Call.ByID(1084458757, app);
@@ -74,6 +76,7 @@ export function Start(): $CancellablePromise<void> {
 
 /**
  * Stop 取消在途请求并等待后台退出(接入 app.OnShutdown)。
+ * 同时等待 SyncNow 触发的在途批次,避免关停后仍有落盘/事件广播。
  */
 export function Stop(): $CancellablePromise<void> {
     return $Call.ByID(3154212062);

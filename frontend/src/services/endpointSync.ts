@@ -47,6 +47,8 @@ function extractBaseUrl(apiUrl: string): string {
  */
 export async function fetchAllProviderEndpoints(): Promise<SyncedEndpoint[]> {
   const endpoints: SyncedEndpoint[] = []
+  // 记录加载失败的平台数：单平台失败仍隔离容错，全部失败时抛错让调用方提示
+  let failedPlatforms = 0
 
   try {
     // 1. 获取 Claude 供应商
@@ -66,6 +68,7 @@ export async function fetchAllProviderEndpoints(): Promise<SyncedEndpoint[]> {
       })
     }
   } catch (error) {
+    failedPlatforms++
     console.error('获取 Claude 供应商失败:', error)
   }
 
@@ -87,6 +90,7 @@ export async function fetchAllProviderEndpoints(): Promise<SyncedEndpoint[]> {
       })
     }
   } catch (error) {
+    failedPlatforms++
     console.error('获取 Codex 供应商失败:', error)
   }
 
@@ -108,7 +112,13 @@ export async function fetchAllProviderEndpoints(): Promise<SyncedEndpoint[]> {
       })
     }
   } catch (error) {
+    failedPlatforms++
     console.error('获取 Gemini 供应商失败:', error)
+  }
+
+  // 三个平台全部加载失败：视为同步失败，抛错交由调用方展示提示
+  if (failedPlatforms === 3) {
+    throw new Error('所有供应商端点同步失败')
   }
 
   // 4. 去重：相同 URL 只保留第一个

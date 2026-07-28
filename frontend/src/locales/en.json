@@ -128,7 +128,9 @@
       "testEndpointHint": "Leave empty for default endpoint",
       "timeout": "Timeout",
       "timeoutHint": "Default 15 seconds"
-    }
+    },
+    "toggleFailed": "Failed to toggle monitoring: ",
+    "saveConfigFailed": "Failed to save configuration: "
   },
   "common": {
     "save": "Save",
@@ -194,7 +196,7 @@
     "noConflicts": "No environment variable conflicts found",
     "value": "Value",
     "source": "Source",
-    "source.system": "System environment variable",
+    "sourceSystem": "System environment variable",
     "refresh": "Recheck"
   },
   "components": {
@@ -259,7 +261,8 @@
         "hostOthers": "Host Custom CLI",
         "tooltip": "Route traffic through the local relay to manage API keys centrally.",
         "statusOn": "Managed",
-        "statusOff": "Not managed"
+        "statusOff": "Not managed",
+        "toggleFailed": "Failed to toggle hosting"
       },
       "customCli": {
         "selectToolFirst": "Please select a CLI tool first",
@@ -290,7 +293,9 @@
         "deleteSuccess": "CLI tool deleted",
         "saveFailed": "Failed to save CLI tool",
         "deleteFailed": "Failed to delete CLI tool",
-        "invalidProxyTarget": "Invalid proxy injection target config file"
+        "invalidProxyTarget": "Invalid proxy injection target config file",
+        "proxyInjectionIncomplete": "Proxy injection settings are incomplete. Please select a target config file and fill in the Base URL field",
+        "proxyTargetPathRequired": "The proxy injection target config file has no path. Please fill in its path first"
       },
       "logs": {
         "view": "View logs",
@@ -305,7 +310,8 @@
         "skill": "Open skill catalog",
         "gemini": "Open Gemini CLI manager",
         "import": "Import cc-switch config",
-        "duplicate": "Duplicate provider"
+        "duplicate": "Duplicate provider",
+        "duplicateFailed": "Failed to duplicate provider"
       },
       "importConfig": {
         "tooltip": "Import {providers} providers · {servers} MCP servers",
@@ -419,7 +425,8 @@
         "errors": {
           "invalidUrl": "Please enter a valid API URL"
         },
-        "saveFailed": "Failed to save provider configuration"
+        "saveFailed": "Failed to save provider configuration",
+        "cliConfigSaveFailed": "Failed to save CLI config"
       },
       "levelDesc": {
         "highest": "Highest Priority",
@@ -630,7 +637,8 @@
         "times": "times",
         "minutes": "minutes",
         "save": "Save",
-        "saving": "Saving..."
+        "saving": "Saving...",
+        "settingsLoadFailed": "Failed to load settings. To avoid overwriting existing configuration, this change was not saved. Reloading settings..."
       },
       "subLabel": {
         "sb_assistant_access": "Accessibility permission is required to operate clipboard contents",
@@ -673,7 +681,7 @@
       "import": {
         "title": "Batch Import MCP Servers",
         "inputDesc": "Paste MCP configuration JSON. Supports Claude Desktop format, array format, or server map format.",
-        "placeholder": "{\n  \"mcpServers\": {\n    \"server-name\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@modelcontextprotocol/server-xxx\"]\n    }\n  }\n}",
+        "placeholder": "Paste Claude Desktop or standard MCP configuration JSON...",
         "next": "Next",
         "parsing": "Parsing...",
         "back": "Back",
@@ -997,7 +1005,8 @@
       "saveAllFailed": "All config files failed to save",
       "savePartialSuccess": "{success} saved, {fail} failed",
       "tabPreview": "Preview",
-      "tabCurrent": "Current"
+      "tabCurrent": "Current",
+      "saveError": "Failed to save configuration"
     }
   }
 }

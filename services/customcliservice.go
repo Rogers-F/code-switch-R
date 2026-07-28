@@ -321,8 +321,17 @@ func (s *CustomCliService) EnableProxy(toolId string) error {
 			if err != nil {
 				return fmt.Errorf("读取配置文件失败: %w", err)
 			}
-			if err := os.WriteFile(backupPath, content, 0o600); err != nil {
-				return fmt.Errorf("创建备份失败: %w", err)
+			// 幂等保护：当前内容已是注入后的代理值时说明并非用户原始配置，
+			// 跳过备份，避免重复启用时用注入值覆盖首次启用保存的原始配置
+			injected, checkErr := s.checkProxyField(content, targetFile.Format, injection.BaseUrlField, s.baseURLWithToolPath(toolId))
+			// 备份尚不存在时无条件建立基线（哪怕内容解析失败，否则禁用后无从还原）；
+			// 备份已存在时只有确认当前内容不是注入值才刷新——检测失败也不刷新，
+			// 避免用损坏或已注入的内容顶掉首次启用保存的原始配置
+			shouldBackup := !FileExists(backupPath) || (checkErr == nil && !injected)
+			if shouldBackup {
+				if err := os.WriteFile(backupPath, content, 0o600); err != nil {
+					return fmt.Errorf("创建备份失败: %w", err)
+				}
 			}
 		}
 

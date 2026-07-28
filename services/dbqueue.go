@@ -99,6 +99,10 @@ type DBWriteQueue struct {
 
 	// 关闭状态标志（防止 Shutdown 后仍可入队）
 	closed atomic.Bool
+	// closeMu 保证 closed 检查与入队是原子段：入队持读锁，Shutdown 置位持写锁。
+	// 只要有调用方持读锁，Shutdown 就不会推进到 close(shutdownChan)，
+	// 因此成功入队的任务必然赶在 worker 排空之前进入队列，不会落入无消费者的死队列
+	closeMu sync.RWMutex
 
 	// 性能监控
 	stats   *QueueStats
@@ -131,10 +135,12 @@ type QueueStats struct {
 //   - ✅ 正确用法：所有 request_log 的 INSERT（同一表、同一操作、参数结构相同）
 //   - ❌ 错误用法：混入不同表的写入（request_log + provider_blacklist）
 //   - ❌ 错误用法：混入不同操作（INSERT + UPDATE + DELETE）
+//
 // - **为什么必须同构**：
 //   - 统计模型假设批次延迟在所有任务间均匀分布（perTaskLatencyMs = batchLatencyMs / count）
 //   - 如果批次内有慢 SQL（触发器、复杂索引），会稀释快 SQL 的延迟统计
 //   - P99 延迟会被低估，无法真实反映单请求 SLA
+//
 // - **代码审查检查点**：
 //   - 搜索所有 ExecBatch/ExecBatchCtx 调用
 //   - 确认每个调用点只写入同一个表的同一种操作
@@ -370,14 +376,32 @@ func (q *DBWriteQueue) commitBatch(tasks []*WriteTask) {
 	sendResultToAll(nil)
 }
 
+// enqueue 在 closeMu 读锁内完成 closed 检查与入队，与 Shutdown 的写锁互斥。
+// 修复竞态：此前 closed 检查与入队非原子，Shutdown 之后任务仍可能进入
+// worker 已排空退出的队列，写入丢失且等待 Result 的 goroutine 永久泄漏。
+// timeout / ctxDone 允许为 nil（nil channel 在 select 中永久阻塞，等价于不启用该分支）。
+// 返回 (是否成功入队, 队列已关闭错误)。
+func (q *DBWriteQueue) enqueue(ch chan<- *WriteTask, task *WriteTask, timeout <-chan time.Time, ctxDone <-chan struct{}) (bool, error) {
+	q.closeMu.RLock()
+	defer q.closeMu.RUnlock()
+
+	if q.closed.Load() {
+		return false, fmt.Errorf("写入队列已关闭")
+	}
+
+	select {
+	case ch <- task:
+		return true, nil
+	case <-timeout:
+		return false, nil
+	case <-ctxDone:
+		return false, nil
+	}
+}
+
 // Exec 同步执行写入（阻塞直到完成，默认 30 秒超时）
 // 防御性设计：即使在高频路径误用，也有 30 秒兜底超时，避免永久阻塞
 func (q *DBWriteQueue) Exec(sql string, args ...interface{}) error {
-	// 先检查关闭状态
-	if q.closed.Load() {
-		return fmt.Errorf("写入队列已关闭")
-	}
-
 	task := &WriteTask{
 		SQL:    sql,
 		Args:   args,
@@ -387,45 +411,39 @@ func (q *DBWriteQueue) Exec(sql string, args ...interface{}) error {
 	// 默认 30 秒超时（防止误用导致永久阻塞）
 	timeout := time.After(30 * time.Second)
 
+	entered, err := q.enqueue(q.queue, task, timeout, nil)
+	if err != nil {
+		return err
+	}
+	if !entered {
+		// 入队失败（队列满），直接返回
+		return fmt.Errorf("入队超时（30秒），队列已满")
+	}
+
+	// 成功入队，等待结果（支持超时）
 	select {
-	case q.queue <- task:
-		// 成功入队，等待结果（支持超时）
+	case err := <-task.Result:
+		return err
+	case <-q.shutdownChan:
+		// 关闭窗口内恰好入队:worker 可能仍在排空,给短暂宽限等待结果,
+		// 避免无消费者时空等满 30 秒
 		select {
 		case err := <-task.Result:
 			return err
-		case <-q.shutdownChan:
-			// 关闭窗口内恰好入队:worker 可能仍在排空,给短暂宽限等待结果,
-			// 避免无消费者时空等满 30 秒
-			select {
-			case err := <-task.Result:
-				return err
-			case <-time.After(2 * time.Second):
-				go func() { <-task.Result }()
-				return fmt.Errorf("写入队列已关闭")
-			}
-		case <-timeout:
-			// 超时，但任务已入队，无法撤销，需等待结果以避免 goroutine 泄漏
+		case <-time.After(2 * time.Second):
 			go func() { <-task.Result }()
-			return fmt.Errorf("写入超时（30秒），队列可能积压严重")
+			return fmt.Errorf("写入队列已关闭")
 		}
-
 	case <-timeout:
-		// 入队失败（队列满），直接返回
-		return fmt.Errorf("入队超时（30秒），队列已满")
-
-	case <-q.shutdownChan:
-		return fmt.Errorf("写入队列已关闭")
+		// 超时，但任务已入队，无法撤销，需等待结果以避免 goroutine 泄漏
+		go func() { <-task.Result }()
+		return fmt.Errorf("写入超时（30秒），队列可能积压严重")
 	}
 }
 
 // ExecBatch 批量执行（异步，高吞吐量场景，默认 30 秒超时）
 // 防御性设计：即使误用，也有 30 秒兜底超时
 func (q *DBWriteQueue) ExecBatch(sql string, args ...interface{}) error {
-	// 先检查关闭状态
-	if q.closed.Load() {
-		return fmt.Errorf("写入队列已关闭")
-	}
-
 	if q.batchQueue == nil {
 		return fmt.Errorf("批量模式未启用")
 	}
@@ -439,69 +457,76 @@ func (q *DBWriteQueue) ExecBatch(sql string, args ...interface{}) error {
 	// 默认 30 秒超时（防止误用导致永久阻塞）
 	timeout := time.After(30 * time.Second)
 
+	entered, err := q.enqueue(q.batchQueue, task, timeout, nil)
+	if err != nil {
+		return err
+	}
+	if !entered {
+		// 入队失败（队列满），直接返回
+		return fmt.Errorf("批量入队超时（30秒），队列已满")
+	}
+
+	// 成功入队，等待结果（支持超时）
 	select {
-	case q.batchQueue <- task:
-		// 成功入队，等待结果（支持超时）
+	case err := <-task.Result:
+		return err
+	case <-q.shutdownChan:
+		// 关闭窗口内恰好入队:给短暂宽限等待排空结果
 		select {
 		case err := <-task.Result:
 			return err
-		case <-timeout:
-			// 超时，但任务已入队，无法撤销
+		case <-time.After(2 * time.Second):
 			go func() { <-task.Result }()
-			return fmt.Errorf("批量写入超时（30秒），批量队列可能积压严重")
+			return fmt.Errorf("写入队列已关闭")
 		}
-
 	case <-timeout:
-		// 入队失败（队列满），直接返回
-		return fmt.Errorf("批量入队超时（30秒），队列已满")
-
-	case <-q.shutdownChan:
-		return fmt.Errorf("写入队列已关闭")
+		// 超时，但任务已入队，无法撤销
+		go func() { <-task.Result }()
+		return fmt.Errorf("批量写入超时（30秒），批量队列可能积压严重")
 	}
 }
 
 // ExecCtx 支持 context 的写入（带超时控制）
 func (q *DBWriteQueue) ExecCtx(ctx context.Context, sql string, args ...interface{}) error {
-	// 先检查关闭状态
-	if q.closed.Load() {
-		return fmt.Errorf("写入队列已关闭")
-	}
-
 	task := &WriteTask{
 		SQL:    sql,
 		Args:   args,
 		Result: make(chan error, 1),
 	}
 
+	entered, err := q.enqueue(q.queue, task, nil, ctx.Done())
+	if err != nil {
+		return err
+	}
+	if !entered {
+		// 入队失败（队列满），直接返回
+		return fmt.Errorf("入队超时或已取消（队列满）: %w", ctx.Err())
+	}
+
+	// 成功入队，等待结果（支持超时）
 	select {
-	case q.queue <- task:
-		// 成功入队，等待结果（支持超时）
+	case err := <-task.Result:
+		return err
+	case <-q.shutdownChan:
+		// 关闭窗口内恰好入队:给短暂宽限等待排空结果,
+		// 避免无期限 context 下调用方永久阻塞
 		select {
 		case err := <-task.Result:
 			return err
-		case <-ctx.Done():
-			// 超时或取消，但任务已入队，无法撤销
-			// 仍需等待结果以避免 goroutine 泄漏
+		case <-time.After(2 * time.Second):
 			go func() { <-task.Result }()
-			return fmt.Errorf("写入超时或已取消: %w", ctx.Err())
+			return fmt.Errorf("写入队列已关闭")
 		}
-
 	case <-ctx.Done():
-		// 入队失败（队列满），直接返回
-		return fmt.Errorf("入队超时或已取消（队列满）: %w", ctx.Err())
-
-	case <-q.shutdownChan:
-		return fmt.Errorf("写入队列已关闭")
+		// 超时或取消，但任务已入队，无法撤销
+		// 仍需等待结果以避免 goroutine 泄漏
+		go func() { <-task.Result }()
+		return fmt.Errorf("写入超时或已取消: %w", ctx.Err())
 	}
 }
 
 // ExecBatchCtx 支持 context 的批量写入（带超时控制）
 func (q *DBWriteQueue) ExecBatchCtx(ctx context.Context, sql string, args ...interface{}) error {
-	// 先检查关闭状态
-	if q.closed.Load() {
-		return fmt.Errorf("写入队列已关闭")
-	}
-
 	if q.batchQueue == nil {
 		return fmt.Errorf("批量模式未启用")
 	}
@@ -512,40 +537,42 @@ func (q *DBWriteQueue) ExecBatchCtx(ctx context.Context, sql string, args ...int
 		Result: make(chan error, 1),
 	}
 
+	entered, err := q.enqueue(q.batchQueue, task, nil, ctx.Done())
+	if err != nil {
+		return err
+	}
+	if !entered {
+		// 入队失败（队列满），直接返回
+		return fmt.Errorf("批量入队超时或已取消（队列满）: %w", ctx.Err())
+	}
+
+	// 成功入队，等待结果（支持超时）
 	select {
-	case q.batchQueue <- task:
-		// 成功入队，等待结果（支持超时）
+	case err := <-task.Result:
+		return err
+	case <-q.shutdownChan:
+		// 关闭窗口内恰好入队:给短暂宽限等待排空结果
 		select {
 		case err := <-task.Result:
 			return err
-		case <-q.shutdownChan:
-			// 关闭窗口内恰好入队:给短暂宽限等待排空结果
-			select {
-			case err := <-task.Result:
-				return err
-			case <-time.After(2 * time.Second):
-				go func() { <-task.Result }()
-				return fmt.Errorf("写入队列已关闭")
-			}
-		case <-ctx.Done():
-			// 超时或取消，但任务已入队，无法撤销
+		case <-time.After(2 * time.Second):
 			go func() { <-task.Result }()
-			return fmt.Errorf("批量写入超时或已取消: %w", ctx.Err())
+			return fmt.Errorf("写入队列已关闭")
 		}
-
 	case <-ctx.Done():
-		// 入队失败（队列满），直接返回
-		return fmt.Errorf("批量入队超时或已取消（队列满）: %w", ctx.Err())
-
-	case <-q.shutdownChan:
-		return fmt.Errorf("写入队列已关闭")
+		// 超时或取消，但任务已入队，无法撤销
+		go func() { <-task.Result }()
+		return fmt.Errorf("批量写入超时或已取消: %w", ctx.Err())
 	}
 }
 
 // Shutdown 优雅关闭
 func (q *DBWriteQueue) Shutdown(timeout time.Duration) error {
-	// 关键修复：先设置关闭标志，拒绝新请求入队
+	// 关键修复：写锁内置位关闭标志，与 enqueue 的读锁互斥，
+	// 保证 close(shutdownChan) 时不再有在途入队，worker 排空后队列必为空
+	q.closeMu.Lock()
 	q.closed.Store(true)
+	q.closeMu.Unlock()
 
 	// 然后关闭 shutdownChan，通知 worker 排空队列
 	close(q.shutdownChan)
@@ -588,24 +615,24 @@ func (q *DBWriteQueue) GetStats() QueueStats {
 // 📌 统计假设与局限性说明：
 //
 // 1. **平均延迟计算假设**：
-//    - 批量提交时，假设批次延迟在所有任务间均匀分布
-//    - 计算公式：AvgLatencyMs = (旧总延迟 + 批次延迟) / 新总任务数
-//    - 局限性：如果批次内不同 SQL 耗时差异巨大（如含触发器、复杂索引），统计会失真
+//   - 批量提交时，假设批次延迟在所有任务间均匀分布
+//   - 计算公式：AvgLatencyMs = (旧总延迟 + 批次延迟) / 新总任务数
+//   - 局限性：如果批次内不同 SQL 耗时差异巨大（如含触发器、复杂索引），统计会失真
 //
 // 2. **P99 延迟计算假设**：
-//    - 批量提交时，将批次延迟平均分摊到每个任务（perTaskLatencyMs = latencyMs / count）
-//    - 每个任务记录相同的延迟样本，用于 P99 计算
-//    - 局限性：真实情况下，批次内首个任务可能耗时更长（事务开启开销），最后一个任务可能更快
+//   - 批量提交时，将批次延迟平均分摊到每个任务（perTaskLatencyMs = latencyMs / count）
+//   - 每个任务记录相同的延迟样本，用于 P99 计算
+//   - 局限性：真实情况下，批次内首个任务可能耗时更长（事务开启开销），最后一个任务可能更快
 //
 // 3. **适用场景**：
-//    - ✅ 批次内所有 SQL 耗时相近（如 request_log INSERT，相同表结构、无触发器）
-//    - ✅ 关注整体系统性能趋势，而非单条 SQL 精确耗时
-//    - ❌ 批次内混合不同类型操作（INSERT + UPDATE + DELETE）
-//    - ❌ 需要精确追踪每条 SQL 的实际耗时
+//   - ✅ 批次内所有 SQL 耗时相近（如 request_log INSERT，相同表结构、无触发器）
+//   - ✅ 关注整体系统性能趋势，而非单条 SQL 精确耗时
+//   - ❌ 批次内混合不同类型操作（INSERT + UPDATE + DELETE）
+//   - ❌ 需要精确追踪每条 SQL 的实际耗时
 //
 // 4. **改进方向**（如需精确统计）：
-//    - 在 WriteTask 中添加 startTime 字段，worker 执行时逐个记录真实耗时
-//    - 成本：每个任务额外 8 字节（time.Time）+ 逐个更新统计的锁竞争
+//   - 在 WriteTask 中添加 startTime 字段，worker 执行时逐个记录真实耗时
+//   - 成本：每个任务额外 8 字节（time.Time）+ 逐个更新统计的锁竞争
 func (q *DBWriteQueue) updateStats(count int, latency time.Duration, err error) {
 	q.statsMu.Lock()
 	defer q.statsMu.Unlock()

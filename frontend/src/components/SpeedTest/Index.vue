@@ -29,22 +29,24 @@ const syncError = ref('')
 const endpointCount = computed(() => endpoints.value.length)
 
 function addEndpoint() {
-  if (!newUrl.value.trim()) return
+  // 统一用 trim 后的 URL：后端返回的结果 URL 也是去除首尾空白的，口径必须一致
+  const url = newUrl.value.trim()
+  if (!url) return
 
   // 基础 URL 校验
   try {
-    new URL(newUrl.value)
+    new URL(url)
   } catch {
     return
   }
 
   // 检查重复
-  if (endpoints.value.some(e => e.url === newUrl.value)) {
+  if (endpoints.value.some(e => e.url === url)) {
     return
   }
 
   endpoints.value.push({
-    url: newUrl.value,
+    url,
     result: null,
     testing: false,
     source: 'manual'  // 手动添加的端点
@@ -81,10 +83,11 @@ async function runTest() {
     })
   } catch (e) {
     console.error('Test failed:', e)
+  } finally {
+    // 兜底：无论结果是否逐条匹配成功，都不让任何一行停留在"测试中"
     endpoints.value.forEach(ep => {
       ep.testing = false
     })
-  } finally {
     isTesting.value = false
   }
 }

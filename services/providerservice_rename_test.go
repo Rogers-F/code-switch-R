@@ -18,6 +18,9 @@ func setupRenameTestEnv(t *testing.T) string {
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	// Windows 的 os.UserHomeDir() 读的是 USERPROFILE,只设 HOME 会让测试写到真实用户配置目录
+	t.Setenv("USERPROFILE", tmpHome)
+	assertHomeIsolated(t, tmpHome)
 
 	configDir := filepath.Join(tmpHome, ".code-switch")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {

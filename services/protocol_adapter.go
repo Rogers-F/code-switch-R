@@ -322,6 +322,26 @@ func (c *OpenAIToAnthropicSSEConverter) ProcessLine(line string) string {
 	return ""
 }
 
+// formatAnthropicSSEEvent 按 Anthropic 流式规范输出一个事件。
+// 必须带 "event: <类型>" 行：官方 anthropic SDK（Claude Code 使用）按事件名分发，
+// 只有 data: 行的流会被当作未知事件全部丢弃。
+func formatAnthropicSSEEvent(eventType string, payload map[string]interface{}) string {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(data))
+}
+
+// FinalizeIfUnterminated 在上游未发送 [DONE] 就断流时补齐终止事件序列。
+// 已经输出过 message_stop 时返回空串。
+func (c *OpenAIToAnthropicSSEConverter) FinalizeIfUnterminated() string {
+	if c.stopped {
+		return ""
+	}
+	return c.outputStopEvents()
+}
+
 // outputContentDelta 输出内容增量事件
 func (c *OpenAIToAnthropicSSEConverter) outputContentDelta(text string) string {
 	var output strings.Builder
@@ -337,23 +357,21 @@ func (c *OpenAIToAnthropicSSEConverter) outputContentDelta(text string) string {
 	}
 
 	// 输出 content_block_delta
-	delta := map[string]interface{}{
+	output.WriteString(formatAnthropicSSEEvent("content_block_delta", map[string]interface{}{
 		"type":  "content_block_delta",
 		"index": 0,
 		"delta": map[string]interface{}{
 			"type": "text_delta",
 			"text": text,
 		},
-	}
-	deltaJSON, _ := json.Marshal(delta)
-	output.WriteString(fmt.Sprintf("data: %s\n\n", string(deltaJSON)))
+	}))
 
 	return output.String()
 }
 
 // outputMessageStart 输出 message_start 事件
 func (c *OpenAIToAnthropicSSEConverter) outputMessageStart() string {
-	msg := map[string]interface{}{
+	return formatAnthropicSSEEvent("message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
 			"id":            c.messageID,
@@ -368,23 +386,19 @@ func (c *OpenAIToAnthropicSSEConverter) outputMessageStart() string {
 				"output_tokens": 0,
 			},
 		},
-	}
-	msgJSON, _ := json.Marshal(msg)
-	return fmt.Sprintf("data: %s\n\n", string(msgJSON))
+	})
 }
 
 // outputContentBlockStart 输出 content_block_start 事件
 func (c *OpenAIToAnthropicSSEConverter) outputContentBlockStart() string {
-	block := map[string]interface{}{
+	return formatAnthropicSSEEvent("content_block_start", map[string]interface{}{
 		"type":  "content_block_start",
 		"index": 0,
 		"content_block": map[string]interface{}{
 			"type": "text",
 			"text": "",
 		},
-	}
-	blockJSON, _ := json.Marshal(block)
-	return fmt.Sprintf("data: %s\n\n", string(blockJSON))
+	})
 }
 
 // outputStopEvents 输出停止事件序列
@@ -407,19 +421,16 @@ func (c *OpenAIToAnthropicSSEConverter) outputStopEvents() string {
 	}
 
 	// content_block_stop
-	blockStop := map[string]interface{}{
+	output.WriteString(formatAnthropicSSEEvent("content_block_stop", map[string]interface{}{
 		"type":  "content_block_stop",
 		"index": 0,
-	}
-	blockStopJSON, _ := json.Marshal(blockStop)
-	output.WriteString(fmt.Sprintf("data: %s\n\n", string(blockStopJSON)))
+	}))
 
 	// message_delta（包含 stop_reason 和 usage）
-	stopReason := c.mapFinishReason(c.finishReason)
-	msgDelta := map[string]interface{}{
+	output.WriteString(formatAnthropicSSEEvent("message_delta", map[string]interface{}{
 		"type": "message_delta",
 		"delta": map[string]interface{}{
-			"stop_reason":   stopReason,
+			"stop_reason":   c.mapFinishReason(c.finishReason),
 			"stop_sequence": nil,
 		},
 		"usage": map[string]interface{}{
@@ -427,16 +438,12 @@ func (c *OpenAIToAnthropicSSEConverter) outputStopEvents() string {
 			"output_tokens":           c.outputTokens,
 			"cache_read_input_tokens": c.cacheReadTokens,
 		},
-	}
-	msgDeltaJSON, _ := json.Marshal(msgDelta)
-	output.WriteString(fmt.Sprintf("data: %s\n\n", string(msgDeltaJSON)))
+	}))
 
 	// message_stop
-	msgStop := map[string]interface{}{
+	output.WriteString(formatAnthropicSSEEvent("message_stop", map[string]interface{}{
 		"type": "message_stop",
-	}
-	msgStopJSON, _ := json.Marshal(msgStop)
-	output.WriteString(fmt.Sprintf("data: %s\n\n", string(msgStopJSON)))
+	}))
 
 	return output.String()
 }

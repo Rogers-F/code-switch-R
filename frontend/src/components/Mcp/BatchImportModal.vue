@@ -54,7 +54,7 @@
             @click="toggleSelection(server)"
           >
             <div class="checkbox-wrapper">
-              <input type="checkbox" :checked="server.selected" @click.stop />
+              <input type="checkbox" :checked="server.selected" @click.stop @change="toggleSelection(server)" />
             </div>
             <div class="server-info">
               <div class="server-name-row">

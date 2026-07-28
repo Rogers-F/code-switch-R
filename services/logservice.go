@@ -25,8 +25,10 @@ func (ls *LogService) CostSince(start string, platform string) (float64, error) 
 		return 0, err
 	}
 	model := xdb.New("request_log")
+	// created_at 由 DEFAULT CURRENT_TIMESTAMP 落库,存的是 UTC 文本,
+	// 查询边界必须先转 UTC 再格式化,否则非 UTC 时区下与存储口径错位
 	options := []xdb.Option{
-		xdb.WhereGte("created_at", startTime.Format(timeLayout)),
+		xdb.WhereGte("created_at", startTime.UTC().Format(timeLayout)),
 		xdb.Field(
 			"model",
 			"input_tokens",
@@ -173,8 +175,10 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 		rangeStart = rangeStart.Add(-time.Duration(totalHours-1) * time.Hour)
 	}
 	model := xdb.New("request_log")
+	// created_at 存的是 UTC 文本,预滤边界须转 UTC,否则东部时区丢失窗口最旧的
+	// 时区偏移小时数、西部时区多取窗口外旧记录
 	options := []xdb.Option{
-		xdb.WhereGe("created_at", rangeStart.Format(timeLayout)),
+		xdb.WhereGe("created_at", rangeStart.UTC().Format(timeLayout)),
 		xdb.Field(
 			"model",
 			"input_tokens",
@@ -200,6 +204,10 @@ func (ls *LogService) HeatmapStats(days int) ([]HeatmapStat, error) {
 	for _, record := range records {
 		createdAt, _ := parseCreatedAt(record)
 		if createdAt.IsZero() {
+			continue
+		}
+		// 兜底过滤:非标准格式的 created_at 可能穿过 SQL 预滤,窗口外记录直接跳过
+		if createdAt.Before(rangeStart) {
 			continue
 		}
 		hourStart := startOfHour(createdAt)
@@ -530,10 +538,12 @@ func parseTimeInput(value string) (time.Time, error) {
 		"2006-01-02T15:04:05-0700",
 	}
 	for _, layout := range layouts {
-		if parsed, err := time.Parse(layout, raw); err == nil {
+		// 前端传入的裸时间串是本地墙钟时间,必须先按本地时区解析;
+		// time.Parse 会把无时区的串按 UTC 解释,只留作兜底
+		if parsed, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
 			return parsed.In(time.Local), nil
 		}
-		if parsed, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+		if parsed, err := time.Parse(layout, raw); err == nil {
 			return parsed.In(time.Local), nil
 		}
 	}

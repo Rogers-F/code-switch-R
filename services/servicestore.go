@@ -42,10 +42,11 @@ func NewSuiStore() (*SuiStore, error) {
 	    keycode INTEGER NOT NULL,
 	    modifiers INTEGER NOT NULL,
 	    description TEXT,
-		target TEXT 
+		target TEXT
 	);
 	`)
 	if err != nil {
+		db.Close()
 		return nil, err
 	}
 	// 检查是否已存在数据
@@ -53,17 +54,19 @@ func NewSuiStore() (*SuiStore, error) {
 	var count int
 	err = row.Scan(&count)
 	if err != nil {
+		db.Close()
 		return nil, err
 	}
 
 	if count == 0 {
 		_, err = db.Exec(`
 			INSERT INTO hotkeys (keycode, modifiers, description, target)
-			VALUES 
+			VALUES
 				(34, 768, 'testdemo', '1'),
 				(46, 768, 'testdemo2', '2');
 		`)
 		if err != nil {
+			db.Close()
 			return nil, err
 		}
 	}

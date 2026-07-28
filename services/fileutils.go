@@ -23,24 +23,10 @@ func AtomicWriteJSON(path string, data interface{}) error {
 }
 
 // AtomicWriteBytes 原子写入字节数据
+// 复用 atomicWriteFile：临时文件 → fsync → 原子重命名（Windows 走 MoveFileEx 覆盖替换），
+// 确保数据落盘后才替换目标文件，失败时清理临时文件
 func AtomicWriteBytes(path string, data []byte) error {
-	// 确保目录存在
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("创建目录失败 %s: %w", dir, err)
-	}
-
-	// 生成临时文件路径（同目录下，避免跨文件系统问题）
-	tmpPath := fmt.Sprintf("%s.tmp.%d", path, time.Now().UnixNano())
-
-	// 写入临时文件
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
-		return fmt.Errorf("写入临时文件失败 %s: %w", tmpPath, err)
-	}
-
-	// 原子重命名（平台特定实现：Windows 走 MoveFileEx 覆盖替换，
-	// 消除旧实现"先删目标再改名"造成的文件短暂不存在窗口）
-	return atomicRename(tmpPath, path)
+	return atomicWriteFile(path, data, 0o600)
 }
 
 // AtomicWriteText 原子写入文本文件

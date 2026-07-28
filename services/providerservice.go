@@ -55,7 +55,8 @@ type Provider struct {
 
 	// 连通性自动拉黑开关 - 在 Provider 编辑页面配置
 	// 前置条件：AvailabilityMonitorEnabled 必须为 true
-	// 启用后，当健康检查连续失败达到阈值时自动拉黑
+	// 启用后，健康检查连续失败达到阈值时向拉黑服务上报失败计数，
+	// 由拉黑服务按其自身失败阈值决定何时真正拉黑
 	ConnectivityAutoBlacklist bool `json:"connectivityAutoBlacklist,omitempty"`
 
 	// 可用性高级配置 - 可选，在可用性页面的"高级配置"中设置
@@ -302,16 +303,30 @@ func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
 	// 如果有迁移，记录日志并持久化到磁盘
 	if migrated {
 		fmt.Printf("[ProviderService] 已从旧配置迁移可用性字段 (kind=%s)\n", kind)
-		// 自动保存迁移后的配置（使用带锁的保存方法避免死锁）
+		// 锁内重新读取+迁移+保存：锁外读到的快照可能已被并发保存覆盖，
+		// 直接回写会静默丢弃期间的用户修改（新增供应商消失、字段回滚）
 		ps.mu.Lock()
-		err := ps.saveProvidersLocked(kind, envelope.Providers)
-		ps.mu.Unlock()
-
-		if err != nil {
-			log.Printf("[ProviderService] 迁移后写入失败: %v\n", err)
+		fresh, freshErr := ps.loadProvidersRaw(kind)
+		if freshErr == nil {
+			stillMigrated := false
+			for i := range fresh {
+				if fresh[i].migrateFromLegacy() {
+					stillMigrated = true
+				}
+			}
+			// 若并发保存已清除旧字段则无需再写盘，直接返回最新快照
+			if stillMigrated {
+				if saveErr := ps.saveProvidersLocked(kind, fresh); saveErr != nil {
+					log.Printf("[ProviderService] 迁移后写入失败: %v\n", saveErr)
+				} else {
+					fmt.Printf("[ProviderService] 迁移后的配置已保存到磁盘 (kind=%s)\n", kind)
+				}
+			}
+			envelope.Providers = fresh
 		} else {
-			fmt.Printf("[ProviderService] 迁移后的配置已保存到磁盘 (kind=%s)\n", kind)
+			log.Printf("[ProviderService] 迁移后重新加载失败: %v\n", freshErr)
 		}
+		ps.mu.Unlock()
 	}
 
 	return envelope.Providers, nil
@@ -401,6 +416,22 @@ func (p *Provider) clearLegacyFields() {
 	// 注意：ConnectivityAuthType 现在是活跃字段，不再清除
 }
 
+// uniqueProviderName 保证生成的供应商名字在现有列表中唯一。
+// 名字冲突时追加序号（"X (副本) 2"）：黑名单、用量统计与别名迁移都以 name 为键，
+// 重名会让两个供应商的状态互相串扰。
+func uniqueProviderName(providers []Provider, candidate string) string {
+	taken := make(map[string]bool, len(providers))
+	for _, p := range providers {
+		taken[strings.ToLower(strings.TrimSpace(p.Name))] = true
+	}
+
+	name := candidate
+	for seq := 2; taken[strings.ToLower(strings.TrimSpace(name))]; seq++ {
+		name = fmt.Sprintf("%s %d", candidate, seq)
+	}
+	return name
+}
+
 // DuplicateProvider 复制供应商配置，生成新的副本
 // 返回新创建的 Provider 对象
 func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Provider, error) {
@@ -438,9 +469,11 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 	newID := maxID + 1
 
 	// 5. 克隆配置（深拷贝）
+	// 名字必须在现有列表里唯一：黑名单、用量统计、别名迁移全部以 name 为键，
+	// 同名供应商会互相串扰（一个被拉黑，另一个也被跳过；用量记到同一条）
 	cloned := &Provider{
 		ID:                   newID,
-		Name:                 source.Name + " (副本)",
+		Name:                 uniqueProviderName(providers, source.Name+" (副本)"),
 		APIURL:               source.APIURL,
 		APIKey:               source.APIKey,
 		Site:                 source.Site,

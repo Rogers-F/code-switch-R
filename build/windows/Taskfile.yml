@@ -61,21 +61,3 @@ tasks:
   run:
     cmds:
       - '{{.BIN_DIR}}/{{.APP_NAME}}.exe'
-
-  build:updater:
-    summary: Build updater.exe with UAC manifest (requires rsrc tool)
-    cmds:
-      - go install github.com/akavel/rsrc@latest
-      - cmd: rsrc -manifest cmd/updater/updater.exe.manifest -o cmd/updater/rsrc_windows_amd64.syso
-        platforms: [windows]
-      - cmd: rsrc -manifest cmd/updater/updater.exe.manifest -o cmd/updater/rsrc_windows_amd64.syso
-        platforms: [linux, darwin]
-      - go build -ldflags="-w -s -H windowsgui" -o {{.BIN_DIR}}/updater.exe ./cmd/updater
-      - cmd: powershell Remove-item cmd/updater/*.syso -ErrorAction SilentlyContinue
-        platforms: [windows]
-      - cmd: rm -f cmd/updater/*.syso
-        platforms: [linux, darwin]
-    env:
-      GOOS: windows
-      GOARCH: amd64
-      CGO_ENABLED: 0

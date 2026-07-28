@@ -3,10 +3,12 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Prompt 自定义提示词
@@ -44,7 +46,9 @@ func NewPromptService() *PromptService {
 		},
 		lastWriteTime: make(map[string]time.Time),
 	}
-	_ = svc.load()
+	if err := svc.load(); err != nil {
+		log.Printf("加载提示词配置失败: %v", err)
+	}
 	return svc
 }
 
@@ -114,6 +118,24 @@ func (s *PromptService) UpsertPrompt(platform, id string, prompt Prompt) error {
 	}
 	prompt.UpdatedAt = &now
 
+	// 记录旧状态，用于识别启用→禁用的切换
+	prev, existed := (*prompts)[id]
+	turningOff := existed && prev.Enabled && !prompt.Enabled
+
+	// 从启用变为禁用时会清空目标文件。清空前先把文件里的现有内容回填进提示词记录，
+	// 否则用户在 CLAUDE.md / AGENTS.md / GEMINI.md 里手改的内容会被直接抹掉且无处恢复。
+	if turningOff {
+		if filePath, err := s.getPromptFilePathReadOnly(platform); err == nil {
+			if err := s.backupCurrentPrompt(platform, filePath, prompts); err != nil {
+				return err
+			}
+			// 回填可能已经更新了同一条记录的 Content，以文件内容为准，避免丢失外部编辑
+			if backfilled, ok := (*prompts)[id]; ok && backfilled.Content != "" {
+				prompt.Content = backfilled.Content
+			}
+		}
+	}
+
 	// 保存到内存
 	(*prompts)[id] = prompt
 
@@ -129,6 +151,15 @@ func (s *PromptService) UpsertPrompt(platform, id string, prompt Prompt) error {
 			return err
 		}
 		return s.writePromptFile(filePath, prompt.Content)
+	}
+
+	// 从启用变为禁用：清空目标文件，否则 CLI 仍会继续加载该提示词
+	if turningOff {
+		filePath, err := s.getPromptFilePath(platform)
+		if err != nil {
+			return err
+		}
+		return s.writePromptFile(filePath, "")
 	}
 
 	return nil
@@ -220,6 +251,11 @@ func (s *PromptService) ImportFromFile(platform string) (string, error) {
 		return "", fmt.Errorf("读取提示词文件失败: %w", err)
 	}
 
+	// 非 UTF-8 内容经 JSON 序列化会被不可逆替换成乱码，直接拒绝导入
+	if !utf8.Valid(content) {
+		return "", fmt.Errorf("提示词文件不是有效的 UTF-8 编码，请先将文件另存为 UTF-8: %s", filePath)
+	}
+
 	// 生成ID
 	now := time.Now().Unix()
 	id := fmt.Sprintf("imported-%d", now)
@@ -287,6 +323,11 @@ func (s *PromptService) backupCurrentPrompt(platform, filePath string, prompts *
 	contentStr := string(content)
 	if len(contentStr) == 0 {
 		return nil // 空文件，无需备份
+	}
+
+	// 非 UTF-8 内容备份后会变成乱码，且随后会被覆盖导致原文件不可恢复，直接中止
+	if !utf8.Valid(content) {
+		return fmt.Errorf("当前提示词文件不是有效的 UTF-8 编码，请先将文件另存为 UTF-8: %s", filePath)
 	}
 
 	// 检查是否已有已启用的提示词
@@ -487,6 +528,14 @@ func (s *PromptService) syncFromFile(platform, filePath string, fileModTime time
 
 	contentStr := string(content)
 
+	// 空文件或非 UTF-8 内容不回填：避免清空已保存的正文，或经 JSON 序列化被替换成乱码
+	if len(contentStr) == 0 || !utf8.Valid(content) {
+		if !fileModTime.IsZero() {
+			s.lastWriteTime[filePath] = fileModTime
+		}
+		return nil
+	}
+
 	// 内容相同，无需同步
 	if enabledPrompt.Content == contentStr {
 		if !fileModTime.IsZero() {
@@ -531,7 +580,29 @@ func (s *PromptService) load() error {
 		return err
 	}
 
-	return json.Unmarshal(data, &s.config)
+	var cfg PromptConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		// 解析失败：把损坏文件改名保留，避免后续保存用空配置覆盖用户原有数据
+		badPath := fmt.Sprintf("%s.bad-%d", configPath, time.Now().Unix())
+		if renameErr := os.Rename(configPath, badPath); renameErr != nil {
+			return fmt.Errorf("解析 prompts.json 失败（且备份损坏文件失败: %v）: %w", renameErr, err)
+		}
+		return fmt.Errorf("解析 prompts.json 失败，原文件已保留为 %s: %w", badPath, err)
+	}
+
+	// 平台字段为 null 时 map 会被反序列化为 nil，补齐为空 map，避免后续写入 panic
+	if cfg.Claude == nil {
+		cfg.Claude = make(map[string]Prompt)
+	}
+	if cfg.Codex == nil {
+		cfg.Codex = make(map[string]Prompt)
+	}
+	if cfg.Gemini == nil {
+		cfg.Gemini = make(map[string]Prompt)
+	}
+
+	s.config = cfg
+	return nil
 }
 
 // save 保存配置
@@ -553,13 +624,8 @@ func (s *PromptService) save() error {
 		return err
 	}
 
-	// 原子写入
-	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, configPath)
+	// 原子写入（带 fsync，防止断电/强杀导致文件截断）
+	return atomicWriteFile(configPath, data, 0644)
 }
 
 // deepCopyMap 深拷贝提示词映射

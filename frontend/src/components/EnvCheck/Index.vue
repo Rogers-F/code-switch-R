@@ -25,17 +25,28 @@ const error = ref<string | null>(null)
 const conflictCount = computed(() => conflicts.value.length)
 const hasConflicts = computed(() => conflictCount.value > 0)
 
+// 检测请求序号：快速切换平台时慢的旧请求会在新请求之后返回，
+// 不做序号保护会用旧平台的检测结果覆盖当前平台
+let checkSeq = 0
+
 async function checkConflicts() {
+  const seq = ++checkSeq
+  const platform = activePlatform.value
   loading.value = true
   error.value = null
   try {
-    conflicts.value = await CheckEnvConflicts(activePlatform.value)
+    const result = await CheckEnvConflicts(platform)
+    if (seq !== checkSeq) return // 已有更新的请求发出，丢弃本次过期结果
+    conflicts.value = result
   } catch (e) {
+    if (seq !== checkSeq) return
     console.error('Failed to check conflicts:', e)
     error.value = extractErrorMessage(e)
     conflicts.value = []
   } finally {
-    loading.value = false
+    if (seq === checkSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -45,7 +56,7 @@ function getSourceIcon(sourceType: 'system' | 'file'): string {
 
 function getSourceLabel(conflict: EnvConflict): string {
   if (conflict.sourceType === 'system') {
-    return t('envcheck.source.system')
+    return t('envcheck.sourceSystem')
   }
   return conflict.sourcePath
 }

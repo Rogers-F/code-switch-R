@@ -53,7 +53,15 @@ type ProviderRelayService struct {
 	notificationService *NotificationService
 	appSettings         *AppSettingsService // 应用设置服务（用于获取轮询开关状态）
 	server              *http.Server
+	serverMu            sync.Mutex // 保护 server：Start/Stop 均可从前端 RPC 触发
 	addr                string
+	// extraAddrs 额外监听地址（wsl_auto 模式下的 WSL 宿主机网段）。
+	// 同一个 http.Server 可以 Serve 多个 listener，Shutdown 会一并关闭。
+	extraAddrs []string
+	// boundAddrs 本次启动实际绑定成功的地址。监听地址在启动时就已冻结，
+	// 之后改设置不会重绑，所以任何"这个地址能不能连"的判断都必须以它为准，
+	// 不能拿磁盘上的设置去推断。
+	boundAddrs []string
 	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
 	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
 	rrMu                sync.Mutex                   // 轮询状态锁
@@ -63,7 +71,205 @@ type ProviderRelayService struct {
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
 var errClientAbort = errors.New("client aborted, skip failure count")
 
-func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, addr string) *ProviderRelayService {
+// errUpstreamStreamAborted 表示上游返回 2xx 后中途断流。
+// 此时响应头与部分内容已经写给客户端，不能再降级到其它供应商（会写出两段响应），
+// 但必须计入供应商失败，否则坏供应商永远不会被拉黑。
+var errUpstreamStreamAborted = errors.New("upstream stream aborted after response started")
+
+// errUpstreamClientError 表示上游以"请求本身有问题"为由拒绝（400/413/422 等）。
+// 换供应商同样会失败，因此不计入供应商失败次数，避免一个坏请求把所有供应商拉黑。
+var errUpstreamClientError = errors.New("upstream rejected the request payload")
+
+// relayHTTPClient 转发共用的 HTTP 客户端。
+// xrequest 的默认路径每次调用都会新建 http.Client 与 http.Transport，
+// 连接完全无法复用，用后的空闲连接与其读写协程会长期滞留；这里改为共享连接池。
+// 超时设为与原实现一致的 32 小时（适配超大型项目分析），实际的提前中止依靠
+// 请求 context —— 客户端断开时立刻释放上游连接。
+var relayHTTPClient = &http.Client{
+	Timeout: 32 * time.Hour,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   16,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	},
+}
+
+// deleteHeaderFold 按 HTTP 头大小写不敏感的语义删除。
+// cloneHeaders 拿到的是 Go 规范化后的键名（如 X-Api-Key），
+// 用小写字面量 delete 删不掉，必须逐个比对。
+func deleteHeaderFold(headers map[string]string, names ...string) {
+	for _, name := range names {
+		for key := range headers {
+			if strings.EqualFold(key, name) {
+				delete(headers, key)
+			}
+		}
+	}
+}
+
+// getHeaderFold 大小写不敏感地取头部值。
+func getHeaderFold(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
+}
+
+// setHeaderCanonical 以规范化键名写入头部，并先清掉同名的其它大小写形式。
+// xrequest 是 req.Header[k] = []string{v} 直接赋值不做规范化，
+// 若不先清理，客户端的 X-Api-Key 与注入的 x-api-key 会作为两个条目同时发到上游。
+func setHeaderCanonical(headers map[string]string, name string, value string) {
+	deleteHeaderFold(headers, name)
+	headers[http.CanonicalHeaderKey(name)] = value
+}
+
+// sanitizeUpstreamHeaders 清理透传给上游的客户端请求头。
+//
+// 必须在注入供应商凭据之前调用：它会按大小写不敏感的方式删掉所有认证类头，
+// 放到注入之后调用会把刚写入的供应商凭据一并删除。
+//
+// 具体清理三类：
+//  1. 认证类头必须清空，否则用户本机的真实 API Key 会随请求一起发给每个第三方供应商；
+//  2. Accept-Encoding 必须交回 Go 协商，透传客户端的值会让 Go 不再自动解压，
+//     SSE 解析与 usage 提取拿到的是压缩字节，计费恒为 0；
+//  3. 逐跳头（Connection/TE 等）不应跨代理转发。
+func sanitizeUpstreamHeaders(headers map[string]string) {
+	deleteHeaderFold(headers,
+		"authorization", "proxy-authorization", "x-api-key", "api-key", "x-goog-api-key",
+		"accept-encoding", "connection", "keep-alive", "transfer-encoding", "te", "upgrade")
+}
+
+// credentialQueryParams 查询串中承载凭据的参数名（小写比较）。
+var credentialQueryParams = map[string]bool{
+	"key":          true,
+	"api_key":      true,
+	"apikey":       true,
+	"access_token": true,
+	"token":        true,
+}
+
+// stripCredentialQueryParams 从原始查询串里删掉凭据类参数，其余参数保持原样与原顺序
+// （alt=sse 这类必须保留，且不能因重新编码改变值）。
+func stripCredentialQueryParams(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	parts := strings.Split(rawQuery, "&")
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := part
+		if eq := strings.Index(part, "="); eq >= 0 {
+			name = part[:eq]
+		}
+		if credentialQueryParams[strings.ToLower(name)] {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	return strings.Join(kept, "&")
+}
+
+// maskSensitiveQuery 把 URL 查询串里的凭据类参数替换掉再进日志。
+// Gemini 端点常见 ?key=<API Key>，原样打印会把密钥写进控制台与日志文件。
+func maskSensitiveQuery(rawURL string) string {
+	qIdx := strings.Index(rawURL, "?")
+	if qIdx < 0 {
+		return rawURL
+	}
+	path, rawQuery := rawURL[:qIdx], rawURL[qIdx+1:]
+	parts := strings.Split(rawQuery, "&")
+	for i, part := range parts {
+		eq := strings.Index(part, "=")
+		if eq <= 0 {
+			continue
+		}
+		if credentialQueryParams[strings.ToLower(part[:eq])] {
+			parts[i] = part[:eq] + "=***"
+		}
+	}
+	return path + "?" + strings.Join(parts, "&")
+}
+
+// checkNonStreamTruncated 校验非流式响应是否被上游截断。
+//
+// xrequest 读取非流式响应体时丢弃了 io.ReadAll 的错误（xrequest/response.go 的
+// `body, _ := io.ReadAll(...)`），上游中途断连会被当作完整响应，
+// 于是半死的供应商在非流式请求上永远被判成功、失败计数被清零、永远不会被拉黑。
+// 上游声明了 Content-Length 时可以用它与实际写给客户端的字节数比对；
+// 分块传输（无 Content-Length）或内容被压缩时无从校验，返回 nil 维持原行为。
+func checkNonStreamTruncated(resp *xrequest.Response, written int64) error {
+	if resp == nil || resp.RawResponse == nil {
+		return nil
+	}
+	declared := resp.RawResponse.ContentLength
+	if declared <= 0 {
+		return nil // 分块传输、未声明长度或空响应体
+	}
+	// 上游若做了内容压缩，解压后长度与 Content-Length 不可比
+	if resp.RawResponse.Header.Get("Content-Encoding") != "" {
+		return nil
+	}
+	if written < declared {
+		return fmt.Errorf("响应被截断: 实际 %d 字节，上游声明 %d 字节", written, declared)
+	}
+	return nil
+}
+
+// respondAllProvidersFailed 统一输出"所有供应商都失败"的终态响应。
+//
+// 只有当**每一次**失败都是上游判定请求内容有问题（400/413/422 等）时才回 4xx：
+// 这类请求换供应商也不可能成功，回 502 会让 SDK 按服务端故障自动重试，
+// 一个坏请求被反复重发，每次都完整扫一遍全部供应商、白耗上游配额。
+//
+// 反之只要有任何一次是真的供应商故障（超时、5xx、限流），就必须维持 502 让 SDK 退避重试——
+// 只看最后一个错误会误判：降级链末尾往往是最挑剔的备用供应商，
+// 它回的 400 会把前面那个"临时过载、稍后可用"的供应商掩盖掉。
+func respondAllProvidersFailed(c *gin.Context, lastError error, allClientErrors bool, payload gin.H) {
+	status := http.StatusBadGateway
+	if allClientErrors && errors.Is(lastError, errUpstreamClientError) {
+		status = http.StatusBadRequest
+		payload["type"] = "error"
+		payload["error"] = map[string]string{
+			"type":    "invalid_request_error",
+			"message": lastError.Error(),
+		}
+	}
+	c.JSON(status, payload)
+}
+
+// isClientSideUpstreamStatus 判定上游 4xx 是否属于"请求内容本身有问题"。
+// 这类失败换供应商也一样，不应计入供应商失败次数；
+// 401/403/404/408/429 仍属供应商侧问题（密钥失效、路径配错、限流），保持计入。
+func isClientSideUpstreamStatus(status int) bool {
+	switch status {
+	case http.StatusBadRequest,
+		http.StatusRequestEntityTooLarge,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity:
+		return true
+	}
+	return false
+}
+
+// NewProviderRelayService 构造代理服务。addrs 首个为主监听地址，
+// 其余为额外监听地址（wsl_auto 模式下需要同时覆盖回环与 WSL 宿主机网段）。
+func NewProviderRelayService(providerService *ProviderService, geminiService *GeminiService, blacklistService *BlacklistService, notificationService *NotificationService, appSettings *AppSettingsService, addrs ...string) *ProviderRelayService {
+	addr := ""
+	var extraAddrs []string
+	if len(addrs) > 0 {
+		addr = addrs[0]
+		extraAddrs = append(extraAddrs, addrs[1:]...)
+	}
 	if addr == "" {
 		addr = "127.0.0.1:18100" // 【安全修复】仅监听本地回环地址，防止 API Key 暴露到局域网
 	}
@@ -78,6 +284,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 		notificationService: notificationService,
 		appSettings:         appSettings,
 		addr:                addr,
+		extraAddrs:          extraAddrs,
 		lastUsed: map[string]*LastUsedProvider{
 			"claude": nil,
 			"codex":  nil,
@@ -248,6 +455,15 @@ func (prs *ProviderRelayService) roundRobinOrderGemini(level int, providers []Ge
 }
 
 func (prs *ProviderRelayService) Start() error {
+	// 本服务注册为 Wails 服务后 Start/Stop 也可被前端 RPC 调用，
+	// 重复 Start 会覆盖 prs.server 引用，旧监听器与 Serve 协程再也关不掉
+	prs.serverMu.Lock()
+	alreadyRunning := prs.server != nil
+	prs.serverMu.Unlock()
+	if alreadyRunning {
+		return fmt.Errorf("provider relay 已在 %s 上运行", prs.addr)
+	}
+
 	// 启动前验证配置
 	if warnings := prs.validateConfig(); len(warnings) > 0 {
 		fmt.Println("======== Provider 配置验证警告 ========")
@@ -265,19 +481,50 @@ func (prs *ProviderRelayService) Start() error {
 		return fmt.Errorf("listen provider relay on %s: %w", prs.addr, err)
 	}
 
-	prs.server = &http.Server{
+	server := &http.Server{
 		Addr:    prs.addr,
 		Handler: router,
 	}
+	prs.serverMu.Lock()
+	prs.server = server
+	prs.serverMu.Unlock()
 
-	fmt.Printf("provider relay server listening on %s\n", listener.Addr().String())
-
-	go func() {
-		if err := prs.server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("provider relay server error: %v\n", err)
+	listeners := []net.Listener{listener}
+	// 额外地址失败不影响主地址：WSL 网卡可能尚未就绪或该 IP 已变化，
+	// 此时主地址（回环）仍应正常服务，只告警
+	for _, extra := range prs.extraAddrs {
+		extraListener, extraErr := net.Listen("tcp", extra)
+		if extraErr != nil {
+			fmt.Printf("[WARN] 额外监听地址 %s 绑定失败（不影响主地址）: %v\n", extra, extraErr)
+			continue
 		}
-	}()
+		listeners = append(listeners, extraListener)
+	}
+
+	bound := make([]string, 0, len(listeners))
+	for _, l := range listeners {
+		fmt.Printf("provider relay server listening on %s\n", l.Addr().String())
+		bound = append(bound, l.Addr().String())
+		go func(ln net.Listener) {
+			if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("provider relay server error: %v\n", err)
+			}
+		}(l)
+	}
+
+	prs.serverMu.Lock()
+	prs.boundAddrs = bound
+	prs.serverMu.Unlock()
 	return nil
+}
+
+// BoundAddresses 返回本次启动实际绑定成功的监听地址。
+// 监听地址在启动时冻结，改了网络设置也要重启应用才生效，
+// 所以 UI 展示与"WSL 能不能连到"的判断都应以此为准。
+func (prs *ProviderRelayService) BoundAddresses() []string {
+	prs.serverMu.Lock()
+	defer prs.serverMu.Unlock()
+	return append([]string(nil), prs.boundAddrs...)
 }
 
 // validateConfig 验证所有 provider 的配置
@@ -331,12 +578,28 @@ func (prs *ProviderRelayService) validateConfig() []string {
 }
 
 func (prs *ProviderRelayService) Stop() error {
-	if prs.server == nil {
+	prs.serverMu.Lock()
+	server := prs.server
+	prs.server = nil
+	// 清掉绑定地址：停掉之后再对外报告"正在监听 xxx"会误导 UI 与 WSL 可达性判断
+	prs.boundAddrs = nil
+	prs.serverMu.Unlock()
+
+	if server == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return prs.server.Shutdown(ctx)
+	err := server.Shutdown(ctx)
+	if err != nil {
+		// 优雅关闭超时（长流式请求会一直占着连接）：强制关闭监听与全部连接，
+		// 否则 Serve 协程与在途连接会活过 OnShutdown
+		fmt.Printf("[WARN] 代理优雅关闭超时，强制关闭: %v\n", err)
+		if closeErr := server.Close(); closeErr != nil {
+			fmt.Printf("[WARN] 强制关闭代理失败: %v\n", closeErr)
+		}
+	}
+	return err
 }
 
 func (prs *ProviderRelayService) Addr() string {
@@ -374,6 +637,17 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			}
 			bodyBytes = data
 			c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		}
+
+		// 空 body 或非法 JSON 一定会被所有上游拒绝，提前挡掉：
+		// 否则每个供应商都要挨一次 4xx，还会白耗一轮降级
+		if !gjson.ValidBytes(bodyBytes) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"type":    "error",
+				"error":   map[string]string{"type": "invalid_request_error", "message": "request body must be valid JSON"},
+				"message": "request body must be valid JSON",
+			})
+			return
 		}
 
 		isStream := gjson.GetBytes(bodyBytes, "stream").Bool()
@@ -484,6 +758,8 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				maxRetryPerProvider, retryWaitSeconds)
 
 			var lastError error
+			// 只要有过一次真正的供应商故障，终态就必须维持 502 让 SDK 退避重试
+			sawNonClientError := false
 			var lastProvider string
 			totalAttempts := 0
 
@@ -576,6 +852,24 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							return
 						}
 
+						// 上游 2xx 后中途断流：响应已部分写出，不能再换供应商（会写出两段响应），
+						// 但必须计入失败，否则半死的供应商永远不会被拉黑
+						if errors.Is(err, errUpstreamStreamAborted) {
+							if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+							}
+							return
+						}
+
+						// 上游判定"请求内容本身有问题"：换供应商也一样失败，
+						// 不计入失败次数（否则一个坏请求能把全部供应商拉黑），直接换下一个供应商
+						if errors.Is(err, errUpstreamClientError) {
+							fmt.Printf("[INFO] 上游拒绝请求内容，不计供应商失败，切换到下一个: %s\n", errorMsg)
+							break
+						}
+
+						sawNonClientError = true
+
 						// 记录失败次数（可能触发拉黑）
 						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
 							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
@@ -587,11 +881,22 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							break
 						}
 
-						// 等待后重试（除非是最后一次）
+						// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开，
+						// 此时继续重试只是白烧上游额度
 						if retryCount < maxRetryPerProvider-1 {
 							fmt.Printf("[INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
-							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+							select {
+							case <-time.After(time.Duration(retryWaitSeconds) * time.Second):
+							case <-c.Request.Context().Done():
+								fmt.Printf("[INFO] 等待重试期间客户端已断开，停止尝试\n")
+								return
+							}
 						}
+					}
+
+					if c.Request.Context().Err() != nil {
+						fmt.Printf("[INFO] 客户端已断开，停止尝试后续 Provider\n")
+						return
 					}
 				}
 			}
@@ -603,7 +908,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			if lastError != nil {
 				errorMsg = lastError.Error()
 			}
-			c.JSON(http.StatusBadGateway, gin.H{
+			respondAllProvidersFailed(c, lastError, !sawNonClientError, gin.H{
 				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
 				"lastProvider":  lastProvider,
 				"totalAttempts": totalAttempts,
@@ -622,6 +927,8 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		var lastError error
+		// 只要有过一次真正的供应商故障，终态就必须维持 502 让 SDK 退避重试
+		sawNonClientError := false
 		var lastProvider string
 		var lastDuration time.Duration
 		totalAttempts := 0
@@ -702,11 +1009,33 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					return
 				}
 
-				// 客户端中断不计入失败次数
+				// 客户端中断不计入失败次数，且没必要再换供应商
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-				} else if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-					fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+					return
+				}
+
+				// 上游 2xx 后中途断流：响应已部分写出，不能再降级，但必须计入失败
+				if errors.Is(err, errUpstreamStreamAborted) {
+					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					return
+				}
+
+				// 上游判定"请求内容本身有问题"：不计入供应商失败，继续尝试下一个
+				if errors.Is(err, errUpstreamClientError) {
+					fmt.Printf("[INFO] 上游拒绝请求内容，不计供应商失败: %s\n", errorMsg)
+				} else {
+					sawNonClientError = true
+					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+				}
+
+				if c.Request.Context().Err() != nil {
+					fmt.Printf("[INFO] 客户端已断开，停止尝试后续 Provider\n")
+					return
 				}
 
 				// 发送切换通知：检查是否有下一个可用的 provider
@@ -746,7 +1075,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		fmt.Printf("[ERROR] 所有 %d 个 provider 均失败，最后尝试: %s | 错误: %s\n",
 			totalAttempts, lastProvider, errorMsg)
 
-		c.JSON(http.StatusBadGateway, gin.H{
+		respondAllProvidersFailed(c, lastError, !sawNonClientError, gin.H{
 			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
 			"last_provider":  lastProvider,
 			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
@@ -773,6 +1102,14 @@ func (prs *ProviderRelayService) forwardRequest(
 	upstreamProtocol := provider.ResolveUpstreamProtocol(endpoint)
 	var sseConverter *OpenAIToAnthropicSSEConverter
 	var convertInfo ConvertInfo
+
+	// codex 走的是 OpenAI Responses 协议，请求体不是 Anthropic Messages 格式。
+	// 若供应商被误配成 openai_chat，套用 Anthropic→OpenAI 转换只会产出无意义的请求体，
+	// 这里直接按原样转发并告警，避免静默损坏请求。
+	if upstreamProtocol == UpstreamProtocolOpenAIChat && kind == "codex" {
+		fmt.Printf("[协议转换] Provider %s 被配置为 OpenAI Chat，但 codex 使用 Responses 协议，跳过请求体转换\n", provider.Name)
+		upstreamProtocol = UpstreamProtocolAnthropic
+	}
 
 	// 如果上游是 OpenAI Chat，需要转换请求体
 	if upstreamProtocol == UpstreamProtocolOpenAIChat {
@@ -804,41 +1141,43 @@ func (prs *ProviderRelayService) forwardRequest(
 	}
 	_ = convertInfo // 避免未使用警告
 
+	// 先清掉客户端自带的凭据与压缩协商，再注入本代理的供应商凭据
+	sanitizeUpstreamHeaders(headers)
+
 	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
 	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
 	switch authType {
 	case "x-api-key":
 		// 仅当用户显式选择 x-api-key 时使用（Anthropic 官方 API）
-		headers["x-api-key"] = provider.APIKey
-		// 只有 Anthropic 协议才注入 anthropic-version
-		if upstreamProtocol == UpstreamProtocolAnthropic {
-			headers["anthropic-version"] = "2023-06-01"
+		setHeaderCanonical(headers, "x-api-key", provider.APIKey)
+		// 只有 Anthropic 协议的 Anthropic 类平台才注入 anthropic-version，
+		// codex 的 /responses 是 OpenAI Responses 协议，注入该头没有意义
+		if upstreamProtocol == UpstreamProtocolAnthropic && kind != "codex" {
+			setHeaderCanonical(headers, "anthropic-version", "2023-06-01")
 		}
 	case "", "bearer":
 		// 默认使用 Bearer token（兼容所有第三方中转）
-		headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+		setHeaderCanonical(headers, "authorization", fmt.Sprintf("Bearer %s", provider.APIKey))
 	default:
 		// 自定义 Header 名
 		headerName := strings.TrimSpace(provider.ConnectivityAuthType)
 		if headerName == "" || strings.EqualFold(headerName, "custom") {
 			headerName = "Authorization"
 		}
-		headers[headerName] = provider.APIKey
+		setHeaderCanonical(headers, headerName, provider.APIKey)
 	}
 
 	// OpenAI 协议时移除 Anthropic 专用头
 	if upstreamProtocol == UpstreamProtocolOpenAIChat {
-		delete(headers, "anthropic-version")
-		delete(headers, "anthropic-beta")
-		delete(headers, "x-api-key")
-		// 确保使用 Bearer 认证
-		if headers["Authorization"] == "" {
-			headers["Authorization"] = fmt.Sprintf("Bearer %s", provider.APIKey)
+		deleteHeaderFold(headers, "anthropic-version", "anthropic-beta", "x-api-key")
+		// 确保使用 Bearer 认证（上一步可能把 x-api-key 型凭据删掉了）
+		if getHeaderFold(headers, "authorization") == "" {
+			setHeaderCanonical(headers, "authorization", fmt.Sprintf("Bearer %s", provider.APIKey))
 		}
 	}
 
-	if _, ok := headers["Accept"]; !ok {
-		headers["Accept"] = "application/json"
+	if getHeaderFold(headers, "accept") == "" {
+		setHeaderCanonical(headers, "accept", "application/json")
 	}
 
 	requestLog := &ReqeustLog{
@@ -892,11 +1231,15 @@ func (prs *ProviderRelayService) forwardRequest(
 		}
 	}()
 
+	// 绑定客户端 context：客户端取消（用户 Ctrl-C / CLI 超时断开）时立即释放上游连接，
+	// 否则处理协程与上游请求会一直挂到 32 小时超时，上游还在持续产出并计费。
+	// 超时与连接池由 relayHTTPClient 统一提供，不再每请求新建 Transport。
 	req := xrequest.New().
+		SetClient(relayHTTPClient).
+		WithContext(c.Request.Context()).
 		SetHeaders(headers).
 		SetQueryParams(query).
-		SetRetry(1, 500*time.Millisecond).
-		SetTimeout(32 * time.Hour) // 32小时超时，适配超大型项目分析
+		SetRetry(1, 500*time.Millisecond)
 
 	reqBody := bytes.NewReader(bodyBytes)
 	req = req.SetBody(reqBody)
@@ -909,9 +1252,9 @@ func (prs *ProviderRelayService) forwardRequest(
 	}
 
 	if err != nil {
-		// resp 存在但 err != nil：可能是客户端中断，不计入失败
-		if resp != nil && requestLog.HttpCode == 0 {
-			fmt.Printf("[INFO] Provider %s 响应存在但状态码为0，判定为客户端中断\n", provider.Name)
+		// 客户端已断开：不是供应商故障，不计入失败次数
+		if c.Request.Context().Err() != nil || errors.Is(err, context.Canceled) {
+			fmt.Printf("[INFO] Provider %s 请求期间客户端已断开，不计入供应商失败\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, err)
 		}
 		// 尝试从响应体提取供应商原始错误信息
@@ -930,9 +1273,9 @@ func (prs *ProviderRelayService) forwardRequest(
 	status := requestLog.HttpCode
 
 	if resp.Error() != nil {
-		// resp 存在、有错误、但状态码为 0：客户端中断，不计入失败
-		if status == 0 {
-			fmt.Printf("[INFO] Provider %s 响应错误但状态码为0，判定为客户端中断\n", provider.Name)
+		// 客户端已断开：不是供应商故障，不计入失败次数
+		if c.Request.Context().Err() != nil {
+			fmt.Printf("[INFO] Provider %s 响应期间客户端已断开，不计入供应商失败\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
 		}
 		// 优先使用 extractUpstreamError 提取完整错误（覆盖 SSE 空 body 场景）
@@ -942,48 +1285,99 @@ func (prs *ProviderRelayService) forwardRequest(
 				errMsg = upstreamBody
 			}
 		}
-		if errMsg != "" {
-			return false, fmt.Errorf("upstream status %d: %s", status, errMsg)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("upstream status %d", status)
 		}
-		return false, fmt.Errorf("upstream status %d", status)
+		if isClientSideUpstreamStatus(status) {
+			return false, fmt.Errorf("%w: upstream status %d: %s", errUpstreamClientError, status, errMsg)
+		}
+		return false, fmt.Errorf("upstream status %d: %s", status, errMsg)
 	}
 
 	// 状态码为 0 且无错误：当作成功处理
 	if status == 0 {
 		fmt.Printf("[WARN] Provider %s 返回状态码 0，但无错误，当作成功处理\n", provider.Name)
-		var copyErr error
-		if sseConverter != nil && isStream {
-			// 使用协议转换 Hook
-			_, copyErr = resp.ToHttpResponseWriter(c.Writer, protocolConvertHook(sseConverter, kind, requestLog))
-		} else {
-			_, copyErr = resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		}
-		if copyErr != nil {
-			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
-		}
-		return true, nil
+		return prs.relayResponseToClient(c, kind, provider, resp, sseConverter, isStream, requestLog)
 	}
 
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		var copyErr error
-		if sseConverter != nil && isStream {
-			// 使用协议转换 Hook
-			_, copyErr = resp.ToHttpResponseWriter(c.Writer, protocolConvertHook(sseConverter, kind, requestLog))
-		} else {
-			_, copyErr = resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
-		}
-		if copyErr != nil {
-			fmt.Printf("[WARN] 复制响应到客户端失败（不影响provider成功判定）: %v\n", copyErr)
-		}
-		// 只要provider返回了2xx状态码，就算成功（复制失败是客户端问题，不是provider问题）
-		return true, nil
+		return prs.relayResponseToClient(c, kind, provider, resp, sseConverter, isStream, requestLog)
 	}
 
 	// 尝试从响应体提取供应商原始错误信息
-	if upstreamBody := extractUpstreamError(resp); upstreamBody != "" {
-		return false, fmt.Errorf("upstream status %d: %s", status, upstreamBody)
+	upstreamBody := extractUpstreamError(resp)
+	detail := fmt.Sprintf("upstream status %d", status)
+	if upstreamBody != "" {
+		detail = fmt.Sprintf("upstream status %d: %s", status, upstreamBody)
 	}
-	return false, fmt.Errorf("upstream status %d", status)
+	// 请求内容本身被拒绝：换供应商也一样，不计入供应商失败次数
+	if isClientSideUpstreamStatus(status) {
+		return false, fmt.Errorf("%w: %s", errUpstreamClientError, detail)
+	}
+	return false, errors.New(detail)
+}
+
+// relayResponseToClient 把上游 2xx 响应转发给客户端并区分三种收尾情况：
+//   - 完整转发成功；
+//   - 客户端主动断开（不计供应商失败）；
+//   - 上游中途断流（响应已部分写出，不能再降级，但必须计供应商失败，
+//     否则半死的供应商每次都被判成功、失败计数被清零而永远不会被拉黑）。
+func (prs *ProviderRelayService) relayResponseToClient(
+	c *gin.Context,
+	kind string,
+	provider Provider,
+	resp *xrequest.Response,
+	sseConverter *OpenAIToAnthropicSSEConverter,
+	isStream bool,
+	requestLog *ReqeustLog,
+) (bool, error) {
+	var copyErr error
+	if sseConverter != nil && isStream {
+		// 使用协议转换 Hook
+		_, copyErr = resp.ToHttpResponseWriter(c.Writer, protocolConvertHook(sseConverter, kind, requestLog))
+		// 上游未发 [DONE] 就断开时补齐终止事件序列，否则客户端一直等 message_stop，
+		// 且 message_delta 里已捕获的 usage 也会随之丢失。
+		// 只在响应确实已经开始写出时才补：一个字节都没写出去的失败要留给降级重试，
+		// 否则会给客户端伪造一条"完整但空"的消息，用户看到空回答还没有任何报错。
+		if c.Writer.Written() {
+			if tail := sseConverter.FinalizeIfUnterminated(); tail != "" {
+				parseEventPayload(tail, ClaudeCodeParseTokenUsageFromResponse, requestLog)
+				if _, writeErr := c.Writer.Write([]byte(tail)); writeErr == nil {
+					c.Writer.Flush()
+				}
+			}
+		}
+	} else {
+		var written int64
+		written, copyErr = resp.ToHttpResponseWriter(c.Writer, ReqeustLogHook(c, kind, requestLog))
+		// 非流式路径 xrequest 内部是 `body, _ := io.ReadAll(...)`，上游中途断流的读错误被丢弃，
+		// 截断的响应会被当成完整响应返回 nil，坏供应商反而被记成功、永远不会被拉黑。
+		// 上游声明了 Content-Length 时用它兜底校验实际写出的字节数。
+		if copyErr == nil {
+			if truncErr := checkNonStreamTruncated(resp, written); truncErr != nil {
+				copyErr = truncErr
+			}
+		}
+	}
+
+	if copyErr == nil {
+		return true, nil
+	}
+
+	if c.Request.Context().Err() != nil || errors.Is(copyErr, context.Canceled) {
+		fmt.Printf("[INFO] Provider %s 转发过程中客户端断开，不计入供应商失败\n", provider.Name)
+		return false, fmt.Errorf("%w: %v", errClientAbort, copyErr)
+	}
+
+	// 一个字节都没写给客户端（例如 xrequest 在 Peek 阶段就读失败，此时响应头还没发出）：
+	// 仍可安全降级到下一个供应商，按普通失败上报
+	if !c.Writer.Written() {
+		fmt.Printf("[WARN] Provider %s 响应读取失败且尚未写出任何内容，可降级: %v\n", provider.Name, copyErr)
+		return false, fmt.Errorf("upstream read failed before response started: %w", copyErr)
+	}
+
+	fmt.Printf("[WARN] Provider %s 上游中途断流（响应已部分写出，无法降级）: %v\n", provider.Name, copyErr)
+	return false, fmt.Errorf("%w: %v", errUpstreamStreamAborted, copyErr)
 }
 
 // extractUpstreamError 从供应商响应中提取原始错误信息（最多 512 字节）
@@ -991,6 +1385,13 @@ func extractUpstreamError(resp *xrequest.Response) string {
 	if resp == nil {
 		return ""
 	}
+	// 错误响应不会再走 ToHttpResponseWriter（那里才有 Body.Close），
+	// 这里必须自己关闭，否则每次失败都泄漏一条上游连接
+	defer func() {
+		if resp.RawResponse != nil && resp.RawResponse.Body != nil {
+			_ = resp.RawResponse.Body.Close()
+		}
+	}()
 	// 优先尝试 String()（会自动解压 gzip 等）
 	body := resp.String()
 	// SSE 流式响应时 String() 返回空，回退到直接读取 RawResponse.Body（带超时防御）
@@ -1065,19 +1466,56 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-func ensureRequestLogColumn(db *sql.DB, column string, definition string) error {
-	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('request_log') WHERE name = '%s'", column)
+func requestLogColumnExists(db *sql.DB, column string) (bool, error) {
 	var count int
-	if err := db.QueryRow(query).Scan(&count); err != nil {
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('request_log') WHERE name = ?", column,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func ensureRequestLogColumn(db *sql.DB, column string, definition string) error {
+	exists, err := requestLogColumnExists(db, column)
+	if err != nil {
 		return err
 	}
-	if count == 0 {
-		alter := fmt.Sprintf("ALTER TABLE request_log ADD COLUMN %s %s", column, definition)
-		if _, err := db.Exec(alter); err != nil {
+	if exists {
+		return nil
+	}
+	alter := fmt.Sprintf("ALTER TABLE request_log ADD COLUMN %s %s", column, definition)
+	_, err = db.Exec(alter)
+	return err
+}
+
+// ensureRequestLogCreatedAt 单独处理 created_at 列的迁移。
+// SQLite 不允许 ALTER TABLE ADD COLUMN 带 CURRENT_TIMESTAMP 这类非常量默认值
+// （报 "Cannot add a column with non-constant default"）。
+// 建表时就没有该列的旧库若走通用迁移会直接失败，进而让 InitDatabase 返回错误、应用无法启动。
+// 这里改为：加不带默认值的列 → 回填历史行 → 用触发器为后续 INSERT 补时间戳
+// （INSERT 语句不显式写 created_at，没有触发器就会留下 NULL，按时间统计的用量与成本全废）。
+func ensureRequestLogCreatedAt(db *sql.DB) error {
+	exists, err := requestLogColumnExists(db, "created_at")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := db.Exec("ALTER TABLE request_log ADD COLUMN created_at DATETIME"); err != nil {
 			return err
 		}
 	}
-	return nil
+	if _, err := db.Exec("UPDATE request_log SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"); err != nil {
+		return err
+	}
+	// 新建库的 created_at 自带 DEFAULT CURRENT_TIMESTAMP，触发器条件不会命中；
+	// 迁移补出来的列没有默认值，全靠该触发器兜底。
+	_, err = db.Exec(`CREATE TRIGGER IF NOT EXISTS request_log_created_at_default
+		AFTER INSERT ON request_log FOR EACH ROW WHEN NEW.created_at IS NULL
+		BEGIN
+			UPDATE request_log SET created_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+		END`)
+	return err
 }
 
 func ensureRequestLogTable() error {
@@ -1110,11 +1548,15 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 	}
 
 	// 历史新增列按声明顺序补齐,旧库也能顺利升级。新增列只需在末尾追加一行。
+	// created_at 的默认值是非常量，不能走通用 ALTER 路径，单独迁移
+	if err := ensureRequestLogCreatedAt(db); err != nil {
+		return err
+	}
+
 	migrations := []struct {
 		column     string
 		definition string
 	}{
-		{"created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"},
 		{"is_stream", "INTEGER DEFAULT 0"},
 		{"duration_sec", "REAL DEFAULT 0"},
 		{"ephemeral_5m_tokens", "INTEGER DEFAULT 0"},
@@ -1253,7 +1695,14 @@ func maxIntInto(dst *int, candidate int) {
 
 // codex usage parser(OpenAI Responses API)
 func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
-	if usageResult := gjson.Get(data, "response.usage"); usageResult.Exists() {
+	// 流式事件把 Response 包在 response 字段里(response.completed);
+	// 非流式 /responses 直接返回 Response 对象,usage 在根级——两处都要看,
+	// 否则非流式请求的 token 与成本全部记 0。
+	usageResult := gjson.Get(data, "response.usage")
+	if !usageResult.Exists() {
+		usageResult = gjson.Get(data, "usage")
+	}
+	if usageResult.Exists() {
 		inputTokens := int(usageResult.Get("input_tokens").Int())
 		outputTokens := int(usageResult.Get("output_tokens").Int())
 		cacheReadTokens := int(usageResult.Get("input_tokens_details.cached_tokens").Int())
@@ -1261,14 +1710,19 @@ func CodexParseTokenUsageFromResponse(data string, usage *ReqeustLog) {
 		if cacheReadTokens > inputTokens {
 			cacheReadTokens = inputTokens
 		}
+		if reasoningTokens > outputTokens {
+			reasoningTokens = outputTokens
+		}
 		// Responses usage.input_tokens 含 cached_tokens;下游把两者分开计价,这里先拆成未缓存输入+缓存读取。
 		usage.InputTokens = inputTokens - cacheReadTokens
-		usage.OutputTokens = outputTokens
+		// output_tokens 已包含 reasoning_tokens,而计费引擎是 OutputCost + ReasoningCost 相加,
+		// 不拆开会把推理 token 计两次。
+		usage.OutputTokens = outputTokens - reasoningTokens
 		usage.CacheReadTokens = cacheReadTokens
 		usage.ReasoningTokens = reasoningTokens
 	}
 	// service_tier 可能在 response.service_tier 或 response.usage.service_tier,两路径都尝试
-	for _, path := range []string{"response.service_tier", "response.usage.service_tier"} {
+	for _, path := range []string{"response.service_tier", "response.usage.service_tier", "service_tier", "usage.service_tier"} {
 		if rawTier := gjson.Get(data, path).String(); strings.TrimSpace(rawTier) != "" {
 			usage.ServiceTier = string(modelpricing.NormalizeObservedServiceTier(rawTier, warnUnknownTier))
 			break
@@ -1345,16 +1799,30 @@ func mergeGeminiUsageMetadata(usage gjson.Result, reqLog *ReqeustLog) {
 		reqLog.ReasoningTokens = int(v.Int())
 	}
 
-	// 若仅提供 totalTokenCount，按 total - input 估算输出 token
+	// 若仅提供 totalTokenCount，按 total - input 估算输出 token。
+	// totalTokenCount 含 thoughtsTokenCount，直接相减会把思考 token 也算进输出，
+	// 与单独入库的 ReasoningTokens 重复计费，因此要先扣掉。
 	total := usage.Get("totalTokenCount").Int()
 	if total > 0 && reqLog.OutputTokens == 0 && promptTokens > 0 && promptTokens < int(total) {
-		reqLog.OutputTokens = int(total) - promptTokens
+		if derived := int(total) - promptTokens - reqLog.ReasoningTokens; derived > 0 {
+			reqLog.OutputTokens = derived
+		}
 	}
 }
 
 // geminiClientAbortMsg 标记 Gemini 转发中"客户端主动断开"的错误信息,
 // 调用方据此跳过 RecordFailure(与 Claude/Codex 的 errClientAbort 语义对齐)。
 const geminiClientAbortMsg = "client aborted"
+
+// geminiClientErrorPrefix 标记 Gemini 转发中"上游判定请求内容本身有问题"的错误信息。
+// Gemini 转发返回的是字符串而不是 error，用前缀传递该分类：
+// 调用方据此跳过 RecordFailure 与同供应商重试（与 errUpstreamClientError 语义对齐）。
+const geminiClientErrorPrefix = "client request rejected: "
+
+// isGeminiClientError 判断 Gemini 转发的错误信息是否属于客户端请求问题。
+func isGeminiClientError(errMsg string) bool {
+	return strings.HasPrefix(errMsg, geminiClientErrorPrefix)
+}
 
 // streamGeminiResponseWithHook 流式传输 Gemini 响应并通过 Hook 提取 token 用量
 // 【修复】维护跨 chunk 缓冲，确保完整 SSE 事件解析
@@ -1475,13 +1943,17 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		fullPath := c.Param("any")
 		endpoint := apiVersion + fullPath
 
-		// 保留查询参数（如 ?alt=sse, ?key= 等）
-		query := c.Request.URL.RawQuery
+		// 保留查询参数（如 ?alt=sse），但必须剔除客户端自带的凭据参数：
+		// Gemini REST 支持 ?key=<API Key>，原样转发会把用户本机的真实 Key 发给
+		// 降级链上每一个第三方供应商，上游还可能优先用它认证计费。
+		// 供应商凭据统一走 x-goog-api-key 请求头注入。
+		query := stripCredentialQueryParams(c.Request.URL.RawQuery)
 		if query != "" {
 			endpoint = endpoint + "?" + query
 		}
 
-		fmt.Printf("[Gemini] 收到请求: %s\n", endpoint)
+		// 查询串里可能带 key=<API Key>，日志要脱敏后再打印
+		fmt.Printf("[Gemini] 收到请求: %s\n", maskSensitiveQuery(endpoint))
 
 		// 读取请求体
 		var bodyBytes []byte
@@ -1599,6 +2071,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				maxRetryPerProvider, retryWaitSeconds)
 
 			var lastError string
+			// 只要有过一次真正的供应商故障，终态就必须维持 502 让 SDK 退避重试
+			sawNonClientError := false
 			var lastProvider string
 			totalAttempts := 0
 
@@ -1669,6 +2143,15 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errMsg)
 
+						// 上游判定请求内容本身有问题：不计供应商失败，也别拿同一个坏请求重试，
+						// 直接换下一个供应商
+						if isGeminiClientError(errMsg) {
+							fmt.Printf("[Gemini] 上游拒绝请求内容，不计供应商失败，切换到下一个\n")
+							break
+						}
+
+						sawNonClientError = true
+
 						// 记录失败次数（可能触发拉黑）
 						_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
 
@@ -1690,10 +2173,16 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			// 所有 Provider 都失败或被拉黑
 			fmt.Printf("[Gemini] 💥 拉黑模式：所有 Provider 都失败或被拉黑（共尝试 %d 次）\n", totalAttempts)
 
-			if requestLog.HttpCode == 0 {
-				requestLog.HttpCode = http.StatusBadGateway
+			// 请求内容被拒时必须回 4xx：回 502 会让 SDK 按服务端故障自动重试，
+			// 一个不可能成功的坏请求被反复重发，每次都扫一遍全部供应商
+			terminalStatus := http.StatusBadGateway
+			if !sawNonClientError && isGeminiClientError(lastError) {
+				terminalStatus = http.StatusBadRequest
 			}
-			c.JSON(http.StatusBadGateway, gin.H{
+			if requestLog.HttpCode == 0 {
+				requestLog.HttpCode = terminalStatus
+			}
+			c.JSON(terminalStatus, gin.H{
 				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, lastError),
 				"lastProvider":  lastProvider,
 				"totalAttempts": totalAttempts,
@@ -1712,6 +2201,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}
 
 		var lastError string
+		// 只要有过一次真正的供应商故障，终态就必须维持 502 让 SDK 退避重试
+		sawNonClientError := false
 		for _, level := range sortedLevels {
 			providersInLevel := levelGroups[level]
 
@@ -1757,6 +2248,12 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 				// 失败，记录并继续
 				lastError = errMsg
+				// 上游判定请求内容本身有问题：换供应商也一样，不计供应商失败
+				if isGeminiClientError(errMsg) {
+					fmt.Printf("[Gemini] 上游拒绝请求内容，不计供应商失败\n")
+					continue
+				}
+				sawNonClientError = true
 				_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
 			}
 
@@ -1764,10 +2261,14 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}
 
 		// 所有 Level 都失败
-		if requestLog.HttpCode == 0 {
-			requestLog.HttpCode = http.StatusBadGateway
+		terminalStatus := http.StatusBadGateway
+		if !sawNonClientError && isGeminiClientError(lastError) {
+			terminalStatus = http.StatusBadRequest
 		}
-		c.JSON(http.StatusBadGateway, gin.H{
+		if requestLog.HttpCode == 0 {
+			requestLog.HttpCode = terminalStatus
+		}
+		c.JSON(terminalStatus, gin.H{
 			"error":   "all gemini providers failed",
 			"details": lastError,
 		})
@@ -1841,16 +2342,23 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 			req.Header.Add(key, value)
 		}
 	}
+	// 清掉客户端自带凭据（否则用户本机 Key 会发给第三方供应商）与 Accept-Encoding
+	// （透传后 Go 不再自动解压，流式 usageMetadata 解析拿到压缩字节，计费恒为 0）
+	for _, name := range []string{
+		"Authorization", "Proxy-Authorization", "X-Api-Key", "Api-Key", "X-Goog-Api-Key",
+		"Accept-Encoding", "Connection", "Keep-Alive", "Te", "Upgrade",
+	} {
+		req.Header.Del(name)
+	}
 
 	// 设置 API Key
 	if provider.APIKey != "" {
 		req.Header.Set("x-goog-api-key", provider.APIKey)
 	}
 
-	// 发送请求（与 Claude/Codex 转发同量级的超长超时，适配长推理/长输出任务；
-	// 原 300 秒会把 Gemini 长任务腰斩并误计为供应商失败）
-	client := &http.Client{Timeout: 32 * time.Hour}
-	resp, err := client.Do(req)
+	// 发送请求（与 Claude/Codex 转发共用连接池，避免每请求新建 Transport；
+	// 超时同为 32 小时以适配长推理/长输出任务，提前中止依靠请求 context）
+	resp, err := relayHTTPClient.Do(req)
 	providerDuration := time.Since(providerStart).Seconds()
 
 	if err != nil {
@@ -1869,9 +2377,16 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	// 检查响应状态
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errorBody, _ := io.ReadAll(resp.Body)
+		// 上游错误体大小不可控（可能是整页 HTML），限长读取后再进日志与错误串
+		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		fmt.Printf("[Gemini]   ✗ 失败: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
-		return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(errorBody)), false
+		msg := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(errorBody))
+		// 请求内容本身被拒（400/413/422 等）：换供应商也一样失败，
+		// 加前缀让调用方跳过失败计数，避免一个坏请求把所有 Gemini 供应商拉黑
+		if isClientSideUpstreamStatus(resp.StatusCode) {
+			msg = geminiClientErrorPrefix + msg
+		}
+		return false, msg, false
 	}
 
 	fmt.Printf("[Gemini]   ✓ 连接成功: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
@@ -1889,8 +2404,13 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		// 【重要】从 Flush() 开始，响应头已写入客户端，任何失败都不能重试
 		copyErr := streamGeminiResponseWithHook(resp.Body, c.Writer, requestLog)
 		if copyErr != nil {
-			// 客户端主动断开（如用户取消）不是供应商故障
-			if errors.Is(copyErr, errClientAbort) {
+			// 客户端主动断开（如用户取消）不是供应商故障。
+			// 取消发生在等待上游下一个 chunk 时（最常见时序）不会有写失败，
+			// 而是请求 context 让 Body.Read 返回 context canceled，必须一并识别，
+			// 否则用户每次取消都会给健康供应商记一次失败，连续取消即被拉黑。
+			if errors.Is(copyErr, errClientAbort) ||
+				errors.Is(copyErr, context.Canceled) ||
+				c.Request.Context().Err() != nil {
 				fmt.Printf("[Gemini]   ℹ️ 客户端中断流式连接: %s\n", provider.Name)
 				return false, geminiClientAbortMsg, true
 			}
@@ -1961,6 +2481,16 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			}
 			bodyBytes = data
 			c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		}
+
+		// 空 body 或非法 JSON 一定会被所有上游拒绝，提前挡掉
+		if !gjson.ValidBytes(bodyBytes) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"type":    "error",
+				"error":   map[string]string{"type": "invalid_request_error", "message": "request body must be valid JSON"},
+				"message": "request body must be valid JSON",
+			})
+			return
 		}
 
 		isStream := gjson.GetBytes(bodyBytes, "stream").Bool()
@@ -2066,6 +2596,8 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				maxRetryPerProvider, retryWaitSeconds)
 
 			var lastError error
+			// 只要有过一次真正的供应商故障，终态就必须维持 502 让 SDK 退避重试
+			sawNonClientError := false
 			var lastProvider string
 			totalAttempts := 0
 
@@ -2141,11 +2673,39 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
 							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
 
+						// 客户端请求被拒绝（协议转换不支持的格式/功能）：直接返回 400，不重试不拉黑。
+						// 与 claude/codex 路径保持一致，否则客户端自身的问题会被算成供应商故障
+						if errors.Is(err, ErrClientRequestRejected) {
+							fmt.Printf("[CustomCLI][INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+							c.JSON(http.StatusBadRequest, gin.H{
+								"type":    "error",
+								"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+								"message": errorMsg,
+							})
+							return
+						}
+
 						// 客户端中断不计入失败次数，直接返回
 						if errors.Is(err, errClientAbort) {
 							fmt.Printf("[CustomCLI][INFO] 客户端中断，停止重试\n")
 							return
 						}
+
+						// 上游 2xx 后中途断流：响应已部分写出，不能再换供应商，但必须计入失败
+						if errors.Is(err, errUpstreamStreamAborted) {
+							if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+								fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+							}
+							return
+						}
+
+						// 上游判定"请求内容本身有问题"：不计供应商失败，直接换下一个供应商
+						if errors.Is(err, errUpstreamClientError) {
+							fmt.Printf("[CustomCLI][INFO] 上游拒绝请求内容，不计供应商失败，切换到下一个: %s\n", errorMsg)
+							break
+						}
+
+						sawNonClientError = true
 
 						// 记录失败次数（可能触发拉黑）
 						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
@@ -2158,11 +2718,21 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							break
 						}
 
-						// 等待后重试（除非是最后一次）
+						// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开
 						if retryCount < maxRetryPerProvider-1 {
 							fmt.Printf("[CustomCLI][INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
-							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+							select {
+							case <-time.After(time.Duration(retryWaitSeconds) * time.Second):
+							case <-c.Request.Context().Done():
+								fmt.Printf("[CustomCLI][INFO] 等待重试期间客户端已断开，停止尝试\n")
+								return
+							}
 						}
+					}
+
+					if c.Request.Context().Err() != nil {
+						fmt.Printf("[CustomCLI][INFO] 客户端已断开，停止尝试后续 Provider\n")
+						return
 					}
 				}
 			}
@@ -2174,7 +2744,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			if lastError != nil {
 				errorMsg = lastError.Error()
 			}
-			c.JSON(http.StatusBadGateway, gin.H{
+			respondAllProvidersFailed(c, lastError, !sawNonClientError, gin.H{
 				"error":         fmt.Sprintf("所有 Provider 都失败或被拉黑，最后尝试: %s - %s", lastProvider, errorMsg),
 				"lastProvider":  lastProvider,
 				"totalAttempts": totalAttempts,
@@ -2193,6 +2763,8 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		}
 
 		var lastError error
+		// 只要有过一次真正的供应商故障，终态就必须维持 502 让 SDK 退避重试
+		sawNonClientError := false
 		var lastProvider string
 		var lastDuration time.Duration
 		totalAttempts := 0
@@ -2250,10 +2822,43 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 				fmt.Printf("[CustomCLI][WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
 					level, provider.Name, errorMsg, duration.Seconds())
 
+				// 客户端请求被拒绝（协议转换不支持的格式/功能）：直接返回 400，不重试不拉黑
+				if errors.Is(err, ErrClientRequestRejected) {
+					fmt.Printf("[CustomCLI][INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+					c.JSON(http.StatusBadRequest, gin.H{
+						"type":    "error",
+						"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+						"message": errorMsg,
+					})
+					return
+				}
+
 				if errors.Is(err, errClientAbort) {
 					fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-				} else if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-					fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					return
+				}
+
+				// 上游 2xx 后中途断流：响应已部分写出，不能再降级，但必须计入失败
+				if errors.Is(err, errUpstreamStreamAborted) {
+					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+					return
+				}
+
+				// 上游判定"请求内容本身有问题"：不计入供应商失败，继续尝试下一个
+				if errors.Is(err, errUpstreamClientError) {
+					fmt.Printf("[CustomCLI][INFO] 上游拒绝请求内容，不计供应商失败: %s\n", errorMsg)
+				} else {
+					sawNonClientError = true
+					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					}
+				}
+
+				if c.Request.Context().Err() != nil {
+					fmt.Printf("[CustomCLI][INFO] 客户端已断开，停止尝试后续 Provider\n")
+					return
 				}
 
 				// 发送切换通知
@@ -2291,7 +2896,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		fmt.Printf("[CustomCLI][ERROR] 所有 %d 个 provider 均失败，最后尝试: %s | 错误: %s\n",
 			totalAttempts, lastProvider, errorMsg)
 
-		c.JSON(http.StatusBadGateway, gin.H{
+		respondAllProvidersFailed(c, lastError, !sawNonClientError, gin.H{
 			"error":          fmt.Sprintf("所有 %d 个 provider 均失败，最后错误: %s", totalAttempts, errorMsg),
 			"last_provider":  lastProvider,
 			"last_duration":  fmt.Sprintf("%.2fs", lastDuration.Seconds()),
@@ -2380,6 +2985,13 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 			for _, value := range values {
 				req.Header.Add(key, value)
 			}
+		}
+		// 清掉客户端自带凭据，避免用户本机 Key 被转发给第三方供应商
+		for _, name := range []string{
+			"Authorization", "Proxy-Authorization", "X-Api-Key", "Api-Key", "X-Goog-Api-Key",
+			"Accept-Encoding", "Connection", "Keep-Alive", "Te", "Upgrade",
+		} {
+			req.Header.Del(name)
 		}
 
 		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）

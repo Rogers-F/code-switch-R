@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -91,8 +92,12 @@ func (s *SpeedTestService) testSingleEndpoint(client *http.Client, rawURL string
 		}
 	}
 
-	// 热身请求（忽略结果，用于建立连接）
-	_, _ = s.makeRequest(client, parsedURL.String())
+	// 热身请求（用于建立连接）：必须读完并关闭 Body，
+	// 连接才会归还连接池供测量请求复用，否则第二次测量仍包含完整握手且短时泄漏 socket
+	if warmResp, warmErr := s.makeRequest(client, parsedURL.String()); warmErr == nil {
+		_, _ = io.Copy(io.Discard, io.LimitReader(warmResp.Body, 64<<10))
+		_ = warmResp.Body.Close()
+	}
 
 	// 第二次请求：测量延迟
 	start := time.Now()

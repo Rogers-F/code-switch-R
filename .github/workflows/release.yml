@@ -16,7 +16,7 @@ jobs:
       matrix:
         arch: [arm64, amd64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Update version from tag
         id: version
@@ -28,11 +28,11 @@ jobs:
           echo "Updated version_service.go:"
           grep "AppVersion" version_service.go
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.24'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -57,6 +57,17 @@ jobs:
       - name: Update build assets
         run: wails3 task common:update:build-assets
 
+      # update build-assets 会用 config.yml(0.1.0) 重新生成 Info.plist，版本必须在其之后注入
+      - name: Inject version into Info.plist
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          export VERSION
+          perl -0pi -e 's|(<key>CFBundleVersion</key>\s*<string>)[^<]*(</string>)|$1$ENV{VERSION}$2|; s|(<key>CFBundleShortVersionString</key>\s*<string>)[^<]*(</string>)|$1$ENV{VERSION}$2|' build/darwin/Info.plist
+          echo "Updated build/darwin/Info.plist:"
+          grep -A1 -E 'CFBundleVersion|CFBundleShortVersionString' build/darwin/Info.plist
+          # 两个版本键都必须已写入真实版本，否则直接失败
+          test "$(grep -c "<string>${VERSION}</string>" build/darwin/Info.plist)" -eq 2
+
       - name: Generate bindings
         run: wails3 task common:generate:bindings
 
@@ -80,17 +91,26 @@ jobs:
           cd bin
           ditto -c -k --sequesterRsrc --keepParent "$(basename ${{ steps.find-app.outputs.app_path }})" CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
 
+      - name: Generate SHA256 Checksum
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          cd bin
+          shasum -a 256 "CodeSwitch-v${VERSION}-macos-${{ matrix.arch }}.zip" > "CodeSwitch-v${VERSION}-macos-${{ matrix.arch }}.zip.sha256"
+          cat "CodeSwitch-v${VERSION}-macos-${{ matrix.arch }}.zip.sha256"
+
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-${{ matrix.arch }}
-          path: bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
+          path: |
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.zip.sha256
 
   build-windows:
     name: Build Windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Update version from tag
         id: version
@@ -107,19 +127,11 @@ jobs:
           Write-Host "Updated version_service.go:"
           Select-String "AppVersion" version_service.go
 
-          # Update build/windows/info.json
-          $json = Get-Content build/windows/info.json -Raw | ConvertFrom-Json
-          $json.fixed.file_version = $VERSION
-          $json.info.'0000'.ProductVersion = $VERSION
-          $json | ConvertTo-Json -Depth 10 | Set-Content build/windows/info.json
-          Write-Host "Updated build/windows/info.json:"
-          Get-Content build/windows/info.json
-
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.24'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -146,6 +158,19 @@ jobs:
 
       - name: Update build assets
         run: wails3 task common:update:build-assets
+
+      # update build-assets 会用 config.yml(0.1.0) 重新生成 info.json，版本必须在其之后注入，
+      # 否则 generate:syso 读到的 exe 版本资源恒为 0.1.0
+      - name: Inject version into build assets
+        shell: pwsh
+        run: |
+          $VERSION = "${{ steps.version.outputs.VERSION }}"
+          $json = Get-Content build/windows/info.json -Raw | ConvertFrom-Json
+          $json.fixed.file_version = $VERSION
+          $json.info.'0000'.ProductVersion = $VERSION
+          $json | ConvertTo-Json -Depth 10 | Set-Content build/windows/info.json
+          Write-Host "Updated build/windows/info.json:"
+          Get-Content build/windows/info.json
 
       - name: Generate bindings
         run: wails3 task common:generate:bindings
@@ -176,7 +201,10 @@ jobs:
           wails3 generate webview2bootstrapper
           $binaryPath = (Resolve-Path "..\..\..\bin\CodeSwitch.exe").Path
           Write-Host "Binary path: $binaryPath"
-          makensis -DARG_WAILS_AMD64_BINARY="$binaryPath" project.nsi
+          # wails_tools.nsh 里 INFO_PRODUCTVERSION 默认 0.1.0，必须显式传入真实版本，
+          # 否则安装器版本资源与卸载注册表 DisplayVersion 全部错误
+          $VERSION = "${{ steps.version.outputs.VERSION }}"
+          makensis -DARG_WAILS_AMD64_BINARY="$binaryPath" -DINFO_PRODUCTVERSION="$VERSION" project.nsi
           Pop-Location
 
       - name: Rename files with version
@@ -201,16 +229,18 @@ jobs:
           $VERSION = "${{ steps.version.outputs.VERSION }}"
           Push-Location bin
           Get-FileHash -Algorithm SHA256 "CodeSwitch-v$VERSION.exe" | ForEach-Object { "$($_.Hash.ToLower())  CodeSwitch-v$VERSION.exe" } | Out-File -Encoding ascii "CodeSwitch-v$VERSION.exe.sha256"
+          Get-FileHash -Algorithm SHA256 "CodeSwitch-v$VERSION-amd64-installer.exe" | ForEach-Object { "$($_.Hash.ToLower())  CodeSwitch-v$VERSION-amd64-installer.exe" } | Out-File -Encoding ascii "CodeSwitch-v$VERSION-amd64-installer.exe.sha256"
           Write-Host "SHA256 checksums generated:"
           Get-Content *.sha256
           Pop-Location
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-amd64
           path: |
             bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-amd64-installer.exe
+            bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}-amd64-installer.exe.sha256
             bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.exe
             bin/CodeSwitch-v${{ steps.version.outputs.VERSION }}.exe.sha256
 
@@ -218,7 +248,7 @@ jobs:
     name: Build Linux
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Update version from tag
         id: version
@@ -230,11 +260,11 @@ jobs:
           echo "Updated version_service.go:"
           grep "AppVersion" version_service.go
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.24'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -310,6 +340,9 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           sed -i "s/^version:.*/version: \"$VERSION\"/" build/linux/nfpm/nfpm.yaml
           echo "Updated nfpm version to: $VERSION"
+          # update build-assets 可能用模板重置 nfpm.yaml（postremove 被注释），此处幂等地重新启用卸载脚本
+          sed -i 's|^  # postremove:.*|  postremove: "./build/linux/nfpm/scripts/postremove.sh"|' build/linux/nfpm/nfpm.yaml
+          grep -n "postremove" build/linux/nfpm/nfpm.yaml
 
       - name: Create DEB Package
         run: wails3 task linux:create:deb
@@ -317,18 +350,31 @@ jobs:
       - name: Create RPM Package
         run: wails3 task linux:create:rpm
 
+      # wails3 tool package 固定输出 CodeSwitch.deb / CodeSwitch.rpm，
+      # 重命名为发行版惯例文件名；找不到产物直接失败，避免发布时静默缺失
+      - name: Rename Linux Packages
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          cd bin
+          echo "Files in bin/:"
+          ls -la
+          if [ -f CodeSwitch.deb ]; then mv CodeSwitch.deb "codeswitch_${VERSION}_amd64.deb"; fi
+          if [ -f CodeSwitch.rpm ]; then mv CodeSwitch.rpm "codeswitch-${VERSION}-1.x86_64.rpm"; fi
+          test -f "codeswitch_${VERSION}_amd64.deb"
+          test -f "codeswitch-${VERSION}-1.x86_64.rpm"
+
       - name: Generate SHA256 Checksums
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
           cd bin
           sha256sum "CodeSwitch-v${VERSION}.AppImage" > "CodeSwitch-v${VERSION}.AppImage.sha256"
-          for f in codeswitch_*.deb; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
-          for f in codeswitch-*.rpm; do [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"; done
+          sha256sum "codeswitch_${VERSION}_amd64.deb" > "codeswitch_${VERSION}_amd64.deb.sha256"
+          sha256sum "codeswitch-${VERSION}-1.x86_64.rpm" > "codeswitch-${VERSION}-1.x86_64.rpm.sha256"
           echo "SHA256 checksums:"
           cat *.sha256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-amd64
           path: |
@@ -344,10 +390,10 @@ jobs:
     needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
@@ -355,7 +401,7 @@ jobs:
         run: ls -R artifacts
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
@@ -366,20 +412,23 @@ jobs:
 
           # macOS
           cp artifacts/macos-arm64/CodeSwitch-v${VERSION}-macos-arm64.zip release-assets/
+          cp artifacts/macos-arm64/CodeSwitch-v${VERSION}-macos-arm64.zip.sha256 release-assets/
           cp artifacts/macos-amd64/CodeSwitch-v${VERSION}-macos-amd64.zip release-assets/
+          cp artifacts/macos-amd64/CodeSwitch-v${VERSION}-macos-amd64.zip.sha256 release-assets/
 
           # Windows
           cp artifacts/windows-amd64/CodeSwitch-v${VERSION}-amd64-installer.exe release-assets/
+          cp artifacts/windows-amd64/CodeSwitch-v${VERSION}-amd64-installer.exe.sha256 release-assets/
           cp artifacts/windows-amd64/CodeSwitch-v${VERSION}.exe release-assets/
           cp artifacts/windows-amd64/CodeSwitch-v${VERSION}.exe.sha256 release-assets/
 
-          # Linux
+          # Linux（deb/rpm 已在构建 job 中强制校验存在，此处缺失应直接失败而非静默跳过）
           cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage release-assets/
           cp artifacts/linux-amd64/CodeSwitch-v${VERSION}.AppImage.sha256 release-assets/
-          cp artifacts/linux-amd64/codeswitch_*.deb release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch_*.deb.sha256 release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm release-assets/ 2>/dev/null || true
-          cp artifacts/linux-amd64/codeswitch-*.rpm.sha256 release-assets/ 2>/dev/null || true
+          cp artifacts/linux-amd64/codeswitch_*.deb release-assets/
+          cp artifacts/linux-amd64/codeswitch_*.deb.sha256 release-assets/
+          cp artifacts/linux-amd64/codeswitch-*.rpm release-assets/
+          cp artifacts/linux-amd64/codeswitch-*.rpm.sha256 release-assets/
 
           ls -lh release-assets/
 
@@ -395,9 +444,19 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "Generating release body for v$VERSION"
 
-          # 提取当前版本的更新内容（从标题到下一个版本标题之前）
-          # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败
-          tr -d '\r' < RELEASE_NOTES.md | awk "/^# Code Switch v$VERSION/,/^# Code Switch v[0-9]/" | head -n -1 > /tmp/version_notes.md
+          # 提取当前版本的更新内容（从标题之后到下一个版本标题之前）
+          # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败；
+          # 不能用 awk 区间模式 /起/,/止/：标题行同时命中首尾模式时区间只含标题行本身
+          tr -d '\r' < RELEASE_NOTES.md | awk -v ver="$VERSION" '
+            $0 == "# Code Switch v" ver {found=1; next}
+            found && /^# Code Switch v[0-9]/ {exit}
+            found {lines[++n]=$0}
+            END {
+              # 去掉尾部的空行与 "---" 分隔线，后面拼接 release body 时会另加分隔
+              while (n > 0 && (lines[n] ~ /^[[:space:]]*$/ || lines[n] == "---")) n--
+              for (i=1; i<=n; i++) print lines[i]
+            }
+          ' > /tmp/version_notes.md
 
           # 如果没找到版本说明，使用默认内容
           if [ ! -s /tmp/version_notes.md ]; then
@@ -461,7 +520,7 @@ jobs:
           cat /tmp/release_body.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
           files: release-assets/*
           body_path: /tmp/release_body.md

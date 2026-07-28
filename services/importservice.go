@@ -391,10 +391,7 @@ func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 			} else if kind == "codex" {
 				// Codex: 如果没有 Config，生成最小 TOML
 				if entry.Settings.Config == "" {
-					entry.Settings.Config = fmt.Sprintf(
-						"model_provider = \"db\"\n[model_providers.db]\nbase_url = \"%s\"\nname = \"%s\"",
-						url, name,
-					)
+					entry.Settings.Config = buildMinimalCodexConfig(url, name)
 				}
 			}
 		}
@@ -408,6 +405,22 @@ func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 	}
 
 	return rows.Err()
+}
+
+// buildMinimalCodexConfig 生成仅含 base_url 的最小 Codex TOML 配置。
+// name/url 中的反斜杠与双引号必须转义，否则拼出的 TOML 非法，
+// 后续 resolveCodexAPIURL 解析失败会导致该供应商被静默跳过
+func buildMinimalCodexConfig(url, name string) string {
+	return fmt.Sprintf(
+		"model_provider = \"db\"\n[model_providers.db]\nbase_url = \"%s\"\nname = \"%s\"",
+		escapeTOMLString(url), escapeTOMLString(name),
+	)
+}
+
+// escapeTOMLString 转义 TOML 基础字符串中的反斜杠与双引号
+func escapeTOMLString(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	return strings.ReplaceAll(value, "\"", "\\\"")
 }
 
 // loadMCPServersFromSQLite 从 SQLite 读取 MCP servers 数据
@@ -537,11 +550,11 @@ type ccMCPServerEntry struct {
 }
 
 type ccMCPServerConfig struct {
-	Type    string    `json:"type"`
-	Command string    `json:"command"`
-	Args    []string  `json:"args"`
-	Env     stringMap `json:"env"` // 使用 stringMap 兼容旧配置中数字类型的值
-	URL     string    `json:"url"`
+	Type    string      `json:"type"`
+	Command string      `json:"command"`
+	Args    stringSlice `json:"args"` // 使用 stringSlice 兼容 args 为单个字符串或含数字的情况
+	Env     stringMap   `json:"env"`  // 使用 stringMap 兼容旧配置中数字类型的值
+	URL     string      `json:"url"`
 }
 
 type providerCandidate struct {
@@ -610,6 +623,11 @@ func diffProviderCandidates(kind string, entries map[string]ccProviderEntry, exi
 		}
 		if dedupKey != "" {
 			seen[dedupKey] = struct{}{}
+		}
+		// 名字是黑名单/统计/轮询的键，同批重名会互相串扰，
+		// 接受候选后立即登记其名字，同名后续候选走上面的名字查重被跳过
+		if name := normalizeName(candidate.Name); name != "" {
+			existingNames[name] = struct{}{}
 		}
 		candidates = append(candidates, candidate)
 	}
@@ -744,33 +762,62 @@ func (is *ImportService) importProviders(cfg *ccSwitchConfig, pending map[string
 }
 
 func (is *ImportService) saveProviders(kind string, candidates []providerCandidate) (int, error) {
-	existing, err := is.providerService.LoadProviders(kind)
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	accent, tint := defaultVisual(kind)
+	added := 0
+	// 在锁内完成"加载→合并→保存"，避免与其它保存路径并发时相互覆盖丢失更新
+	err := is.providerService.mutateProviders(kind, func(existing []Provider) ([]Provider, error) {
+		existingURL := make(map[string]struct{}, len(existing))
+		existingNames := make(map[string]struct{}, len(existing))
+		for _, provider := range existing {
+			if url := normalizeURL(provider.APIURL); url != "" {
+				existingURL[url] = struct{}{}
+			}
+			if name := normalizeName(provider.Name); name != "" {
+				existingNames[name] = struct{}{}
+			}
+		}
+		nextID := nextProviderID(existing)
+		merged := make([]Provider, 0, len(existing)+len(candidates))
+		merged = append(merged, existing...)
+		added = 0
+		for _, candidate := range candidates {
+			// 候选集生成与保存之间可能有并发写入，保存前按当前配置再查重一次
+			if url := normalizeURL(candidate.APIURL); url != "" {
+				if _, exists := existingURL[url]; exists {
+					continue
+				}
+				existingURL[url] = struct{}{}
+			}
+			if name := normalizeName(candidate.Name); name != "" {
+				if _, exists := existingNames[name]; exists {
+					continue
+				}
+				existingNames[name] = struct{}{}
+			}
+			provider := Provider{
+				ID:      nextID,
+				Name:    candidate.Name,
+				APIURL:  candidate.APIURL,
+				APIKey:  candidate.APIKey,
+				Site:    candidate.Site,
+				Icon:    candidate.Icon,
+				Tint:    tint,
+				Accent:  accent,
+				Enabled: true,
+			}
+			merged = append(merged, provider)
+			nextID++
+			added++
+		}
+		return merged, nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	nextID := nextProviderID(existing)
-	merged := make([]Provider, 0, len(existing)+len(candidates))
-	merged = append(merged, existing...)
-	accent, tint := defaultVisual(kind)
-	for _, candidate := range candidates {
-		provider := Provider{
-			ID:      nextID,
-			Name:    candidate.Name,
-			APIURL:  candidate.APIURL,
-			APIKey:  candidate.APIKey,
-			Site:    candidate.Site,
-			Icon:    candidate.Icon,
-			Tint:    tint,
-			Accent:  accent,
-			Enabled: true,
-		}
-		merged = append(merged, provider)
-		nextID++
-	}
-	if err := is.providerService.SaveProviders(kind, merged); err != nil {
-		return 0, err
-	}
-	return len(candidates), nil
+	return added, nil
 }
 
 func nextProviderID(list []Provider) int64 {
@@ -830,17 +877,37 @@ func (is *ImportService) importMCPServers(candidates []MCPServer) (int, error) {
 	if len(candidates) == 0 {
 		return 0, nil
 	}
-	existing, err := is.mcpService.ListServers()
+	added := 0
+	// 在锁内完成"读取→合并→保存"，避免与其它保存路径并发时相互覆盖丢失更新
+	err := is.mcpService.mutateServers(func(existing []MCPServer) ([]MCPServer, error) {
+		existingNames := make(map[string]struct{}, len(existing))
+		for _, server := range existing {
+			if name := normalizeName(server.Name); name != "" {
+				existingNames[name] = struct{}{}
+			}
+		}
+		merged := make([]MCPServer, 0, len(existing)+len(candidates))
+		merged = append(merged, existing...)
+		added = 0
+		for _, candidate := range candidates {
+			name := normalizeName(candidate.Name)
+			if name == "" {
+				continue
+			}
+			// 候选集生成与保存之间可能有并发写入，保存前按当前配置再查重一次
+			if _, exists := existingNames[name]; exists {
+				continue
+			}
+			existingNames[name] = struct{}{}
+			merged = append(merged, candidate)
+			added++
+		}
+		return merged, nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	merged := make([]MCPServer, 0, len(existing)+len(candidates))
-	merged = append(merged, existing...)
-	merged = append(merged, candidates...)
-	if err := is.mcpService.SaveServers(merged); err != nil {
-		return 0, err
-	}
-	return len(candidates), nil
+	return added, nil
 }
 
 func collectMCPServers(cfg *ccSwitchConfig) []MCPServer {

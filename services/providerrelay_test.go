@@ -28,8 +28,10 @@ func TestResponseUsageSnapshotIsNotAccumulated(t *testing.T) {
 	if usage.InputTokens != 70 {
 		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
 	}
-	if usage.OutputTokens != 20 {
-		t.Fatalf("OutputTokens=%d, want 20", usage.OutputTokens)
+	// Responses 的 output_tokens 含 reasoning_tokens,而计费是 OutputCost+ReasoningCost 相加,
+	// 入库前必须拆成互不重叠的两桶,否则推理 token 被计两次
+	if usage.OutputTokens != 16 {
+		t.Fatalf("OutputTokens=%d, want 16(20-4 推理)", usage.OutputTokens)
 	}
 	if usage.CacheReadTokens != 30 {
 		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)
@@ -94,8 +96,9 @@ func TestResponseUsageLatestSnapshotCanReduceUncachedInput(t *testing.T) {
 	if usage.InputTokens != 70 {
 		t.Fatalf("InputTokens=%d, want 70", usage.InputTokens)
 	}
-	if usage.OutputTokens != 20 {
-		t.Fatalf("OutputTokens=%d, want 20", usage.OutputTokens)
+	// 同上:output_tokens 已含 reasoning_tokens,入库前拆分避免重复计费
+	if usage.OutputTokens != 16 {
+		t.Fatalf("OutputTokens=%d, want 16(20-4 推理)", usage.OutputTokens)
 	}
 	if usage.CacheReadTokens != 30 {
 		t.Fatalf("CacheReadTokens=%d, want 30", usage.CacheReadTokens)

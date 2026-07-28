@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // DeepLinkImportRequest 深度链接导入请求模型
@@ -185,6 +184,14 @@ func (s *DeepLinkService) ImportProviderFromDeepLink(request *DeepLinkImportRequ
 		return "", fmt.Errorf("Homepage 是必需的（在 URL 或配置文件中）")
 	}
 
+	// 合并后的 Endpoint/Homepage 可能来自配置文件，未经 URL 校验，这里统一复验
+	if err := validateHTTPURL(merged.Endpoint, "endpoint"); err != nil {
+		return "", err
+	}
+	if err := validateHTTPURL(merged.Homepage, "homepage"); err != nil {
+		return "", err
+	}
+
 	// 3. 根据 app 类型构建 Provider
 	provider, err := s.buildProviderFromRequest(merged)
 	if err != nil {
@@ -205,30 +212,34 @@ func (s *DeepLinkService) ImportProviderFromDeepLink(request *DeepLinkImportRequ
 		return "", fmt.Errorf("不支持的 app 类型: %s", merged.App)
 	}
 
-	// 加载现有供应商列表
-	providers, err := s.providerService.LoadProviders(kind)
-	if err != nil {
-		return "", fmt.Errorf("加载供应商列表失败: %w", err)
+	// 在锁内完成"加载→查重→追加→保存"，避免与并发保存相互覆盖丢失更新
+	var newID int64
+	if err := s.providerService.mutateProviders(kind, func(providers []Provider) ([]Provider, error) {
+		// 去重：黑名单与用量统计按 name 键控，重复导入会导致状态串扰
+		for _, p := range providers {
+			if normalizeName(p.Name) == normalizeName(provider.Name) {
+				return nil, fmt.Errorf("已存在同名供应商 '%s'，请勿重复导入", p.Name)
+			}
+			if normalizeURL(p.APIURL) == normalizeURL(provider.APIURL) {
+				return nil, fmt.Errorf("已存在相同端点的供应商 '%s'，请勿重复导入", p.Name)
+			}
+		}
+
+		// 生成小整数 ID（与导入路径一致），避免超出前端浮点数精度导致 ID 漂移
+		provider.ID = nextProviderID(providers)
+		newID = provider.ID
+		return append(providers, *provider), nil
+	}); err != nil {
+		return "", err
 	}
 
-	// 添加新供应商到列表
-	providers = append(providers, *provider)
-
-	// 保存更新后的列表
-	if err := s.providerService.SaveProviders(kind, providers); err != nil {
-		return "", fmt.Errorf("保存供应商失败: %w", err)
-	}
-
-	return strconv.FormatInt(provider.ID, 10), nil
+	return strconv.FormatInt(newID, 10), nil
 }
 
 // buildProviderFromRequest 从深度链接请求构建 Provider
+// ID 由保存时在锁内按现有列表生成（maxID+1），此处不填
 func (s *DeepLinkService) buildProviderFromRequest(request *DeepLinkImportRequest) (*Provider, error) {
-	// 生成唯一 ID（使用时间戳）
-	id := time.Now().UnixNano()
-
 	provider := &Provider{
-		ID:      id,
 		Name:    request.Name,
 		APIURL:  request.Endpoint,
 		APIKey:  request.APIKey,
@@ -237,12 +248,8 @@ func (s *DeepLinkService) buildProviderFromRequest(request *DeepLinkImportReques
 		Level:   1,     // 默认最高优先级
 	}
 
-	// 如果提供了模型信息，可以设置到 SupportedModels
-	if request.Model != nil && *request.Model != "" {
-		provider.SupportedModels = map[string]bool{
-			*request.Model: true,
-		}
-	}
+	// 注意：深链的 model 参数只是推荐模型，不写入 SupportedModels；
+	// 白名单是排他的，写入单个模型会导致 Claude 实际请求的模型全部被跳过
 
 	return provider, nil
 }
@@ -259,7 +266,7 @@ func (s *DeepLinkService) parseAndMergeConfig(request *DeepLinkImportRequest) (*
 	var configContent string
 	if request.Config != nil {
 		// 解码 Base64 内联配置
-		decoded, err := base64.StdEncoding.DecodeString(*request.Config)
+		decoded, err := decodeBase64Config(*request.Config)
 		if err != nil {
 			return nil, fmt.Errorf("无效的 Base64 编码: %w", err)
 		}
@@ -418,6 +425,31 @@ func (s *DeepLinkService) mergeGeminiConfig(request *DeepLinkImportRequest, conf
 	}
 }
 
+// decodeBase64Config 宽松解码 Base64 内联配置。
+// URL 查询参数解析会把未转义的 '+' 还原成空格，第三方生成方也可能使用
+// URL-safe 变体（-/_），因此先还原空格再依次尝试各编码格式。
+func decodeBase64Config(value string) ([]byte, error) {
+	// 标准字符集：把被 URL 解码成空格的 '+' 还原
+	normalized := strings.ReplaceAll(value, " ", "+")
+	var lastErr error
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding} {
+		decoded, err := enc.DecodeString(normalized)
+		if err == nil {
+			return decoded, nil
+		}
+		lastErr = err
+	}
+	// URL-safe 字符集不含 '+'，直接用原始值尝试
+	for _, enc := range []*base64.Encoding{base64.URLEncoding, base64.RawURLEncoding} {
+		decoded, err := enc.DecodeString(value)
+		if err == nil {
+			return decoded, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
 // validateHTTPURL 验证 HTTP(S) URL
 func validateHTTPURL(urlStr, fieldName string) error {
 	parsedURL, err := url.Parse(urlStr)
@@ -427,6 +459,10 @@ func validateHTTPURL(urlStr, fieldName string) error {
 
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return fmt.Errorf("'%s' 的 URL scheme 无效: 必须是 http 或 https, 得到 '%s'", fieldName, parsedURL.Scheme)
+	}
+
+	if parsedURL.Host == "" {
+		return fmt.Errorf("'%s' 的 URL 缺少主机名", fieldName)
 	}
 
 	return nil

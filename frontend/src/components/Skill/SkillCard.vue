@@ -83,6 +83,9 @@
         <div v-if="loadingContent" class="skill-content-loading">
           {{ t('components.skill.actions.loading') }}
         </div>
+        <div v-else-if="contentError" class="skill-content-loading">
+          {{ contentError }}
+        </div>
         <pre v-else class="skill-content-pre">{{ content }}</pre>
       </div>
     </transition>
@@ -111,12 +114,14 @@ defineEmits<{
 const { t } = useI18n()
 
 const content = ref('')
+const contentError = ref('')
 const loadingContent = ref(false)
 
 // Load content when expanded
 watch(() => props.expanded, async (isExpanded) => {
   if (isExpanded && !content.value) {
     loadingContent.value = true
+    contentError.value = ''
     try {
       content.value = await getSkillContent(
         props.skill.directory,
@@ -125,7 +130,8 @@ watch(() => props.expanded, async (isExpanded) => {
       )
     } catch (error) {
       console.error('failed to load skill content', error)
-      content.value = t('components.skill.actions.loadFailed')
+      // 错误文案放独立 ref，保持 content 为空，下次展开可重试加载
+      contentError.value = t('components.skill.actions.loadFailed')
     } finally {
       loadingContent.value = false
     }

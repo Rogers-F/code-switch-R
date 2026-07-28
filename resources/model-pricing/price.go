@@ -658,21 +658,26 @@ func (s *snapshot) calculateCost(model string, usage UsageSnapshot) CostBreakdow
 	}
 
 	// 价格档位选择优先级:tiered_pricing > longContextTier > above_272k > above_200k > above_128k > 基础价。
+	// outputRate 记录本次实际选中的 output 单价,供 reasoning 回退计费复用。
+	outputRate := baseOutput
 	switch {
 	case len(entry.TieredPricing) > 0:
 		band := pickTier(entry.TieredPricing, totalPromptTokens)
 		breakdown.IsTiered = true
+		outputRate = band.OutputCostPerToken
 		breakdown.InputCost = float64(usage.InputTokens) * band.InputCostPerToken
 		breakdown.OutputCost = float64(usage.OutputTokens) * band.OutputCostPerToken
 		breakdown.CacheReadCost = float64(usage.CacheReadTokens) *
 			firstNonZero(band.CacheReadInputTokenCost, baseCacheRead)
 	case useLong:
 		breakdown.IsLongContext = true
+		outputRate = longTier.Output
 		breakdown.InputCost = float64(usage.InputTokens) * longTier.Input
 		breakdown.OutputCost = float64(usage.OutputTokens) * longTier.Output
 		breakdown.CacheReadCost = float64(usage.CacheReadTokens) * baseCacheRead
 	case longBand.active:
 		breakdown.IsLongContext = true
+		outputRate = longBand.outputPerTok
 		breakdown.InputCost = float64(usage.InputTokens) * longBand.inputPerTok
 		breakdown.OutputCost = float64(usage.OutputTokens) * longBand.outputPerTok
 		breakdown.CacheReadCost = float64(usage.CacheReadTokens) * longBand.cacheRead
@@ -682,8 +687,18 @@ func (s *snapshot) calculateCost(model string, usage UsageSnapshot) CostBreakdow
 		breakdown.CacheReadCost = float64(usage.CacheReadTokens) * baseCacheRead
 	}
 
-	if usage.ReasoningTokens > 0 && entry.OutputCostPerReasoningToken > 0 {
-		breakdown.ReasoningCost = float64(usage.ReasoningTokens) * entry.OutputCostPerReasoningToken
+	if usage.ReasoningTokens > 0 {
+		// ReasoningTokens 与 OutputTokens 是互不重叠的两桶:
+		// Gemini 的 thoughtsTokenCount 本就独立于 candidatesTokenCount 上报,
+		// OpenAI Responses 的 reasoning_tokens 在提取阶段已从 output_tokens 里扣除
+		// (见 services/providerrelay.go 的 CodexParseTokenUsageFromResponse)。
+		// 因此缺 reasoning 单价时统一回退 output 单价——推理 token 本质就是按输出计费,
+		// 否则这部分 token 会全部 0 计费(目前只有 gemini 与 qwen 系条目带 reasoning 单价)。
+		rate := entry.OutputCostPerReasoningToken
+		if rate <= 0 {
+			rate = outputRate
+		}
+		breakdown.ReasoningCost = float64(usage.ReasoningTokens) * rate
 	}
 
 	cacheCreateTokens, cache1hTokens := resolveCacheTokens(usage)
@@ -906,8 +921,8 @@ func isModelEndBoundary(key string, end int, allowSuffix bool) bool {
 
 // buildCandidates 生成该模型名的所有等价候选(按优先级去重)。
 func buildCandidates(model string) []string {
-	seen := make(map[string]bool, 4)
-	out := make([]string, 0, 4)
+	seen := make(map[string]bool, 8)
+	out := make([]string, 0, 8)
 	add := func(s string) {
 		if s == "" || seen[s] {
 			return
@@ -916,14 +931,28 @@ func buildCandidates(model string) []string {
 		out = append(out, s)
 	}
 
-	add(model)
-	if model == "gpt-5-codex" {
-		add("gpt-5")
+	// 先用原名(允许 overlay 显式定义带 [1m] 的条目),再补去掉 "[1m]" 后缀的基础名:
+	// Claude Code 的 1M beta 写法(如 claude-sonnet-4-5-20250929[1m])应回退基础条目计价,
+	// 超 200k 的用量由 above_200k 档自动接管,无需独立价目。
+	for _, name := range []string{model, strip1MSuffix(model)} {
+		add(name)
+		if name == "gpt-5-codex" {
+			add("gpt-5")
+		}
+		stripped := stripRegionPrefix(name)
+		add(stripped)
+		add(strings.TrimPrefix(stripped, "anthropic."))
 	}
-	stripped := stripRegionPrefix(model)
-	add(stripped)
-	add(strings.TrimPrefix(stripped, "anthropic."))
 	return out
+}
+
+// strip1MSuffix 去掉模型名中的 "[1m]" 长上下文标记(大小写不敏感),未携带时原样返回。
+func strip1MSuffix(name string) string {
+	idx := strings.Index(strings.ToLower(name), "[1m]")
+	if idx < 0 {
+		return name
+	}
+	return name[:idx] + name[idx+len("[1m]"):]
 }
 
 // familyFallbackCandidates 根据硬编码家族规则生成候选键,顺序由 familyRules 决定。

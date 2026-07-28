@@ -113,7 +113,13 @@ func (bs *BlacklistService) RecordSuccess(platform string, providerName string) 
 
 	if lastRecoveredAt.Valid && blacklistLevel > 0 {
 		timeSinceRecovery := now.Sub(lastRecoveredAt.Time)
-		hoursSinceRecovery := int(timeSinceRecovery.Hours())
+
+		// 降级步长取自配置的正常降级间隔（防止手改 JSON 为 0 导致除零，兜底 1 小时）
+		degradeInterval := time.Duration(levelConfig.NormalDegradeIntervalHours * float64(time.Hour))
+		if degradeInterval <= 0 {
+			degradeInterval = time.Hour
+		}
+		intervalsSinceRecovery := int(timeSinceRecovery / degradeInterval)
 
 		// 宽恕机制：稳定 3 小时且等级 >= 3，直接清零到 L0
 		if timeSinceRecovery >= time.Duration(levelConfig.ForgivenessHours*float64(time.Hour)) && blacklistLevel >= 3 {
@@ -121,20 +127,19 @@ func (bs *BlacklistService) RecordSuccess(platform string, providerName string) 
 			newLastDegradeHour = 0
 			log.Printf("🎉 Provider %s/%s 触发宽恕机制（稳定 %.1f 小时），等级清零（L%d → L0）",
 				platform, providerName, timeSinceRecovery.Hours(), blacklistLevel)
-		} else if hoursSinceRecovery > lastDegradeHour {
-			// 正常降级：每小时 -1 等级（防止同一小时内重复降级）
-			hoursPassed := hoursSinceRecovery - lastDegradeHour
-			degradeCount := hoursPassed
+		} else if intervalsSinceRecovery > lastDegradeHour {
+			// 正常降级：每个降级间隔 -1 等级（last_degrade_hour 记录已消费的间隔数，防止同一间隔内重复降级）
+			degradeCount := intervalsSinceRecovery - lastDegradeHour
 
 			newLevel = blacklistLevel - degradeCount
 			if newLevel < 0 {
 				newLevel = 0
 			}
 
-			newLastDegradeHour = hoursSinceRecovery
+			newLastDegradeHour = intervalsSinceRecovery
 
 			if degradeCount > 0 {
-				log.Printf("📉 Provider %s/%s 降级（L%d → L%d，经过 %d 小时）",
+				log.Printf("📉 Provider %s/%s 降级（L%d → L%d，经过 %d 个降级间隔）",
 					platform, providerName, blacklistLevel, newLevel, degradeCount)
 			}
 		}
@@ -226,6 +231,32 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 	`, platform, providerName).Scan(&id, &failureCount, &blacklistedUntil, &blacklistLevel, &lastRecoveredAt, &lastFailureWindowStart)
 
 	if err == sql.ErrNoRows {
+		// 阈值 <= 1 时首次失败即达标，直接插入拉黑记录（否则实际表现为阈值 2）
+		if levelConfig.FailureThreshold <= 1 {
+			newLevel := 1 // 无历史记录，首次拉黑为 L1
+			duration := bs.getLevelDuration(newLevel, levelConfig)
+			blacklistedUntil := now.Add(time.Duration(duration) * time.Minute)
+
+			err = GlobalDBQueue.Exec(`
+				INSERT INTO provider_blacklist
+					(platform, provider_name, failure_count, last_failure_at, blacklisted_at, blacklisted_until, blacklist_level, last_failure_window_start, auto_recovered)
+				VALUES (?, ?, 0, ?, ?, ?, ?, ?, 0)
+			`, platform, providerName, now, now, blacklistedUntil, newLevel, now)
+
+			if err != nil {
+				return fmt.Errorf("插入拉黑记录失败: %w", err)
+			}
+
+			log.Printf("⛔ Provider %s/%s 已拉黑（L0 → L%d，%d 分钟），过期时间: %s",
+				platform, providerName, newLevel, duration, blacklistedUntil.Format("15:04:05"))
+
+			// 发送拉黑通知
+			if bs.notificationService != nil {
+				bs.notificationService.NotifyProviderBlacklisted(platform, providerName, newLevel, duration)
+			}
+			return nil
+		}
+
 		// 首次失败，插入新记录
 		err = GlobalDBQueue.Exec(`
 			INSERT INTO provider_blacklist
@@ -298,6 +329,8 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 		blacklistedAt := now
 		blacklistedUntil := now.Add(time.Duration(duration) * time.Minute)
 
+		// 清空 last_recovered_at / last_degrade_hour：降级与宽恕计时必须以本次拉黑之后的恢复时间为基准，
+		// 否则到期后首个成功会用上一轮的陈旧恢复时间直接触发宽恕，L4/L5 等级瞬间清零
 		err = GlobalDBQueue.Exec(`
 			UPDATE provider_blacklist
 			SET failure_count = 0,
@@ -306,7 +339,9 @@ func (bs *BlacklistService) RecordFailure(platform string, providerName string) 
 				blacklisted_until = ?,
 				blacklist_level = ?,
 				auto_recovered = 0,
-				last_failure_window_start = ?
+				last_failure_window_start = ?,
+				last_recovered_at = NULL,
+				last_degrade_hour = 0
 			WHERE id = ?
 		`, now, blacklistedAt, blacklistedUntil, newLevel, now, id)
 
@@ -368,6 +403,30 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 	`, platform, providerName).Scan(&id, &failureCount, &blacklistedUntil)
 
 	if err == sql.ErrNoRows {
+		// 阈值 <= 1 时首次失败即达标，直接插入拉黑记录（否则实际表现为阈值 2）
+		if failureThreshold <= 1 {
+			blacklistedUntil := now.Add(time.Duration(fallbackDuration) * time.Minute)
+
+			err = GlobalDBQueue.Exec(`
+				INSERT INTO provider_blacklist
+					(platform, provider_name, failure_count, last_failure_at, blacklisted_at, blacklisted_until, auto_recovered)
+				VALUES (?, ?, 0, ?, ?, ?, 0)
+			`, platform, providerName, now, now, blacklistedUntil)
+
+			if err != nil {
+				return fmt.Errorf("插入拉黑记录失败: %w", err)
+			}
+
+			log.Printf("⛔ Provider %s/%s 已拉黑 %d 分钟（固定模式，失败 1 次），过期时间: %s",
+				platform, providerName, fallbackDuration, blacklistedUntil.Format("15:04:05"))
+
+			// 发送拉黑通知（固定模式无等级，level 传 0）
+			if bs.notificationService != nil {
+				bs.notificationService.NotifyProviderBlacklisted(platform, providerName, 0, fallbackDuration)
+			}
+			return nil
+		}
+
 		// 首次失败，插入新记录
 		err = GlobalDBQueue.Exec(`
 			INSERT INTO provider_blacklist
@@ -399,15 +458,17 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 		blacklistedAt := now
 		blacklistedUntil := now.Add(time.Duration(fallbackDuration) * time.Minute)
 
+		// 与等级模式一致写 failure_count = 0：若保留阈值计数，期满后至自动恢复扫描前的窗口内
+		// 单次偶发失败会立即按全时长重新拉黑，形成期满边界振荡
 		err = GlobalDBQueue.Exec(`
 			UPDATE provider_blacklist
-			SET failure_count = ?,
+			SET failure_count = 0,
 				last_failure_at = ?,
 				blacklisted_at = ?,
 				blacklisted_until = ?,
 				auto_recovered = 0
 			WHERE id = ?
-		`, failureCount, now, blacklistedAt, blacklistedUntil, id)
+		`, now, blacklistedAt, blacklistedUntil, id)
 
 		if err != nil {
 			return fmt.Errorf("更新拉黑状态失败: %w", err)
@@ -415,6 +476,11 @@ func (bs *BlacklistService) recordFailureFixedMode(platform string, providerName
 
 		log.Printf("⛔ Provider %s/%s 已拉黑 %d 分钟（固定模式，失败 %d 次），过期时间: %s",
 			platform, providerName, fallbackDuration, failureCount, blacklistedUntil.Format("15:04:05"))
+
+		// 发送拉黑通知（固定模式无等级，level 传 0）
+		if bs.notificationService != nil {
+			bs.notificationService.NotifyProviderBlacklisted(platform, providerName, 0, fallbackDuration)
+		}
 
 	} else {
 		// 更新失败计数

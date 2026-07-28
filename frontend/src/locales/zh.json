@@ -128,7 +128,9 @@
       "testEndpointHint": "留空使用默认端点",
       "timeout": "超时时间",
       "timeoutHint": "默认 15 秒"
-    }
+    },
+    "toggleFailed": "切换监控开关失败：",
+    "saveConfigFailed": "保存配置失败："
   },
   "common": {
     "save": "保存",
@@ -194,7 +196,7 @@
     "noConflicts": "未发现环境变量冲突",
     "value": "值",
     "source": "来源",
-    "source.system": "系统环境变量",
+    "sourceSystem": "系统环境变量",
     "refresh": "重新检测"
   },
   "components": {
@@ -260,7 +262,8 @@
         "hostOthers": "托管自定义 CLI",
         "tooltip": "通过本地转发托管 API 访问，统一管理密钥与配额。",
         "statusOn": "已托管",
-        "statusOff": "未托管"
+        "statusOff": "未托管",
+        "toggleFailed": "切换托管状态失败"
       },
       "customCli": {
         "selectToolFirst": "请先选择一个 CLI 工具",
@@ -291,7 +294,9 @@
         "deleteSuccess": "CLI 工具已删除",
         "saveFailed": "保存 CLI 工具失败",
         "deleteFailed": "删除 CLI 工具失败",
-        "invalidProxyTarget": "代理注入目标配置文件无效"
+        "invalidProxyTarget": "代理注入目标配置文件无效",
+        "proxyInjectionIncomplete": "代理注入配置不完整，请为已填写的注入行选择目标配置文件并填写 Base URL 字段",
+        "proxyTargetPathRequired": "代理注入目标配置文件缺少路径，请先填写该配置文件的路径"
       },
       "logs": {
         "view": "查看日志",
@@ -306,7 +311,8 @@
         "skill": "打开 Skill 列表",
         "gemini": "打开 Gemini CLI 管理",
         "import": "导入 cc-switch 配置",
-        "duplicate": "复制供应商"
+        "duplicate": "复制供应商",
+        "duplicateFailed": "复制供应商失败"
       },
       "importConfig": {
         "tooltip": "导入 {providers} 个供应商 · {servers} 个 MCP 服务器",
@@ -420,7 +426,8 @@
         "errors": {
           "invalidUrl": "请输入合法的 API 地址"
         },
-        "saveFailed": "保存供应商配置失败"
+        "saveFailed": "保存供应商配置失败",
+        "cliConfigSaveFailed": "CLI 配置保存失败"
       },
       "levelDesc": {
         "highest": "最高优先级",
@@ -631,7 +638,8 @@
         "times": "次",
         "minutes": "分钟",
         "save": "保存",
-        "saving": "保存中..."
+        "saving": "保存中...",
+        "settingsLoadFailed": "设置加载失败，为避免覆盖已有配置，本次修改未保存，正在重新加载设置"
       },
       "subLabel": {
         "sb_assistant_access": "需要无障碍访问权限来操作剪切板内容",
@@ -998,7 +1006,8 @@
       "saveAllFailed": "所有配置文件保存失败",
       "savePartialSuccess": "成功 {success} 个，失败 {fail} 个",
       "tabPreview": "预览效果",
-      "tabCurrent": "当前磁盘"
+      "tabCurrent": "当前磁盘",
+      "saveError": "保存配置失败"
     }
   }
 }

@@ -32,7 +32,9 @@ type AppService struct {
 	TrayWindow application.Window
 }
 
-func (a *AppService) SetApp(app *application.App) {
+// setApp 故意不导出：AppService 注册为 Wails 服务后，导出方法一律可被前端 RPC 调用，
+// 导出成 SetApp 等于让前端能把 App 引用置为 nil，之后所有开窗动作全部失效。
+func (a *AppService) setApp(app *application.App) {
 	a.App = app
 }
 
@@ -93,9 +95,12 @@ func main() {
 	log.Println("✅ 数据库写入队列已启动")
 
 	// 【修复】第三步：创建服务（现在可以安全使用数据库了）
+	// SuiStore 只服务快捷键存储，初始化失败不应该阻断整个应用启动：
+	// 记录告警并跳过注册，其余功能照常可用
 	suiService, errt := services.NewSuiStore()
 	if errt != nil {
-		log.Fatalf("SuiStore 初始化失败: %v", errt)
+		log.Printf("⚠️ SuiStore 初始化失败，快捷键存储功能不可用: %v", errt)
+		suiService = nil
 	}
 
 	providerService := services.NewProviderService()
@@ -108,11 +113,24 @@ func main() {
 	defaultModelPolicy := services.NewDefaultModelPolicy()
 	modelSyncService := services.NewModelSyncService(appSettings, defaultModelPolicy)
 	blacklistService := services.NewBlacklistService(settingsService, notificationService)
-	geminiService := services.NewGeminiService("127.0.0.1:18100", defaultModelPolicy)
-	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, ":18100")
-	claudeSettings := services.NewClaudeSettingsService(providerRelay.Addr())
-	codexSettings := services.NewCodexSettingsService(providerRelay.Addr(), defaultModelPolicy)
-	cliConfigService := services.NewCliConfigService(providerRelay.Addr(), defaultModelPolicy)
+	// 监听地址取自用户的网络设置，默认仅回环。
+	// 原先写死 ":18100" 会绑到全部网卡，把带供应商 API Key 的代理暴露给整个局域网，
+	// 且让设置页的 localhost 模式形同虚设。
+	relayListenAddrs := services.ResolveRelayListenAddresses()
+	for _, addr := range relayListenAddrs {
+		if addr != "127.0.0.1:18100" {
+			log.Printf("⚠️ 代理按网络设置监听 %s（非仅回环，该网段内的其它设备可访问，请确认这是你需要的）", addr)
+		}
+	}
+	// 写进各 CLI 配置的必须是"连接地址"而不是"绑定地址"：
+	// lan 模式绑的是 0.0.0.0，把它写成 base_url 客户端根本连不上
+	relayConnectAddr := services.RelayConnectAddress(relayListenAddrs[0])
+
+	geminiService := services.NewGeminiService(relayConnectAddr, defaultModelPolicy)
+	providerRelay := services.NewProviderRelayService(providerService, geminiService, blacklistService, notificationService, appSettings, relayListenAddrs...)
+	claudeSettings := services.NewClaudeSettingsService(relayConnectAddr)
+	codexSettings := services.NewCodexSettingsService(relayConnectAddr, defaultModelPolicy)
+	cliConfigService := services.NewCliConfigService(relayConnectAddr, defaultModelPolicy)
 	logService := services.NewLogService()
 	mcpService := services.NewMCPService()
 	skillService := services.NewSkillService()
@@ -129,14 +147,14 @@ func main() {
 	}
 	dockService := dock.New()
 	versionService := NewVersionService()
-	updateService := services.NewUpdateService(AppVersion)
+	// 把构建期 -ldflags "-X main.UpdatePolicy=..." 注入的策略传给更新服务，
+	// 否则该开关只影响 VersionService 的展示，更新流程仍走运行时检测
+	updateService := services.NewUpdateService(AppVersion, UpdatePolicy)
 	consoleService := services.NewConsoleService()
-	customCliService := services.NewCustomCliService(providerRelay.Addr())
-	networkService := services.NewNetworkService(providerRelay.Addr(), claudeSettings, codexSettings, geminiService)
-
-	if err := providerRelay.Start(); err != nil {
-		log.Fatalf("provider relay start error: %v", err)
-	}
+	customCliService := services.NewCustomCliService(relayConnectAddr)
+	// 网络设置页与 WSL 配置都要按"实际绑定了哪些地址"判断，而不是磁盘上的设置：
+	// 监听地址在启动时冻结，改完设置不重启并不会重绑
+	networkService := services.NewNetworkService(relayConnectAddr, claudeSettings, codexSettings, geminiService, providerRelay.BoundAddresses)
 
 	// 启动模型元数据后台同步调度（延迟首查 + 每小时检查到期厂商）
 	modelSyncService.Start()
@@ -160,9 +178,17 @@ func main() {
 		}
 	}()
 
-	// 根据应用设置决定是否启动可用性监控（复用旧的 auto_connectivity_test 字段）
+	// 根据应用设置决定是否启动可用性监控（复用旧的 auto_connectivity_test 字段）。
+	// 延迟期间应用可能已经退出，必须能被 OnShutdown 取消，
+	// 否则巡检会在 StopBackgroundPolling 之后被重新拉起。
+	availabilityStopChan := make(chan struct{})
 	go func() {
-		time.Sleep(3 * time.Second) // 延迟3秒，等待应用初始化
+		select {
+		case <-time.After(3 * time.Second): // 延迟3秒，等待应用初始化
+		case <-availabilityStopChan:
+			return
+		}
+
 		settings, err := appSettings.GetAppSettings()
 
 		// 默认启用自动监控（保持开箱即用）
@@ -172,6 +198,13 @@ func main() {
 		} else {
 			// 读取成功，使用配置值
 			autoEnabled = settings.AutoConnectivityTest
+		}
+
+		// 应用可能在读配置期间进入关停流程，再次确认后才启动巡检
+		select {
+		case <-availabilityStopChan:
+			return
+		default:
 		}
 
 		// 旧的 AutoConnectivityTest 字段现在控制可用性监控
@@ -189,38 +222,45 @@ func main() {
 	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
 	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
 	// 'Mac' options tailor the application when running an macOS.
+	appServices := []application.Service{
+		application.NewService(appservice),
+		application.NewService(providerService),
+		application.NewService(settingsService),
+		application.NewService(blacklistService),
+		application.NewService(claudeSettings),
+		application.NewService(codexSettings),
+		application.NewService(cliConfigService),
+		application.NewService(logService),
+		application.NewService(appSettings),
+		application.NewService(mcpService),
+		application.NewService(skillService),
+		application.NewService(promptService),
+		application.NewService(envCheckService),
+		application.NewService(importService),
+		application.NewService(deeplinkService),
+		application.NewService(speedTestService),
+		application.NewService(connectivityTestService),
+		application.NewService(healthCheckService),
+		application.NewService(dockService),
+		application.NewService(versionService),
+		application.NewService(updateService),
+		application.NewService(geminiService),
+		application.NewService(consoleService),
+		application.NewService(customCliService),
+		application.NewService(networkService),
+		application.NewService(modelSyncService),
+		// 前端用 Call.ByName 调 ProviderRelayService.GetAllLastUsedProviders（"最后使用"徽标），
+		// 不注册的话该调用永远失败
+		application.NewService(providerRelay),
+	}
+	if suiService != nil {
+		appServices = append(appServices, application.NewService(suiService))
+	}
+
 	app := application.New(application.Options{
 		Name:        "AI Code Studio",
 		Description: "Code Switch provider manager",
-		Services: []application.Service{
-			application.NewService(appservice),
-			application.NewService(suiService),
-			application.NewService(providerService),
-			application.NewService(settingsService),
-			application.NewService(blacklistService),
-			application.NewService(claudeSettings),
-			application.NewService(codexSettings),
-			application.NewService(cliConfigService),
-			application.NewService(logService),
-			application.NewService(appSettings),
-			application.NewService(mcpService),
-			application.NewService(skillService),
-			application.NewService(promptService),
-			application.NewService(envCheckService),
-			application.NewService(importService),
-			application.NewService(deeplinkService),
-			application.NewService(speedTestService),
-			application.NewService(connectivityTestService),
-			application.NewService(healthCheckService),
-			application.NewService(dockService),
-			application.NewService(versionService),
-			application.NewService(updateService),
-			application.NewService(geminiService),
-			application.NewService(consoleService),
-			application.NewService(customCliService),
-			application.NewService(networkService),
-			application.NewService(modelSyncService),
-		},
+		Services:    appServices,
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
@@ -236,11 +276,33 @@ func main() {
 	// 设置 ModelSyncService 的 App 引用，用于广播同步完成事件
 	modelSyncService.SetApp(app)
 
+	// 代理放在 App 引用注入之后再启动：早于此的供应商切换事件会因为 app 还是 nil 而丢失。
+	// 端口被占用（多开、其它程序占用 18100）时不能直接退出进程——GUI 构建下没有控制台，
+	// 用户只会看到"双击没反应"，这里改为弹窗告知并让应用带着降级状态继续启动。
+	if relayStartErr := providerRelay.Start(); relayStartErr != nil {
+		log.Printf("provider relay start error: %v", relayStartErr)
+		listenAddr := providerRelay.Addr()
+		// 必须等应用真正跑起来再弹：App.impl 只在 app.Run() 内部赋值，
+		// 提前调用 Show() 会在 dispatchOnMainThread 里解引用 nil 直接 panic，
+		// 反而比原来的退出更糟。
+		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+			dialog := application.ErrorDialog()
+			dialog.SetTitle("代理服务启动失败")
+			dialog.SetMessage(fmt.Sprintf(
+				"本地代理无法监听 %s：%v\n\n"+
+					"常见原因是应用已经在运行，或该端口被其它程序占用。\n"+
+					"关闭占用该端口的程序后重启本应用即可恢复转发功能。",
+				listenAddr, relayStartErr))
+			dialog.Show()
+		})
+	}
+
 	app.OnShutdown(func() {
 		log.Println("🛑 应用正在关闭，停止后台服务...")
 
-		// 1. 停止黑名单定时器
+		// 1. 停止黑名单定时器，并取消尚在延迟等待的可用性监控启动
 		close(blacklistStopChan)
+		close(availabilityStopChan)
 
 		// 2. 停止健康检查轮询
 		healthCheckService.StopBackgroundPolling()
@@ -254,6 +316,10 @@ func main() {
 		if err := providerRelay.Stop(); err != nil {
 			log.Printf("provider relay stop error: %v", err)
 		}
+
+		// 3.5 给刚被中断的请求处理协程一点时间把 request_log 塞进写入队列，
+		// 否则这些流式请求的 token 与费用会随队列关闭一起丢掉
+		time.Sleep(500 * time.Millisecond)
 
 		// 4. 优雅关闭数据库写入队列（10秒超时，双队列架构）
 		if err := services.ShutdownGlobalDBQueue(10 * time.Second); err != nil {
@@ -426,7 +492,7 @@ func main() {
 		})
 	}
 
-	appservice.SetApp(app)
+	appservice.setApp(app)
 
 	// Create a goroutine that emits an event containing the current time every second.
 	// The frontend can listen to this event and update the UI accordingly.
@@ -474,24 +540,58 @@ const (
 	trayProgressBarWidth = 28
 )
 
+// getTrayUsage 汇总原生托盘菜单要显示的今日用量与预算。
+// 预算按平台分别配置（budget_total 对 claude、budget_total_codex 对 codex，
+// 前端托盘同样按平台取用），所以成本也必须按平台取，
+// 不能拿"全平台总成本"去除以"claude 单平台预算"。
+// 只统计配置了预算的平台；一个都没配时退回全平台成本、预算显示为未设置。
 func getTrayUsage(logService *services.LogService, appSettings *services.AppSettingsService) (float64, float64) {
+	if logService == nil {
+		return 0, 0
+	}
+
+	platformCost := func(platform string) float64 {
+		stats, err := logService.StatsSince(platform)
+		if err != nil {
+			return 0
+		}
+		return stats.CostTotal
+	}
+
+	if appSettings == nil {
+		return 0, 0
+	}
+	settings, err := appSettings.GetAppSettings()
+	if err != nil {
+		return 0, 0
+	}
+
+	budgeted := []struct {
+		platform   string
+		total      float64
+		adjustment float64
+	}{
+		{"claude", settings.BudgetTotal, settings.BudgetUsedAdjustment},
+		{"codex", settings.BudgetTotalCodex, settings.BudgetUsedAdjustmentCodex},
+	}
+
 	used := 0.0
 	total := 0.0
-	adjustment := 0.0
-	if logService != nil {
-		stats, err := logService.StatsSince("")
-		if err == nil {
-			used = stats.CostTotal
+	matched := false
+	for _, b := range budgeted {
+		if b.total <= 0 {
+			continue
 		}
+		matched = true
+		total += b.total
+		used += platformCost(b.platform) + b.adjustment
 	}
-	if appSettings != nil {
-		settings, err := appSettings.GetAppSettings()
-		if err == nil {
-			total = settings.BudgetTotal
-			adjustment = settings.BudgetUsedAdjustment
-		}
+
+	if !matched {
+		// 未设置任何预算：只展示今日总成本，进度显示为"未设置"
+		used = platformCost("")
 	}
-	used += adjustment
+
 	if used < 0 {
 		used = 0
 	}

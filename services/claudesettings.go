@@ -105,7 +105,12 @@ func (css *ClaudeSettingsService) EnableProxy() error {
 		// 解析现有配置（仅当文件非空时）
 		if len(content) > 0 {
 			if err := json.Unmarshal(content, &existingData); err != nil {
-				// JSON 解析失败，使用空配置继续（备份已保存）
+				// 已启用状态下本轮未写备份，若降级为空配置会无备份地清空用户配置，
+				// 因此直接返回错误，让用户先修复文件
+				if stateExists {
+					return fmt.Errorf("settings.json 解析失败，请检查文件格式: %w", err)
+				}
+				// 首次启用：备份已保存，使用空配置继续
 				fmt.Printf("[警告] settings.json 格式无效，已备份到 %s，将使用空配置: %v\n", backupPath, err)
 				existingData = make(map[string]interface{})
 			}
@@ -355,7 +360,15 @@ func (css *ClaudeSettingsService) ApplySingleProvider(providerID int) error {
 		env = make(map[string]interface{})
 	}
 	env["ANTHROPIC_BASE_URL"] = normalizeURLTrimSlash(provider.APIURL)
-	env["ANTHROPIC_AUTH_TOKEN"] = provider.APIKey
+	// 按供应商认证方式写入对应字段：x-api-key 型（Anthropic 官方 API）走 ANTHROPIC_API_KEY，
+	// 否则走 ANTHROPIC_AUTH_TOKEN（Bearer），并清理另一字段避免凭证冲突（与代理路径的认证区分保持一致）
+	if strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType)) == "x-api-key" {
+		env["ANTHROPIC_API_KEY"] = provider.APIKey
+		delete(env, "ANTHROPIC_AUTH_TOKEN")
+	} else {
+		env["ANTHROPIC_AUTH_TOKEN"] = provider.APIKey
+		delete(env, "ANTHROPIC_API_KEY")
+	}
 	existingData["env"] = env
 
 	// 9. 原子写入
@@ -407,7 +420,9 @@ func (css *ClaudeSettingsService) GetDirectAppliedProviderID() (*int64, error) {
 	}
 
 	currentURL := anyToString(env["ANTHROPIC_BASE_URL"])
-	currentKey := anyToString(env["ANTHROPIC_AUTH_TOKEN"])
+	// 兼容两种认证字段：Bearer 型写 AUTH_TOKEN，x-api-key 型写 API_KEY
+	currentToken := anyToString(env["ANTHROPIC_AUTH_TOKEN"])
+	currentAPIKey := anyToString(env["ANTHROPIC_API_KEY"])
 
 	if currentURL == "" {
 		return nil, nil
@@ -419,9 +434,10 @@ func (css *ClaudeSettingsService) GetDirectAppliedProviderID() (*int64, error) {
 		return nil, fmt.Errorf("加载供应商配置失败: %w", err)
 	}
 
-	// 4. 按 URL + Key 匹配 provider
+	// 4. 按 URL + Key 匹配 provider（Key 匹配任一认证字段即可）
 	for _, p := range providers {
-		if urlsEqualFold(p.APIURL, currentURL) && p.APIKey == currentKey {
+		if urlsEqualFold(p.APIURL, currentURL) && p.APIKey != "" &&
+			(p.APIKey == currentToken || p.APIKey == currentAPIKey) {
 			id := p.ID
 			return &id, nil
 		}

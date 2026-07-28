@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -133,11 +134,11 @@ type ModelSyncService struct {
 	httpClient *http.Client
 	dir        string
 
-	mu       sync.Mutex
-	state    *modelSyncState
-	catalogs map[string]*modelpricing.RemoteCatalog
-	sources  map[string]string
-	seed     map[string]*modelpricing.RemoteCatalog
+	mu        sync.Mutex
+	state     *modelSyncState
+	catalogs  map[string]*modelpricing.RemoteCatalog
+	sources   map[string]string
+	seed      map[string]*modelpricing.RemoteCatalog
 	running   bool
 	restoring bool // RestoreBuiltinPricing 预约标志:置位期间 runSync 拒绝启动
 	stopped   bool
@@ -185,7 +186,11 @@ func NewModelSyncService(appSettings *AppSettingsService, policy *DefaultModelPo
 }
 
 // SetApp 注入 Wails App 引用,用于向前端广播同步事件。
+// 注册为 Wails 服务后该方法可被前端 RPC 调用，传 nil 会让同步完成事件广播失效，忽略之。
 func (s *ModelSyncService) SetApp(app *application.App) {
+	if app == nil {
+		return
+	}
 	s.mu.Lock()
 	s.app = app
 	s.mu.Unlock()
@@ -267,13 +272,22 @@ func (s *ModelSyncService) GetDefaultModels() DefaultModels {
 // restoring 预约标志保证与同步批次互斥,不存在"已关自动同步但恢复被拒"的部分完成。
 func (s *ModelSyncService) RestoreBuiltinPricing() (ModelSyncStatus, error) {
 	s.mu.Lock()
+	if s.stopped {
+		status := s.coreStatusLocked()
+		s.mu.Unlock()
+		return s.decorateStatus(status), fmt.Errorf("服务已停止,无法恢复内置数据")
+	}
 	if s.running || s.restoring {
 		status := s.coreStatusLocked()
 		s.mu.Unlock()
 		return s.decorateStatus(status), fmt.Errorf("同步正在进行,请稍后再试")
 	}
 	s.restoring = true
+	// 计入 syncWG 让 Stop() 等待整个恢复流程,避免关停后仍在删缓存/写盘/广播
+	// 留下部分厂商已删、部分未删的混合持久化态
+	s.syncWG.Add(1)
 	s.mu.Unlock()
+	defer s.syncWG.Done()
 	defer func() {
 		s.mu.Lock()
 		s.restoring = false
@@ -354,11 +368,17 @@ type providerOutcome struct {
 }
 
 func (s *ModelSyncService) runSync(targets []string) ModelSyncStatus {
+	// 状态在批次 defer 复位 running 之后再取,否则返回值恒报 Running=true
+	s.runSyncBatch(targets)
+	return s.GetSyncStatus()
+}
+
+// runSyncBatch 执行一个同步批次;已有批次/已停止/恢复中时直接返回不重入。
+func (s *ModelSyncService) runSyncBatch(targets []string) {
 	s.mu.Lock()
 	if s.running || s.stopped || s.restoring {
-		status := s.coreStatusLocked()
 		s.mu.Unlock()
-		return s.decorateStatus(status)
+		return
 	}
 	s.running = true
 	s.syncWG.Add(1)
@@ -413,7 +433,6 @@ func (s *ModelSyncService) runSync(targets []string) ModelSyncStatus {
 	wg.Wait()
 
 	s.applyOutcomes(outcomes)
-	return s.GetSyncStatus()
 }
 
 func (s *ModelSyncService) fetchProvider(ctx context.Context, providerID string, etagByOrigin map[string]string) providerOutcome {
@@ -621,6 +640,11 @@ func (s *ModelSyncService) applyOutcomes(outcomes []providerOutcome) {
 		st.CheckedAt = now
 
 		switch {
+		case outcome.err != nil && errors.Is(outcome.err, context.Canceled):
+			// 关停/取消是本地主动行为,不是远端故障:不计失败退避、不覆盖 LastError、
+			// 不推迟 NextDue,下次启动照常按原计划同步(与 90s 批超时的真实失败区分)
+			allOK = false
+
 		case outcome.err != nil:
 			allOK = false
 			st.FailStreak++

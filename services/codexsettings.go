@@ -99,7 +99,13 @@ func (css *CodexSettingsService) EnableProxy() error {
 	// 读取现有配置（最小侵入模式：保留用户的其他配置）
 	var raw map[string]any
 	fileExisted := false
-	if _, statErr := os.Stat(settingsPath); statErr == nil {
+	_, statErr := os.Stat(settingsPath)
+	// 只有"确实不存在"才走新建路径；权限拒绝等其它错误若也当作不存在，
+	// 会跳过备份并用空配置整体重写用户的 config.toml
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return fmt.Errorf("读取 config.toml 状态失败: %w", statErr)
+	}
+	if statErr == nil {
 		fileExisted = true
 		content, readErr := os.ReadFile(settingsPath)
 		if readErr != nil {
@@ -112,7 +118,12 @@ func (css *CodexSettingsService) EnableProxy() error {
 			}
 		}
 		if err := toml.Unmarshal(content, &raw); err != nil {
-			// TOML 解析失败，使用空配置继续（备份已保存）
+			// 已启用状态下本轮未写备份，若降级为空配置会无备份地清空用户配置，
+			// 因此直接返回错误，让用户先修复文件
+			if stateExists {
+				return fmt.Errorf("config.toml 解析失败，请检查文件格式: %w", err)
+			}
+			// 首次启用：备份已保存，使用空配置继续
 			fmt.Printf("[警告] config.toml 格式无效，已备份到 %s，将使用空配置: %v\n", backupPath, err)
 			raw = make(map[string]any)
 		}
@@ -136,10 +147,14 @@ func (css *CodexSettingsService) EnableProxy() error {
 					fmt.Printf("[警告] auth.json 备份失败: %v\n", err)
 				}
 				// 读取原始 API Key
-				var authPayload map[string]string
+				// 使用 map[string]any 以支持非字符串值（如 ChatGPT 登录态的 tokens 对象），
+				// 与 writeAuthFile/surgicalRestoreAuthFile/readAuthKey 保持一致
+				var authPayload map[string]any
 				if json.Unmarshal(authContent, &authPayload) == nil {
 					if v, ok := authPayload[codexEnvKey]; ok {
-						originalAuthKey = &v
+						if s, ok := v.(string); ok {
+							originalAuthKey = &s
+						}
 					}
 				}
 			}
@@ -682,7 +697,13 @@ func (css *CodexSettingsService) ApplySingleProvider(providerID int) error {
 	providerConfig := ensureProviderTable(modelProviders, providerKey)
 	providerConfig["name"] = providerKey
 	providerConfig["base_url"] = normalizeURLTrimSlash(provider.APIURL)
-	providerConfig["wire_api"] = codexWireAPI
+	// 按供应商声明的上游协议写 wire_api：openai_chat 型中转仅支持 Chat Completions，
+	// 恒写 responses 会导致直连后每次请求 404/400
+	if provider.GetUpstreamProtocol() == UpstreamProtocolOpenAIChat {
+		providerConfig["wire_api"] = "chat"
+	} else {
+		providerConfig["wire_api"] = codexWireAPI
+	}
 	providerConfig["requires_openai_auth"] = false
 	modelProviders[providerKey] = providerConfig
 

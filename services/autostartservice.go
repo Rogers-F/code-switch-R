@@ -171,9 +171,25 @@ func (as *AutoStartService) enableWindows() error {
 
 func (as *AutoStartService) disableWindows() error {
 	regExe := windowsRegExe()
+	// 直接删除并按输出判定：不能拿 isEnabledWindows 当存在性检查——
+	// 它在"键存在但记录的是旧路径"和"键存在但被任务管理器禁用"时同样返回 false，
+	// 据此早退会漏删注册表项，还对外报告禁用成功，下次开机旧程序照样自启。
 	cmd := hideWindowCmd(regExe, "delete", windowsRunKey, "/v", windowsAutoStartValue, "/f")
-	_ = cmd.Run()
-	return nil
+	out, runErr := cmd.CombinedOutput()
+	if runErr == nil {
+		return nil
+	}
+
+	// 键本来就不存在：属于"本来没开启"，不算失败
+	lowerOut := strings.ToLower(string(out))
+	if strings.Contains(lowerOut, "unable to find") ||
+		strings.Contains(lowerOut, "无法找到") ||
+		strings.Contains(lowerOut, "找不到") {
+		return nil
+	}
+
+	// 其余失败必须上报：无条件吞掉会让"禁用自启失败"对外报告成功
+	return fmt.Errorf("删除开机自启注册表项失败: %w (%s)", runErr, strings.TrimSpace(string(out)))
 }
 
 // macOS 实现

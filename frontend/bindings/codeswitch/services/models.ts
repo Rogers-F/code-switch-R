@@ -1672,6 +1672,50 @@ export class Hotkey {
 }
 
 /**
+ * LastUsedProvider 最后使用的供应商信息
+ * @author sm
+ */
+export class LastUsedProvider {
+    /**
+     * claude/codex/gemini
+     */
+    "platform": string;
+
+    /**
+     * 供应商名称
+     */
+    "provider_name": string;
+
+    /**
+     * 更新时间（毫秒）
+     */
+    "updated_at": number;
+
+    /** Creates a new LastUsedProvider instance. */
+    constructor($$source: Partial<LastUsedProvider> = {}) {
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("provider_name" in $$source)) {
+            this["provider_name"] = "";
+        }
+        if (!("updated_at" in $$source)) {
+            this["updated_at"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LastUsedProvider instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LastUsedProvider {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LastUsedProvider($$parsedSource as Partial<LastUsedProvider>);
+    }
+}
+
+/**
  * ListenMode 监听模式
  */
 export enum ListenMode {
@@ -2181,7 +2225,8 @@ export class Provider {
     /**
      * 连通性自动拉黑开关 - 在 Provider 编辑页面配置
      * 前置条件：AvailabilityMonitorEnabled 必须为 true
-     * 启用后，当健康检查连续失败达到阈值时自动拉黑
+     * 启用后，健康检查连续失败达到阈值时向拉黑服务上报失败计数，
+     * 由拉黑服务按其自身失败阈值决定何时真正拉黑
      */
     "connectivityAutoBlacklist"?: boolean;
 

@@ -152,7 +152,8 @@ func (s *GeminiService) GetPresets() []GeminiPreset {
 func (s *GeminiService) GetProviders() []GeminiProvider {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.providers
+	// 返回拷贝，避免调用方在锁外与写路径共享同一底层数组造成数据竞争
+	return append([]GeminiProvider(nil), s.providers...)
 }
 
 // AddProvider 添加供应商
@@ -162,14 +163,24 @@ func (s *GeminiService) AddProvider(provider GeminiProvider) error {
 
 	// 检查 ID 是否重复
 	for _, p := range s.providers {
-		if p.ID == provider.ID {
+		if provider.ID != "" && p.ID == provider.ID {
 			return fmt.Errorf("供应商 ID '%s' 已存在", provider.ID)
 		}
 	}
 
-	// 生成 ID（如果没有）
+	// 生成 ID（如果没有）：从 len+1 起递增直到唯一，避免删除后与残留旧 ID 撞车
 	if provider.ID == "" {
-		provider.ID = fmt.Sprintf("gemini-%d", len(s.providers)+1)
+		existing := make(map[string]bool, len(s.providers))
+		for _, p := range s.providers {
+			existing[p.ID] = true
+		}
+		for n := len(s.providers) + 1; ; n++ {
+			candidate := fmt.Sprintf("gemini-%d", n)
+			if !existing[candidate] {
+				provider.ID = candidate
+				break
+			}
+		}
 	}
 
 	s.providers = append(s.providers, provider)
@@ -490,23 +501,73 @@ func isValidEnvKey(key string) bool {
 	return true
 }
 
-// buildGeminiEnvContent 构建 .env 文件内容（用于预览，不写入磁盘）
-// 与 writeGeminiEnv 保持一致的格式和顺序
+// buildGeminiEnvContent 构建 .env 文件内容（用于预览，不写入磁盘）。
+// 必须与 writeGeminiEnv 走同一条按行合并逻辑：配置编辑器把预览内容灌进可编辑文本框，
+// 用户点"应用"时原样落盘。若预览是从 map 全量重建的版本，注释与 export 行在预览里就没了，
+// 一按应用就把用户手写内容永久抹掉。
 func buildGeminiEnvContent(envConfig map[string]string) string {
+	existing, _ := os.ReadFile(getGeminiEnvPath())
+	return renderGeminiEnvContent(string(existing), envConfig)
+}
+
+// renderGeminiEnvContent 把 envConfig 按行合并进现有 .env 内容。
+// 仅改写/删除可解析的 KEY=VALUE 行，注释、export 前缀等无法解析的行原样保留，
+// 避免重建文件破坏用户手写内容。existingRaw 为空表示文件尚不存在。
+func renderGeminiEnvContent(existingRaw string, envConfig map[string]string) string {
 	var lines []string
-	// 按固定顺序写入
-	keys := []string{"GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"}
-	for _, key := range keys {
-		if value, ok := envConfig[key]; ok && value != "" {
+	written := make(map[string]bool)
+
+	// 逐行处理现有内容（为空时跳过，直接按 envConfig 生成）
+	if existingRaw != "" {
+		normalized := strings.ReplaceAll(existingRaw, "\r\n", "\n")
+		normalized = strings.ReplaceAll(normalized, "\r", "\n")
+		rawLines := strings.Split(normalized, "\n")
+		// 去掉结尾换行符切分出的最后一个空元素
+		if n := len(rawLines); n > 0 && rawLines[n-1] == "" {
+			rawLines = rawLines[:n-1]
+		}
+		for _, raw := range rawLines {
+			key := ""
+			trimmed := strings.TrimSpace(raw)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				if idx := strings.Index(trimmed, "="); idx > 0 {
+					k := strings.TrimSpace(trimmed[:idx])
+					if k != "" && isValidEnvKey(k) {
+						key = k
+					}
+				}
+			}
+			// 注释 / 空行 / 无法解析的行原样保留
+			if key == "" {
+				lines = append(lines, raw)
+				continue
+			}
+			value, ok := envConfig[key]
+			if !ok {
+				// 目标配置中已不存在的键，删除该行
+				continue
+			}
+			if written[key] {
+				// 重复键只保留第一处
+				continue
+			}
 			lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+			written[key] = true
 		}
 	}
-	// 写入其他键
+
+	// 追加文件中尚不存在的键：先按固定顺序，再写其余键
+	keys := []string{"GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"}
+	for _, key := range keys {
+		if value, ok := envConfig[key]; ok && !written[key] {
+			lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+			written[key] = true
+		}
+	}
 	for key, value := range envConfig {
-		if key != "GOOGLE_GEMINI_BASE_URL" && key != "GEMINI_API_KEY" && key != "GEMINI_MODEL" {
-			if value != "" {
-				lines = append(lines, fmt.Sprintf("%s=%s", key, value))
-			}
+		if !written[key] {
+			lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+			written[key] = true
 		}
 	}
 
@@ -517,43 +578,18 @@ func buildGeminiEnvContent(envConfig map[string]string) string {
 	return content
 }
 
-// writeGeminiEnv 写入 .env 文件（原子操作）
+// writeGeminiEnv 写入 .env 文件（原子操作），内容由 renderGeminiEnvContent 按行合并生成
 func writeGeminiEnv(envConfig map[string]string) error {
 	dir := getGeminiDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 
-	// 构建 .env 内容
-	var lines []string
-	// 按固定顺序写入
-	keys := []string{"GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"}
-	for _, key := range keys {
-		if value, ok := envConfig[key]; ok && value != "" {
-			lines = append(lines, fmt.Sprintf("%s=%s", key, value))
-		}
-	}
-	// 写入其他键
-	for key, value := range envConfig {
-		if key != "GOOGLE_GEMINI_BASE_URL" && key != "GEMINI_API_KEY" && key != "GEMINI_MODEL" {
-			if value != "" {
-				lines = append(lines, fmt.Sprintf("%s=%s", key, value))
-			}
-		}
-	}
-
-	content := strings.Join(lines, "\n")
-	if len(lines) > 0 {
-		content += "\n"
-	}
-
-	// 原子写入
 	path := getGeminiEnvPath()
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(content), 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	existing, _ := os.ReadFile(path)
+
+	// 原子写入（带 fsync 与 Windows 共享冲突重试）
+	return atomicWriteFile(path, []byte(renderGeminiEnvContent(string(existing), envConfig)), 0600)
 }
 
 // readGeminiSettings 读取 settings.json
@@ -590,17 +626,13 @@ func writeGeminiSettings(newSettings map[string]any) error {
 	// 深度合并
 	mergedSettings := deepMerge(existingSettings, newSettings)
 
-	// 原子写入
+	// 原子写入（带 fsync 与 Windows 共享冲突重试）
 	data, err := json.MarshalIndent(mergedSettings, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return atomicWriteFile(path, data, 0600)
 }
 
 // deepMerge 深度合并两个 map
@@ -656,11 +688,8 @@ func (s *GeminiService) saveProviders() error {
 		return err
 	}
 
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	// 原子写入（带 fsync 与 Windows 共享冲突重试）
+	return atomicWriteFile(path, data, 0644)
 }
 
 // CreateProviderFromPreset 从预设创建供应商
@@ -677,9 +706,9 @@ func (s *GeminiService) CreateProviderFromPreset(presetName string, apiKey strin
 		return nil, fmt.Errorf("未找到预设 '%s'", presetName)
 	}
 
-	// 创建供应商
+	// 创建供应商（ID 基于纳秒时间戳保证唯一，len+1 在删除后会与已有 ID 撞车）
 	provider := GeminiProvider{
-		ID:                  fmt.Sprintf("gemini-%s-%d", strings.ToLower(strings.ReplaceAll(presetName, " ", "-")), len(s.providers)+1),
+		ID:                  fmt.Sprintf("gemini-%s-%d", strings.ToLower(strings.ReplaceAll(presetName, " ", "-")), time.Now().UnixNano()),
 		Name:                preset.Name,
 		WebsiteURL:          preset.WebsiteURL,
 		APIKeyURL:           preset.APIKeyURL,
@@ -751,6 +780,22 @@ const (
 
 // EnableProxy 启用代理
 func (s *GeminiService) EnableProxy() error {
+	// 与 SwitchProvider 等写路径互斥，防止并发读改写 .env 时把过期内容存为基线
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// OAuth 认证不读 .env 的 BaseURL/API Key，注入代理配置后 CLI 会继续走
+	// OAuth 通道导致代理静默失效，这里直接拒绝并提示先切换认证方式
+	if settings, err := readGeminiSettings(); err == nil {
+		if security, ok := settings["security"].(map[string]any); ok {
+			if auth, ok := security["auth"].(map[string]any); ok {
+				if selectedType, ok := auth["selectedType"].(string); ok && selectedType == string(GeminiAuthOAuth) {
+					return fmt.Errorf("当前 Gemini 使用 Google OAuth 认证，代理不会生效；请先切换到 API Key 类型的供应商再启用代理")
+				}
+			}
+		}
+	}
+
 	dir := getGeminiDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -833,6 +878,10 @@ func (s *GeminiService) EnableProxy() error {
 
 // DisableProxy 禁用代理（手术式撤销：仅移除注入的代理配置，保留用户其他编辑）
 func (s *GeminiService) DisableProxy() error {
+	// 与 SwitchProvider 等写路径互斥，避免恢复基线时覆盖并发写入的 .env
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	envPath := getGeminiEnvPath()
 
 	// 读取当前 .env（保留用户在代理期间的所有编辑）
@@ -954,13 +1003,17 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		return nil, fmt.Errorf("未找到 ID 为 '%s' 的供应商", sourceID)
 	}
 
-	// 2. 生成新 ID（基于时间戳保证唯一性）
-	newID := fmt.Sprintf("%s-copy-%d", sourceID, time.Now().Unix())
+	// 2. 生成新 ID。用纳秒而非秒：复制按钮无防抖，同一秒内连点两次会生成完全相同的 ID。
+	// 再扫一遍现有列表做兜底去重（此处已持有 s.mu，成本可忽略）
+	newID := fmt.Sprintf("%s-copy-%d", sourceID, time.Now().UnixNano())
+	for seq := 2; s.providerIDExists(newID); seq++ {
+		newID = fmt.Sprintf("%s-copy-%d-%d", sourceID, time.Now().UnixNano(), seq)
+	}
 
 	// 3. 克隆配置（深拷贝）
 	cloned := GeminiProvider{
 		ID:                  newID,
-		Name:                source.Name + " (副本)",
+		Name:                s.uniqueDuplicateName(source.Name),
 		WebsiteURL:          source.WebsiteURL,
 		APIKeyURL:           source.APIKeyURL,
 		BaseURL:             source.BaseURL,
@@ -970,6 +1023,7 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		Category:            source.Category,
 		PartnerPromotionKey: source.PartnerPromotionKey,
 		Enabled:             false, // 默认禁用，避免与源供应商冲突
+		Level:               source.Level,
 	}
 
 	// 4. 深拷贝 map（避免共享引用）
@@ -995,6 +1049,38 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 	}
 
 	return &cloned, nil
+}
+
+// uniqueDuplicateName 基于源供应商名生成副本名；若与现有供应商重名（如同一个源被连续复制多次），
+// 追加序号直到不冲突，避免出现完全同名的条目——前端 Gemini 分支以 name 作为增删改的匹配键，
+// 重名会导致删除静默失效、编辑写到错误的供应商上。调用方需已持有 s.mu。
+func (s *GeminiService) uniqueDuplicateName(sourceName string) string {
+	baseName := sourceName + " (副本)"
+
+	existing := make(map[string]bool, len(s.providers))
+	for _, p := range s.providers {
+		existing[p.Name] = true
+	}
+
+	if !existing[baseName] {
+		return baseName
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s %d", baseName, n)
+		if !existing[candidate] {
+			return candidate
+		}
+	}
+}
+
+// providerIDExists 判断 ID 是否已被占用。调用方需已持有 s.mu。
+func (s *GeminiService) providerIDExists(id string) bool {
+	for _, p := range s.providers {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // ReorderProviders 重新排序供应商（按传入的 ID 顺序）

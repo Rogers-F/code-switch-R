@@ -427,11 +427,38 @@ func (ss *SkillService) installFromPathEx(directory, source, platform, location 
 		return err
 	}
 	target := filepath.Join(installPath, directory)
-	if err := os.RemoveAll(target); err != nil && !os.IsNotExist(err) {
+
+	// 先复制到旁路目录，成功后再替换旧目录：复制中途失败不会毁掉已安装的旧版本
+	newDir := target + ".new"
+	oldDir := target + ".old"
+	if err := os.RemoveAll(newDir); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := copyDirectory(source, target); err != nil {
+	if err := copyDirectory(source, newDir); err != nil {
+		_ = os.RemoveAll(newDir)
 		return err
+	}
+	if err := os.RemoveAll(oldDir); err != nil && !os.IsNotExist(err) {
+		_ = os.RemoveAll(newDir)
+		return err
+	}
+	hasOld := false
+	if _, err := os.Stat(target); err == nil {
+		if err := os.Rename(target, oldDir); err != nil {
+			_ = os.RemoveAll(newDir)
+			return err
+		}
+		hasOld = true
+	}
+	if err := os.Rename(newDir, target); err != nil {
+		if hasOld {
+			_ = os.Rename(oldDir, target) // 回滚旧版本
+		}
+		_ = os.RemoveAll(newDir)
+		return err
+	}
+	if hasOld {
+		_ = os.RemoveAll(oldDir)
 	}
 	ss.mu.Lock()
 	defer ss.mu.Unlock()

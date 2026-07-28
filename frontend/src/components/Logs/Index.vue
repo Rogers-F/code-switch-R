@@ -681,12 +681,17 @@ watch(
   },
 )
 
+// 卸载标记：首次加载期间离开页面时，阻止 await 之后再启动倒计时定时器造成泄漏
+let isUnmounted = false
+
 onMounted(async () => {
   await loadDashboard()
+  if (isUnmounted) return
   startCountdown()
 })
 
 onUnmounted(() => {
+  isUnmounted = true
   stopCountdown()
 })
 </script>

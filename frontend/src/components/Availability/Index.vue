@@ -13,6 +13,7 @@ import {
   formatStatus,
   getStatusColor,
 } from '../../services/healthcheck'
+import { extractErrorMessage } from '../../utils/error'
 
 const { t } = useI18n()
 
@@ -27,6 +28,7 @@ const nextRefreshIn = ref(0)
 // 配置编辑弹窗状态
 const showConfigModal = ref(false)
 const savingConfig = ref(false)
+const configError = ref('')
 const activeProvider = ref<(ProviderTimeline & { platform: string }) | null>(null)
 const configForm = ref({
   testModel: '',
@@ -117,8 +119,8 @@ async function checkSingle(platform: string, providerId: number) {
   }
 }
 
-// 切换监控开关
-async function toggleMonitor(platform: string, providerId: number, enabled: boolean) {
+// 切换监控开关（返回是否成功，供调用方决定后续动作）
+async function toggleMonitor(platform: string, providerId: number, enabled: boolean, event?: Event): Promise<boolean> {
   try {
     await setAvailabilityMonitorEnabled(platform, providerId, enabled)
     await loadData() // 刷新当前页面
@@ -127,20 +129,26 @@ async function toggleMonitor(platform: string, providerId: number, enabled: bool
     window.dispatchEvent(new CustomEvent('providers-updated', {
       detail: { platform, providerId, enabled }
     }))
+    return true
   } catch (error) {
     console.error('Failed to toggle monitor:', error)
+    // 写入失败：原生 checkbox 已被点击翻转而模型值未变，需手动拨回真实状态
+    const input = event?.target as HTMLInputElement | null
+    if (input) {
+      input.checked = !enabled
+    }
+    await loadData() // 回读后端真实状态
+    alert(t('availability.toggleFailed') + extractErrorMessage(error))
+    return false
   }
 }
 
 // 启用监控并打开配置编辑
 async function enableMonitoringAndEdit(platform: string, timeline: ProviderTimeline) {
-  try {
-    await toggleMonitor(platform, timeline.providerId, true)
-    // 等待状态更新后打开配置弹窗
-    editConfig(platform, { ...timeline, availabilityMonitorEnabled: true })
-  } catch (error) {
-    console.error('Failed to enable monitoring and edit:', error)
-  }
+  const ok = await toggleMonitor(platform, timeline.providerId, true)
+  if (!ok) return
+  // 等待状态更新后打开配置弹窗
+  editConfig(platform, { ...timeline, availabilityMonitorEnabled: true })
 }
 
 // 格式化时间
@@ -189,6 +197,7 @@ function stopTimers() {
 // 打开配置编辑弹窗
 function editConfig(platform: string, timeline: ProviderTimeline) {
   activeProvider.value = { ...timeline, platform }
+  configError.value = ''
   const cfg = timeline.availabilityConfig || {}
   configForm.value = {
     testModel: cfg.testModel || '',
@@ -208,6 +217,7 @@ function closeConfigModal() {
 async function saveConfig() {
   if (!activeProvider.value) return
   savingConfig.value = true
+  configError.value = ''
   try {
     await saveAvailabilityConfig(activeProvider.value.platform, activeProvider.value.providerId, {
       testModel: configForm.value.testModel,
@@ -218,6 +228,8 @@ async function saveConfig() {
     await loadData()
   } catch (error) {
     console.error('Failed to save availability config:', error)
+    // 保存失败：弹窗内展示错误，避免用户反复点击却毫无反馈
+    configError.value = t('availability.saveConfigFailed') + extractErrorMessage(error)
   } finally {
     savingConfig.value = false
   }
@@ -330,7 +342,7 @@ onUnmounted(() => {
                     <input
                       type="checkbox"
                       :checked="timeline.availabilityMonitorEnabled"
-                      @change="toggleMonitor(platform, timeline.providerId, !timeline.availabilityMonitorEnabled)"
+                      @change="toggleMonitor(platform, timeline.providerId, !timeline.availabilityMonitorEnabled, $event)"
                       class="sr-only peer"
                     />
                     <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-[var(--mac-accent)]"></div>
@@ -473,6 +485,8 @@ onUnmounted(() => {
             <p class="mt-1 text-xs text-[var(--mac-text-secondary)]">{{ t('availability.hint.timeout') }}</p>
           </div>
         </div>
+
+        <p v-if="configError" class="mt-4 text-sm text-red-500">{{ configError }}</p>
 
         <div class="mt-6 flex justify-end gap-3">
           <button

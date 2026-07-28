@@ -48,8 +48,23 @@ func NewNotificationService(appSettings *AppSettingsService) *NotificationServic
 
 // SetApp 设置 Wails 应用实例（用于发送事件到前端）
 // @author sm
+// 该服务注册为 Wails 服务后导出方法均可被前端 RPC 调用，
+// 传 nil 会让所有事件广播失效，因此忽略 nil 入参。
+// app 由主协程写入、由代理转发协程读取，必须走锁。
 func (ns *NotificationService) SetApp(app *application.App) {
+	if app == nil {
+		return
+	}
+	ns.mu.Lock()
 	ns.app = app
+	ns.mu.Unlock()
+}
+
+// currentApp 读取 App 引用（与 SetApp 的写入互斥）
+func (ns *NotificationService) currentApp() *application.App {
+	ns.mu.RLock()
+	defer ns.mu.RUnlock()
+	return ns.app
 }
 
 // ensureIconFile 确保图标文件存在于临时目录，并返回路径
@@ -110,15 +125,17 @@ func (ns *NotificationService) NotifyProviderSwitch(info SwitchNotification) {
 		return
 	}
 
+	// 防刷屏：持锁内完成"检查 + 更新时间戳"，
+	// 若时间戳等到异步 goroutine 里才写，突发降级的连续调用会全部通过节流检查导致通知风暴
 	ns.mu.Lock()
-	lastTime := ns.lastNotifyTime
-	ns.mu.Unlock()
-
-	// 防刷屏：检查是否在最小间隔内
-	if time.Since(lastTime) < ns.minInterval {
-		log.Printf("[Notification] 通知被节流，距上次通知仅 %v", time.Since(lastTime))
+	sinceLast := time.Since(ns.lastNotifyTime)
+	if sinceLast < ns.minInterval {
+		ns.mu.Unlock()
+		log.Printf("[Notification] 通知被节流，距上次通知仅 %v", sinceLast)
 		return
 	}
+	ns.lastNotifyTime = time.Now()
+	ns.mu.Unlock()
 
 	// 异步发送通知
 	go ns.sendSwitchNotification(info)
@@ -126,10 +143,6 @@ func (ns *NotificationService) NotifyProviderSwitch(info SwitchNotification) {
 
 // sendSwitchNotification 实际发送切换通知的内部方法
 func (ns *NotificationService) sendSwitchNotification(info SwitchNotification) {
-	ns.mu.Lock()
-	ns.lastNotifyTime = time.Now()
-	ns.mu.Unlock()
-
 	// 简化通知内容：仅显示已切换到哪个供应商
 	title := "Code Switch"
 	body := fmt.Sprintf("已切换到 %s", info.ToProvider)
@@ -148,10 +161,11 @@ func (ns *NotificationService) sendSwitchNotification(info SwitchNotification) {
 // emitSwitchEvent 发送切换事件到前端
 // @author sm
 func (ns *NotificationService) emitSwitchEvent(info SwitchNotification) {
-	if ns.app == nil {
+	app := ns.currentApp()
+	if app == nil {
 		return
 	}
-	ns.app.Event.Emit("provider:switched", map[string]interface{}{
+	app.Event.Emit("provider:switched", map[string]interface{}{
 		"platform":     info.Platform,
 		"fromProvider": info.FromProvider,
 		"toProvider":   info.ToProvider,
@@ -186,10 +200,11 @@ func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerName 
 // emitBlacklistEvent 发送拉黑事件到前端
 // @author sm
 func (ns *NotificationService) emitBlacklistEvent(platform, providerName string, level, durationMinutes int) {
-	if ns.app == nil {
+	app := ns.currentApp()
+	if app == nil {
 		return
 	}
-	ns.app.Event.Emit("provider:blacklisted", map[string]interface{}{
+	app.Event.Emit("provider:blacklisted", map[string]interface{}{
 		"platform":        platform,
 		"providerName":    providerName,
 		"level":           level,

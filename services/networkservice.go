@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf16"
@@ -62,6 +64,19 @@ type NetworkService struct {
 	claudeService *ClaudeSettingsService
 	codexService  *CodexSettingsService
 	geminiService *GeminiService
+	// boundAddrsFn 查询代理本次实际绑定的监听地址。监听地址在启动时冻结，
+	// 任何"这个地址能不能连"的判断都必须以实际绑定为准，不能看磁盘设置。
+	// 这里用函数值而不是直接持有 *ProviderRelayService：后者会让绑定生成器
+	// 把该类型同时当成服务和模型，产生索引遮蔽告警。
+	boundAddrsFn func() []string
+}
+
+// relayBoundAddresses 取代理实际绑定的地址；未注入或未启动时返回空。
+func (ns *NetworkService) relayBoundAddresses() []string {
+	if ns.boundAddrsFn == nil {
+		return nil
+	}
+	return ns.boundAddrsFn()
 }
 
 // NewNetworkService 创建网络服务
@@ -70,6 +85,8 @@ func NewNetworkService(
 	claudeService *ClaudeSettingsService,
 	codexService *CodexSettingsService,
 	geminiService *GeminiService,
+	// boundAddrs 返回代理实际绑定的监听地址，可为 nil（此时回退到按设置推算）
+	boundAddrs func() []string,
 ) *NetworkService {
 	home, err := getUserHomeDir()
 	if err != nil {
@@ -82,6 +99,7 @@ func NewNetworkService(
 		claudeService: claudeService,
 		codexService:  codexService,
 		geminiService: geminiService,
+		boundAddrsFn:  boundAddrs,
 	}
 }
 
@@ -122,8 +140,9 @@ func (ns *NetworkService) GetNetworkSettings() (NetworkSettings, error) {
 		return ns.defaultSettings(), err
 	}
 
-	// 计算当前监听地址
-	settings.CurrentAddress = ns.computeListenAddress(settings)
+	// 当前监听地址以实际绑定为准：设置改了但没重启时，
+	// 显示"设置推算出的地址"会让用户以为已经生效
+	settings.CurrentAddress = ns.currentListenAddress(settings)
 
 	return settings, nil
 }
@@ -133,7 +152,9 @@ func (ns *NetworkService) SaveNetworkSettings(settings NetworkSettings) error {
 	ns.mu.Lock()
 	defer ns.mu.Unlock()
 
-	// 计算当前监听地址
+	// 落盘的是"这套设置应该绑到哪"，而不是"当前进程实际绑在哪"：
+	// 后者是运行期状态，写进设置文件会在下次启动读出一个与设置自相矛盾的值。
+	// 展示用的实际地址由 GetNetworkSettings 在读取时现算。
 	settings.CurrentAddress = ns.computeListenAddress(settings)
 
 	dir := filepath.Dir(ns.settingsPath)
@@ -149,16 +170,133 @@ func (ns *NetworkService) SaveNetworkSettings(settings NetworkSettings) error {
 	return AtomicWriteBytes(ns.settingsPath, data)
 }
 
+// ResolveRelayListenAddresses 解析代理应该绑定的全部地址，首个为主地址
+// （客户端连接地址由它派生）。
+//
+// wsl_auto 模式需要同时覆盖两个网段：本机 CLI 走回环，WSL 内的 CLI 走
+// vEthernet(WSL) 宿主机地址。这两个都是 host-only 范围，
+// 比直接绑 0.0.0.0 安全得多——后者会把无鉴权、自动注入供应商密钥的代理
+// 暴露给整个物理局域网。
+func ResolveRelayListenAddresses() []string {
+	primary := ResolveRelayListenAddress()
+	addrs := []string{primary}
+
+	// 仅 wsl_auto 需要追加 WSL 宿主机地址
+	home, err := getUserHomeDir()
+	if err != nil {
+		return addrs
+	}
+	ns := &NetworkService{settingsPath: filepath.Join(home, appSettingsDir, networkSettingsFile)}
+	settings := ns.defaultSettings()
+	data, readErr := os.ReadFile(ns.settingsPath)
+	if readErr != nil || len(data) == 0 {
+		return addrs
+	}
+	if json.Unmarshal(data, &settings) != nil || settings.ListenMode != ListenModeWSLAuto {
+		return addrs
+	}
+
+	wslHost := strings.TrimSpace(ns.getWSLHostAddressInternal())
+	if wslHost == "" {
+		return addrs
+	}
+	extra := net.JoinHostPort(wslHost, "18100")
+	if extra != primary {
+		addrs = append(addrs, extra)
+	}
+	return addrs
+}
+
+// ResolveRelayListenAddress 在应用启动、服务尚未装配前解析代理应该绑定的主地址。
+// 此前 computeListenAddress 只用于回填 UI 上显示的 CurrentAddress，没有任何代码
+// 真正拿它去绑定监听：代理写死绑全部网卡，于是 localhost 模式形同虚设（带密钥的代理
+// 暴露给整个局域网），而 lan/wsl_auto/custom 模式只是"碰巧能用"。
+// 这里让绑定地址真正来自用户选择；读不到或解析失败一律回落到仅回环。
+// 监听地址在启动时确定，改设置需重启应用才生效。
+func ResolveRelayListenAddress() string {
+	const fallback = "127.0.0.1:18100"
+
+	home, err := getUserHomeDir()
+	if err != nil {
+		return fallback
+	}
+
+	ns := &NetworkService{settingsPath: filepath.Join(home, appSettingsDir, networkSettingsFile)}
+	settings := ns.defaultSettings()
+
+	data, err := os.ReadFile(ns.settingsPath)
+	if err != nil || len(data) == 0 {
+		return fallback
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return fallback
+	}
+
+	// custom 模式的地址是前端自由文本输入，必须与 RelayConnectAddress 用同一套校验：
+	// 否则"漏端口""带空格"之类的输入会让 bind 直接失败，
+	// 而 connect 侧却静默回落到回环，两边指向不同地址、还没有任何提示
+	addr := strings.TrimSpace(ns.computeListenAddress(settings))
+	if addr == "" {
+		return fallback
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		fmt.Printf("[Network] 监听地址 %q 非法（需要 host:port 形式），回落到 %s\n", addr, fallback)
+		return fallback
+	}
+	if p, convErr := strconv.Atoi(port); convErr != nil || p <= 0 || p > 65535 {
+		fmt.Printf("[Network] 监听端口 %q 非法，回落到 %s\n", port, fallback)
+		return fallback
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// RelayConnectAddress 把"监听地址"换算成本机客户端可用的"连接地址"。
+// 0.0.0.0 / :: / 空 host 只能用于 bind，写进 CLI 配置会让客户端 connect 失败
+// （Windows 上直接返回 WSAEADDRNOTAVAIL），必须归一化为回环地址。
+func RelayConnectAddress(listenAddr string) string {
+	const fallback = "127.0.0.1:18100"
+
+	addr := strings.TrimSpace(listenAddr)
+	if addr == "" {
+		return fallback
+	}
+
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fallback
+	}
+	if port == "" {
+		return fallback
+	}
+
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// currentListenAddress 返回展示用的监听地址：优先用代理实际绑定的地址
+// （多个用 " + " 连接，wsl_auto 就是"回环 + WSL 网段"两条），
+// 代理未启动时才回退到按设置推算的值。
+func (ns *NetworkService) currentListenAddress(settings NetworkSettings) string {
+	if bound := ns.relayBoundAddresses(); len(bound) > 0 {
+		return strings.Join(bound, " + ")
+	}
+	return ns.computeListenAddress(settings)
+}
+
 // computeListenAddress 计算监听地址
 func (ns *NetworkService) computeListenAddress(settings NetworkSettings) string {
 	switch settings.ListenMode {
 	case ListenModeLocalhost:
 		return "127.0.0.1:18100"
 	case ListenModeWSLAuto:
-		// WSL 模式下使用宿主机地址
-		if addr := ns.getWSLHostAddressInternal(); addr != "" {
-			return addr + ":18100"
-		}
+		// 主地址仍是回环：Windows 侧 CLI 配置里写的就是 127.0.0.1，
+		// 只绑 WSL 虚拟网卡会让本机 CLI 全部连不上。
+		// WSL 网段由 ResolveRelayListenAddresses 追加为第二个监听地址，
+		// 不走 0.0.0.0——那会把无鉴权、自动注入供应商密钥的代理暴露给整个物理局域网。
 		return "127.0.0.1:18100"
 	case ListenModeLAN:
 		return "0.0.0.0:18100"
@@ -292,6 +430,97 @@ func (ns *NetworkService) getWSLHostAddressInternal() string {
 	return "127.0.0.1"
 }
 
+// wslHostAddressStrict 只在真的探测到 vEthernet(WSL) 网段时返回地址，
+// 探测不到返回空串。getWSLHostAddressInternal 会兜底成 "127.0.0.1"，
+// 而 WSL2 里的 127.0.0.1 是 WSL 自己的回环、根本到不了宿主机代理，
+// 拿它去判断"能不能连"或去绑定监听都是错的。
+func (ns *NetworkService) wslHostAddressStrict() string {
+	addr := strings.TrimSpace(ns.getWSLHostAddressInternal())
+	if addr == "" || addr == "127.0.0.1" {
+		return ""
+	}
+	return addr
+}
+
+// resolveWSLReachableAddress 从代理实际绑定的地址里挑一个 WSL 内能连上的，
+// 挑不出来时返回空串与面向用户的失败原因。
+//
+// wslHost 为 vEthernet(WSL) 网卡地址，探测不到时为空。
+// 可达性规则（从宽到严）：
+//  1. 绑在全部网卡（0.0.0.0 / ::）→ 用 WSL 网段地址；探测不到网段就退回宿主机名解析不了，判失败；
+//  2. 绑在某个具体的非回环 IP → 直接用它，WSL2 的 NAT 网络能路由到宿主机的局域网地址；
+//  3. 只绑了回环 → 仅当探测不到 WSL 网卡（多半是 mirrored 模式，WSL 内的回环即宿主机回环）时可用。
+func (ns *NetworkService) resolveWSLReachableAddress(wslHost string, bound []string) (string, string) {
+	if len(bound) == 0 {
+		return "", "代理尚未启动，无法确定监听地址。请先确认代理正常运行后再配置。"
+	}
+
+	var wildcardPort string
+	var loopbackPort string
+	parsedAny := false
+	for _, addr := range bound {
+		host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+		if err != nil || port == "" {
+			continue // 解析不了的地址不参与判定，也不能让它影响下面的分支
+		}
+		parsedAny = true
+
+		if isLoopbackHostPort(addr) {
+			if loopbackPort == "" {
+				loopbackPort = port
+			}
+			continue
+		}
+
+		if host == "0.0.0.0" || host == "::" {
+			if wildcardPort == "" {
+				wildcardPort = port
+			}
+			continue
+		}
+		// 绑在具体网卡上：直接用该地址本身（含正好是 WSL 网段的情况）
+		return net.JoinHostPort(host, port), ""
+	}
+
+	if !parsedAny {
+		return "", "无法解析代理当前的监听地址，请重启应用后重试。"
+	}
+
+	if wildcardPort != "" {
+		if wslHost == "" {
+			// 与下面只绑回环的分支保持同一套假设：探测不到 vEthernet(WSL) 多半是
+			// mirrored 模式，此时 WSL 内的 127.0.0.1 就是宿主机回环。
+			// 绑全部网卡必然覆盖回环，严格比"只绑回环"更可达，不能反而判失败。
+			return net.JoinHostPort("127.0.0.1", wildcardPort), ""
+		}
+		return net.JoinHostPort(wslHost, wildcardPort), ""
+	}
+
+	if loopbackPort != "" {
+		if wslHost == "" {
+			// 探测不到 WSL 网卡而代理只绑回环：按 mirrored 网络模式处理，
+			// 此时 WSL 内的 127.0.0.1 就是宿主机回环
+			return net.JoinHostPort("127.0.0.1", loopbackPort), ""
+		}
+		return "", "代理当前只监听回环地址，NAT 模式的 WSL 无法访问。请把监听模式改为「WSL 自动」并重启应用后再配置（监听地址在启动时确定，改设置需重启才生效）。"
+	}
+
+	return "", "未能从代理当前的监听地址中找到 WSL 可访问的地址，请检查网络设置后重启应用再试。"
+}
+
+// isLoopbackHostPort 判断 host:port 形式的地址是否指向回环。
+func isLoopbackHostPort(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // ConfigureWSLClients 配置 WSL 中的 CLI 工具
 func (ns *NetworkService) ConfigureWSLClients(targets TargetCli) ConfigureResult {
 	if runtime.GOOS != "windows" {
@@ -310,12 +539,18 @@ func (ns *NetworkService) ConfigureWSLClients(targets TargetCli) ConfigureResult
 		}
 	}
 
-	// 获取宿主机地址
-	hostAddr := ns.getWSLHostAddressInternal()
-	if hostAddr == "" {
-		hostAddr = "127.0.0.1"
+	// 判断依据只能是"代理本次实际绑定了哪些地址"：监听地址在启动时就冻结了，
+	// 改完设置不重启并不会重绑，拿磁盘上的设置去推断会写出连不上的地址还报成功。
+	// hostAddr 为空表示探测不到 vEthernet(WSL) 网卡——这既可能是 WSL 没起来，
+	// 也可能是 networkingMode=mirrored（镜像模式下没有该虚拟网卡，
+	// 且 WSL 内的 127.0.0.1 就是宿主机回环），因此不能直接判失败。
+	hostAddr := ns.wslHostAddressStrict()
+	reachable, failure := ns.resolveWSLReachableAddress(hostAddr, ns.relayBoundAddresses())
+	if reachable == "" {
+		return ConfigureResult{Success: false, Message: failure}
 	}
-	proxyURL := fmt.Sprintf("http://%s:18100", hostAddr)
+
+	proxyURL := "http://" + reachable
 
 	var errors []string
 	var successes []string

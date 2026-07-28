@@ -116,6 +116,14 @@ func validateBlacklistLevelConfig(config *BlacklistLevelConfig) error {
 		return fmt.Errorf("去重窗口必须在 1-300 秒之间")
 	}
 
+	// RetryWaitSeconds 必须大于去重窗口，否则同 Provider 重试落在去重窗内不会计入失败次数
+	if config.RetryWaitSeconds < 1 || config.RetryWaitSeconds > 300 {
+		return fmt.Errorf("重试等待时间必须在 1-300 秒之间")
+	}
+	if config.RetryWaitSeconds <= config.DedupeWindowSeconds {
+		return fmt.Errorf("重试等待时间必须大于去重窗口（%d 秒）", config.DedupeWindowSeconds)
+	}
+
 	if config.NormalDegradeIntervalHours < 0.1 || config.NormalDegradeIntervalHours > 24 {
 		return fmt.Errorf("正常降级间隔必须在 0.1-24 小时之间")
 	}

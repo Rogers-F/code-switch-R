@@ -82,6 +82,28 @@ FunctionEnd
 Section
     !insertmacro wails.setShellContext
 
+    # 覆盖升级时旧进程可能仍在运行（含自动更新静默安装与旧实例退出之间的竞态），
+    # 先轮询等待其自行退出，超时后强制结束，避免主程序文件被占用导致写入失败
+    StrCpy $R9 0
+    ${Do}
+        nsExec::ExecToStack 'cmd /c tasklist /NH /FI "IMAGENAME eq ${PRODUCT_EXECUTABLE}" | findstr /I /C:"${PRODUCT_EXECUTABLE}"'
+        Pop $0
+        Pop $1
+        ${If} $0 != "0"
+            ${Break} # 进程不存在（或查询失败），继续安装
+        ${EndIf}
+        ${If} $R9 >= 10
+            DetailPrint "Closing running ${PRODUCT_EXECUTABLE}"
+            nsExec::ExecToStack 'taskkill /F /IM "${PRODUCT_EXECUTABLE}"'
+            Pop $0
+            Sleep 1000
+            ${Break}
+        ${EndIf}
+        DetailPrint "Waiting for ${PRODUCT_EXECUTABLE} to exit"
+        Sleep 1000
+        IntOp $R9 $R9 + 1
+    ${Loop}
+
     !insertmacro wails.webview2runtime
 
     SetOutPath $INSTDIR
@@ -96,10 +118,14 @@ Section
     !insertmacro wails.writeUninstaller
 SectionEnd
 
-Section "uninstall" 
+Section "uninstall"
     !insertmacro wails.setShellContext
 
+    # WebView2 用户数据在当前用户的 %APPDATA% 下；admin 上下文中 $AppData 指向
+    # C:\ProgramData，须临时切回 current 才能删对目录，删完恢复原上下文
+    SetShellVarContext current
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
+    !insertmacro wails.setShellContext
 
     RMDir /r $INSTDIR
 

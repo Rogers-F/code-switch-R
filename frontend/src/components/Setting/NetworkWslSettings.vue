@@ -32,8 +32,8 @@
           />
         </ListItem>
 
-        <!-- LAN Security Warning -->
-        <div v-if="listenMode === 'lan'" class="security-warning">
+        <!-- LAN Security Warning：custom 模式同样可能绑到非回环地址，一并告警 -->
+        <div v-if="listenMode === 'lan' || listenMode === 'custom'" class="security-warning">
           <div class="warning-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" stroke-linecap="round" stroke-linejoin="round"/>
@@ -251,23 +251,18 @@ const handleListenModeChange = async () => {
   currentListenAddress.value = computeListenAddress()
   await saveSettings()
 
-  // If switching to wsl_auto, trigger address detection
-  if (listenMode.value === 'wsl_auto') {
-    try {
-      const addr = await Call.ByName('codeswitch/services.NetworkService.GetWSLHostAddress')
-      if (addr) {
-        currentListenAddress.value = `${addr}:18100`
-      }
-    } catch (error) {
-      console.error('Failed to get WSL host address:', error)
-    }
-  }
+  // 监听地址以后端返回的实际绑定结果为准（wsl_auto 是"回环 + WSL 网卡"两条）。
+  // 前端自己拼会有两个问题：页面重新挂载后拼装逻辑不再执行、
+  // 以及改了设置但没重启时显示的是"设置推算值"而非真实监听地址。
+  await loadSettings()
 }
 
 const handleCustomAddressChange = async () => {
   if (listenMode.value === 'custom') {
-    currentListenAddress.value = customAddress.value || '0.0.0.0:18100'
+    // 不要前端自拼：显示的必须是后端给出的实际监听地址。
+    // 监听地址在启动时冻结，自拼会让用户以为改完就生效了
     await saveSettings()
+    await loadSettings()
   }
 }
 

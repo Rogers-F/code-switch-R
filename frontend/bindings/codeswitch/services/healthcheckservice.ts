@@ -81,6 +81,7 @@ export function SetAutoAvailabilityPolling(enabled: boolean): $CancellablePromis
 
 /**
  * SetAvailabilityMonitorEnabled 启用/禁用指定 Provider 的可用性监控
+ * 走锁内整段读改写,避免与其他配置保存并发时相互覆盖丢失更新
  */
 export function SetAvailabilityMonitorEnabled(platform: string, providerID: number, enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(3963090830, platform, providerID, enabled);

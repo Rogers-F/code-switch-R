@@ -7,10 +7,29 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+// configFileLocks 按配置文件路径共享的进程级互斥注册表（path -> *sync.Mutex）。
+// 同一配置文件的"读-改-写"整段必须持锁执行，避免并发保存互相覆盖。
+var configFileLocks sync.Map
+
+// lockConfigFile 对指定配置文件路径加锁，返回解锁函数。
+// 路径先做 Clean 归一化，Windows 下额外转小写以匹配大小写不敏感的文件系统。
+func lockConfigFile(path string) func() {
+	key := filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		key = strings.ToLower(key)
+	}
+	v, _ := configFileLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // CliConfigService CLI 配置管理服务
 // 管理 Claude Code、Codex、Gemini 的 CLI 配置文件
@@ -557,10 +576,14 @@ func (s *CliConfigService) SetTemplate(platform string, template map[string]inte
 		return err
 	}
 
+	unlock := lockConfigFile(s.getTemplatesPath())
+	defer unlock()
+
+	// loadTemplates 对文件不存在已返回空模板，此处报错说明文件损坏或不可读，
+	// 直接中止，避免用空模板整体覆盖导致其他平台已保存的模板丢失
 	templates, err := s.loadTemplates()
 	if err != nil {
-		// 如果文件不存在，创建新的模板
-		templates = &CLITemplates{}
+		return fmt.Errorf("读取模板文件失败: %w", err)
 	}
 
 	tpl := CLITemplate{
@@ -617,11 +640,19 @@ func (s *CliConfigService) RestoreDefault(platform string) error {
 		return fmt.Errorf("不支持的平台: %s", platform)
 	}
 
+	unlock := lockConfigFile(configPath)
+	defer unlock()
+
 	// 查找最新的备份文件（支持 *.bak.<timestamp> 格式）
 	backupPath, err := FindLatestBackup(configPath)
 	if err != nil {
 		// 尝试兼容旧格式的备份文件
 		switch p {
+		case PlatformClaude:
+			legacy := filepath.Join(filepath.Dir(configPath), "cc-studio.back.settings.json")
+			if FileExists(legacy) {
+				backupPath, err = legacy, nil
+			}
 		case PlatformCodex:
 			legacy := filepath.Join(filepath.Dir(configPath), "cc-studio.back.config.toml")
 			if FileExists(legacy) {
@@ -782,6 +813,8 @@ func (s *CliConfigService) getClaudeConfig() (*CLIConfig, error) {
 
 func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) error {
 	configPath := s.getClaudeConfigPath()
+	unlock := lockConfigFile(configPath)
+	defer unlock()
 
 	// 读取现有配置（保留用户的其他设置）
 	var data map[string]interface{}
@@ -793,6 +826,9 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) err
 				fmt.Printf("[警告] settings.json 格式无效，将使用空配置: %v\n", err)
 			}
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// 文件存在但读取失败（权限/占用等），中止保存，避免用空配置覆盖用户设置
+		return fmt.Errorf("读取 Claude 配置失败: %w", err)
 	}
 	if data == nil {
 		data = make(map[string]interface{})
@@ -853,6 +889,9 @@ func (s *CliConfigService) saveClaudeConfig(editable map[string]interface{}) err
 
 // saveClaudeConfigContent 将预览区编辑的 settings.json 写入磁盘，并强制覆盖代理锁定字段
 func (s *CliConfigService) saveClaudeConfigContent(configPath string, content string) error {
+	unlock := lockConfigFile(configPath)
+	defer unlock()
+
 	data := make(map[string]interface{})
 	// 空内容允许，视为从空配置开始
 	if strings.TrimSpace(content) != "" {
@@ -1002,6 +1041,8 @@ func (s *CliConfigService) getCodexConfig() (*CLIConfig, error) {
 
 func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) error {
 	configPath := s.getCodexConfigPath()
+	unlock := lockConfigFile(configPath)
+	defer unlock()
 
 	// 读取现有配置（保留用户的其他设置）
 	var raw map[string]interface{}
@@ -1013,6 +1054,9 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 				fmt.Printf("[警告] config.toml 格式无效，将使用空配置: %v\n", err)
 			}
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// 文件存在但读取失败（权限/占用等），中止保存，避免用空配置覆盖用户设置
+		return fmt.Errorf("读取 Codex 配置失败: %w", err)
 	}
 	if raw == nil {
 		raw = make(map[string]interface{})
@@ -1080,6 +1124,9 @@ func (s *CliConfigService) saveCodexConfig(editable map[string]interface{}) erro
 
 // saveCodexConfigContent 将预览区编辑的 config.toml 写入磁盘，并强制覆盖代理锁定字段
 func (s *CliConfigService) saveCodexConfigContent(configPath string, content string) error {
+	unlock := lockConfigFile(configPath)
+	defer unlock()
+
 	raw := make(map[string]interface{})
 	// 空内容允许，视为从空配置开始
 	if strings.TrimSpace(content) != "" {
@@ -1130,6 +1177,9 @@ func (s *CliConfigService) saveCodexConfigContent(configPath string, content str
 
 // saveCodexAuthContent 保存 Codex auth.json（仅做 JSON 校验，不强制覆盖内容）
 func (s *CliConfigService) saveCodexAuthContent(authPath string, content string) error {
+	unlock := lockConfigFile(authPath)
+	defer unlock()
+
 	data := make(map[string]interface{})
 	// 空内容允许（可用于清空/重建）
 	if strings.TrimSpace(content) != "" {
@@ -1237,11 +1287,16 @@ func (s *CliConfigService) getGeminiConfig() (*CLIConfig, error) {
 
 func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) error {
 	envPath := s.getGeminiEnvPath()
+	unlock := lockConfigFile(envPath)
+	defer unlock()
 
-	// 读取现有内容（保留用户的其他设置）
-	envMap := make(map[string]string)
+	// 读取现有原始内容（按行更新，保留注释等非 KEY=VALUE 行）
+	rawContent := ""
 	if content, err := os.ReadFile(envPath); err == nil {
-		envMap = parseEnvFile(string(content))
+		rawContent = string(content)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// 文件存在但读取失败（权限/占用等），中止保存，避免用空配置覆盖用户设置
+		return fmt.Errorf("读取 Gemini .env 失败: %w", err)
 	}
 
 	// 创建备份
@@ -1249,16 +1304,16 @@ func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) err
 		fmt.Printf("创建备份失败: %v\n", err)
 	}
 
-	// 设置锁定字段
-	envMap["GOOGLE_GEMINI_BASE_URL"] = s.geminiBaseURL()
-
 	// 锁定字段列表（这些字段不允许用户覆盖）
 	lockedFields := map[string]bool{
 		"GOOGLE_GEMINI_BASE_URL": true,
 		"GEMINI_API_KEY":         true,
 	}
 
-	// 合并用户编辑的所有字段（除了锁定字段）
+	// 设置锁定字段并合并用户编辑的所有字段（除了锁定字段）
+	updates := map[string]string{
+		"GOOGLE_GEMINI_BASE_URL": s.geminiBaseURL(),
+	}
 	for k, v := range editable {
 		// 跳过锁定字段
 		if lockedFields[k] {
@@ -1266,10 +1321,10 @@ func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) err
 		}
 		// 将值转换为字符串（.env 格式只支持字符串值）
 		if str, ok := v.(string); ok {
-			envMap[k] = str
+			updates[k] = str
 		} else {
 			// 对于非字符串类型，转换为字符串表示
-			envMap[k] = fmt.Sprintf("%v", v)
+			updates[k] = fmt.Sprintf("%v", v)
 		}
 	}
 
@@ -1278,19 +1333,19 @@ func (s *CliConfigService) saveGeminiConfig(editable map[string]interface{}) err
 		return err
 	}
 
-	// 序列化为 .env 格式
-	content := serializeEnvFile(envMap)
-
-	// 原子写入
-	return AtomicWriteText(envPath, content)
+	// 按行更新：仅改写受管键所在行，注释与非常规行原样保留
+	return AtomicWriteText(envPath, upsertEnvContent(rawContent, updates))
 }
 
 // saveGeminiEnvContent 将预览区编辑的 .env 写入磁盘，并强制覆盖代理锁定字段
 func (s *CliConfigService) saveGeminiEnvContent(envPath string, content string) error {
-	envMap := parseEnvFile(content)
+	unlock := lockConfigFile(envPath)
+	defer unlock()
 
 	// 强制写入锁定字段
-	envMap["GOOGLE_GEMINI_BASE_URL"] = s.geminiBaseURL()
+	updates := map[string]string{
+		"GOOGLE_GEMINI_BASE_URL": s.geminiBaseURL(),
+	}
 
 	// GEMINI_API_KEY 为系统锁定字段：优先保留磁盘中的现有值；不存在时写入占位值
 	existingAPIKey := ""
@@ -1299,9 +1354,9 @@ func (s *CliConfigService) saveGeminiEnvContent(envPath string, content string) 
 		existingAPIKey = oldMap["GEMINI_API_KEY"]
 	}
 	if existingAPIKey != "" {
-		envMap["GEMINI_API_KEY"] = existingAPIKey
-	} else if envMap["GEMINI_API_KEY"] == "" {
-		envMap["GEMINI_API_KEY"] = "code-switch-r"
+		updates["GEMINI_API_KEY"] = existingAPIKey
+	} else if parseEnvFile(content)["GEMINI_API_KEY"] == "" {
+		updates["GEMINI_API_KEY"] = "code-switch-r"
 	}
 
 	if _, err := CreateBackup(envPath); err != nil {
@@ -1313,8 +1368,8 @@ func (s *CliConfigService) saveGeminiEnvContent(envPath string, content string) 
 		return err
 	}
 
-	// 原子写入
-	return AtomicWriteText(envPath, serializeEnvFile(envMap))
+	// 按行更新用户提交的内容：仅改写锁定键所在行，注释与非常规行原样保留
+	return AtomicWriteText(envPath, upsertEnvContent(content, updates))
 }
 
 // ========== 模板管理 ==========
@@ -1367,6 +1422,59 @@ func serializeEnvFile(envMap map[string]string) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// upsertEnvContent 按行更新 .env 内容：仅改写 updates 中键所在的 KEY=VALUE 行，
+// 注释、export 前缀等无法识别的行原样保留；文件中不存在的键按序追加到末尾。
+// 相比整体重建（parseEnvFile + serializeEnvFile），可避免保存时丢失用户手写的注释行。
+func upsertEnvContent(content string, updates map[string]string) string {
+	// 统一处理 Windows 和 Unix 行尾
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	hadTrailingNewline := strings.HasSuffix(normalized, "\n")
+	normalized = strings.TrimSuffix(normalized, "\n")
+
+	var lines []string
+	if normalized != "" {
+		lines = strings.Split(normalized, "\n")
+	}
+
+	seen := make(map[string]bool, len(updates))
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// 跳过空行和注释
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		idx := strings.Index(trimmed, "=")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(trimmed[:idx])
+		// 同名键出现多次时全部改写，避免残留旧值覆盖新值
+		if newValue, ok := updates[key]; ok {
+			lines[i] = fmt.Sprintf("%s=%s", key, newValue)
+			seen[key] = true
+		}
+	}
+
+	// 追加文件中不存在的键（按键排序以保证输出稳定）
+	missing := make([]string, 0, len(updates))
+	for k := range updates {
+		if !seen[k] {
+			missing = append(missing, k)
+		}
+	}
+	sort.Strings(missing)
+	for _, k := range missing {
+		lines = append(lines, fmt.Sprintf("%s=%s", k, updates[k]))
+	}
+
+	result := strings.Join(lines, "\n")
+	if hadTrailingNewline && result != "" {
+		result += "\n"
+	}
+	return result
 }
 
 // samePath 跨平台路径比较（Windows 大小写不敏感）

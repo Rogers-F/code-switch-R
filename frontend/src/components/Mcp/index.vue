@@ -122,7 +122,8 @@
                 </div>
                 <p class="card-metrics">{{ serverSummary(server) }}</p>
                 <p v-if="server.website" class="card-link">
-                  <a :href="server.website" target="_blank" rel="noreferrer">{{ server.website }}</a>
+                  <a v-if="safeWebsiteHref(server.website)" :href="safeWebsiteHref(server.website)" target="_blank" rel="noreferrer">{{ server.website }}</a>
+                  <span v-else>{{ server.website }}</span>
                 </p>
                 <p v-if="server.tips" class="card-tip">{{ server.tips }}</p>
               </div>
@@ -531,10 +532,25 @@ const persistServers = async () => {
     await loadServers()
   } catch (error) {
     console.error('failed to save mcp servers', error)
+    // 保存失败时回读磁盘真实状态，撤销本地乐观修改（删除/开关）造成的假象
+    await loadServers()
     errorMessage.value = t('components.mcp.list.saveError')
   } finally {
     saveBusy.value = false
   }
+}
+
+// website 仅放行 http/https 链接，其余 scheme（javascript:、file: 等）退化为纯文本展示
+const safeWebsiteHref = (raw: string): string => {
+  try {
+    const parsed = new URL(raw)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.href
+    }
+  } catch {
+    // 解析失败视为不可点击
+  }
+  return ''
 }
 
 const iconSvg = (name: string) => {

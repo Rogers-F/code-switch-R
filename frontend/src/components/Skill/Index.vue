@@ -384,8 +384,12 @@ const switchPlatform = async (platform: 'claude' | 'codex') => {
   await loadSkillsForPlatform()
 }
 
+// 加载请求序号：平台快速切换时用于丢弃过期响应，避免慢返回的旧平台数据覆盖新平台列表
+let skillsLoadSeq = 0
+
 // Load skills for current platform
 const loadSkillsForPlatform = async () => {
+  const seq = ++skillsLoadSeq
   loading.value = true
   skillsError.value = ''
   try {
@@ -393,6 +397,9 @@ const loadSkillsForPlatform = async () => {
     const installed = await fetchSkillsForPlatform(activePlatform.value)
     // Also load available skills from repos
     const available = await fetchSkills()
+
+    // 期间已发起更新的加载请求，本次结果作废
+    if (seq !== skillsLoadSeq) return
 
     // FIX: Only keep repo skills that can be installed (have repo info)
     // Force installed=false to avoid "gap" where skills fall into neither group
@@ -411,11 +418,15 @@ const loadSkillsForPlatform = async () => {
 
     skills.value = [...installed, ...filtered]
   } catch (error) {
+    if (seq !== skillsLoadSeq) return
     console.error('failed to load skills', error)
     skillsError.value = t('components.skill.list.error')
   } finally {
-    loading.value = false
-    processingSkill.value = ''
+    // 过期请求不碰加载态，交给最新一次请求收尾
+    if (seq === skillsLoadSeq) {
+      loading.value = false
+      processingSkill.value = ''
+    }
   }
 }
 

@@ -938,9 +938,11 @@ func (hcs *HealthCheckService) handleBlacklistIntegration(provider *Provider, re
 	// 在锁外执行耗时的 RPC 调用，避免阻塞其他检测
 	if shouldTriggerBlacklist {
 		if err := hcs.blacklistService.RecordFailure(result.Platform, provider.Name); err != nil {
-			log.Printf("[HealthCheck] 触发拉黑失败: %v", err)
+			log.Printf("[HealthCheck] 上报拉黑服务失败: %v", err)
 		} else {
-			log.Printf("[HealthCheck] Provider %s 连续失败 %d 次，已触发拉黑！", provider.Name, failureThreshold)
+			// 注意：RecordFailure 只累计一次失败，拉黑服务内部还有自己的失败阈值，
+			// 达到其阈值后才会真正写入黑名单，这里不能宣称"已拉黑"
+			log.Printf("[HealthCheck] Provider %s 连续失败 %d 次，已上报拉黑服务累计失败计数", provider.Name, failureThreshold)
 		}
 	}
 
@@ -973,7 +975,10 @@ func (hcs *HealthCheckService) StartBackgroundPolling() {
 	hcs.stopChan = make(chan struct{})
 	hcs.running = true
 
-	go func() {
+	// 以参数捕获本轮的 stop channel 与轮询间隔：
+	// 协程内若直接读 hcs.stopChan，Stop→Start 快速切换时旧协程会读到新 channel 而永不退出，
+	// 造成双协程巡检（失败计数翻倍、历史重复写入）；且无锁读字段与 Start 持锁写构成数据竞争
+	go func(stop chan struct{}, interval time.Duration) {
 		// 启动时延迟随机时间（0-10s），避免整点风暴
 		jitter := time.Duration(rand.Intn(10000)) * time.Millisecond
 		time.Sleep(jitter)
@@ -982,19 +987,19 @@ func (hcs *HealthCheckService) StartBackgroundPolling() {
 		hcs.runAllPlatformChecks()
 
 		// 添加抖动（±10%）
-		ticker := time.NewTicker(hcs.pollInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
 				hcs.runAllPlatformChecks()
-			case <-hcs.stopChan:
+			case <-stop:
 				log.Println("[HealthCheck] 后台巡检已停止")
 				return
 			}
 		}
-	}()
+	}(hcs.stopChan, hcs.pollInterval)
 
 	log.Printf("[HealthCheck] 后台巡检已启动（间隔: %v）", hcs.pollInterval)
 }

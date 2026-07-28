@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -81,6 +82,7 @@ type DownloadState struct {
 	LastModified    string `json:"last_modified"`
 	DownloadedBytes int64  `json:"downloaded_bytes"`
 	TempFilePath    string `json:"temp_file_path"`
+	ArchivePath     string `json:"archive_path,omitempty"` // darwin：解压前的原 zip 路径（.app 是目录，恢复校验需对 zip 计算 SHA）
 }
 
 // PendingApply 待应用更新标记
@@ -88,6 +90,7 @@ type PendingApply struct {
 	TargetVersion string    `json:"target_version"`
 	Method        string    `json:"method"` // "swap" | "installer"
 	FilePath      string    `json:"file_path"`
+	ArchivePath   string    `json:"archive_path,omitempty"` // darwin：FilePath 为 .app 目录时的原 zip 路径
 	FileSHA256    string    `json:"file_sha256"`
 	StartedAt     time.Time `json:"started_at"`
 }
@@ -140,8 +143,9 @@ type UpdateService struct {
 	lastEmitState   UpdateState
 
 	// 配置
-	dataDir      string // 数据目录，用于存储临时文件和状态
-	cachedPolicy string // 缓存的更新策略，避免重复检测
+	dataDir      string       // 数据目录，用于存储临时文件和状态
+	cachedPolicy string       // 缓存的更新策略，避免重复检测
+	forcedPolicy UpdatePolicy // 构建期注入的策略覆盖（非空时跳过运行时检测）
 }
 
 // 常量
@@ -153,6 +157,10 @@ const (
 	progressMinChange = 1 // 最小进度变化（百分比）
 )
 
+// downloadStallTimeout 下载读停滞看门狗超时：链路停滞（对端保持连接但不再发数据）
+// 超过该时长未收到任何数据即中断下载（变量形式便于测试覆盖）
+var downloadStallTimeout = 120 * time.Second
+
 // URL 白名单
 var allowedURLPrefixes = []string{
 	"https://github.com/Rogers-F/code-switch-R/releases/download/",
@@ -161,7 +169,8 @@ var allowedURLPrefixes = []string{
 }
 
 // NewUpdateService 创建更新服务
-func NewUpdateService(currentVersion string) *UpdateService {
+// policy 可选：由 main 透传构建期注入的 UpdatePolicy（"portable"/"installer" 直接采用，其余值走运行时检测）
+func NewUpdateService(currentVersion string, policy ...string) *UpdateService {
 	dataDir := getUpdateDataDir()
 
 	// 确保数据目录存在
@@ -171,6 +180,14 @@ func NewUpdateService(currentVersion string) *UpdateService {
 		state:          StateIdle,
 		currentVersion: currentVersion,
 		dataDir:        dataDir,
+	}
+
+	// 构建期注入的策略覆盖：非法值忽略，回退运行时检测
+	if len(policy) > 0 {
+		switch UpdatePolicy(policy[0]) {
+		case PolicyPortable, PolicyInstaller:
+			us.forcedPolicy = UpdatePolicy(policy[0])
+		}
 	}
 
 	// 读取已忽略的版本
@@ -189,7 +206,11 @@ func NewUpdateService(currentVersion string) *UpdateService {
 }
 
 // SetApp 设置 Wails App 引用
+// 注册为 Wails 服务后该方法可被前端 RPC 调用，传 nil 会让更新事件广播失效，忽略之。
 func (us *UpdateService) SetApp(app *application.App) {
+	if app == nil {
+		return
+	}
 	us.app = app
 }
 
@@ -369,6 +390,7 @@ func (us *UpdateService) RequestRestart() error {
 		TargetVersion: targetInfo.Version,
 		Method:        method,
 		FilePath:      downloadState.TempFilePath,
+		ArchivePath:   downloadState.ArchivePath,
 		FileSHA256:    downloadState.ExpectedSHA256,
 		StartedAt:     time.Now(),
 	}
@@ -674,8 +696,10 @@ func (us *UpdateService) doDownload(ctx context.Context, info *UpdateInfo) {
 		}
 	}
 
-	// HEAD 请求获取 ETag/Last-Modified
-	headReq, err := http.NewRequestWithContext(ctx, "HEAD", info.DownloadURL, nil)
+	// HEAD 请求获取 ETag/Last-Modified（单独加超时，避免链路停滞时卡死）
+	headCtx, headCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer headCancel()
+	headReq, err := http.NewRequestWithContext(headCtx, "HEAD", info.DownloadURL, nil)
 	if err != nil {
 		us.setDownloadError(fmt.Sprintf("failed to create HEAD request: %v", err))
 		return
@@ -714,8 +738,19 @@ func (us *UpdateService) doDownload(ctx context.Context, info *UpdateInfo) {
 	// 保存下载状态
 	us.saveDownloadState(stateFile, dlState)
 
+	// 读进度看门狗：超过 downloadStallTimeout 未收到数据则取消请求，
+	// 避免永久卡在 downloading；中断后走既有续传保存逻辑，可重试续传
+	dlCtx, dlCancel := context.WithCancel(ctx)
+	defer dlCancel()
+	var stalled atomic.Bool
+	watchdog := time.AfterFunc(downloadStallTimeout, func() {
+		stalled.Store(true)
+		dlCancel()
+	})
+	defer watchdog.Stop()
+
 	// 发起下载请求
-	req, err := http.NewRequestWithContext(ctx, "GET", info.DownloadURL, nil)
+	req, err := http.NewRequestWithContext(dlCtx, "GET", info.DownloadURL, nil)
 	if err != nil {
 		us.setDownloadError(fmt.Sprintf("failed to create GET request: %v", err))
 		return
@@ -734,6 +769,10 @@ func (us *UpdateService) doDownload(ctx context.Context, info *UpdateInfo) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		if stalled.Load() {
+			us.setDownloadError(fmt.Sprintf("download stalled: no data received within %s", downloadStallTimeout))
+			return
+		}
 		us.setDownloadError(fmt.Sprintf("download request failed: %v", err))
 		return
 	}
@@ -820,12 +859,22 @@ func (us *UpdateService) doDownload(ctx context.Context, info *UpdateInfo) {
 
 			// 发送进度事件（节流）
 			us.emitProgressThrottled(downloaded, info.Size)
+
+			// 收到数据，重置停滞看门狗
+			watchdog.Reset(downloadStallTimeout)
 		}
 
 		if readErr == io.EOF {
 			break
 		}
 		if readErr != nil {
+			// 看门狗触发的停滞中断：保存续传状态并置为 error（errorOp=download 允许重试续传）
+			if stalled.Load() {
+				dlState.DownloadedBytes = us.downloadedBytes
+				us.saveDownloadState(stateFile, dlState)
+				us.setDownloadError(fmt.Sprintf("download stalled: no data received within %s", downloadStallTimeout))
+				return
+			}
 			// P0: 检查是否是取消导致的错误，不要误报为 error
 			if ctx.Err() != nil {
 				// 下载被取消，保存续传状态后正常返回
@@ -872,6 +921,7 @@ func (us *UpdateService) verifyAndFinalize(tempPath, finalPath string, info *Upd
 	}
 
 	// 如果是 macOS 的 zip 文件，解压
+	archivePath := ""
 	if runtime.GOOS == "darwin" && strings.HasSuffix(finalPath, ".zip") {
 		extractDir := filepath.Join(us.dataDir, "downloads", "extracted")
 		if err := unzip(finalPath, extractDir); err != nil {
@@ -882,6 +932,8 @@ func (us *UpdateService) verifyAndFinalize(tempPath, finalPath string, info *Upd
 		entries, _ := os.ReadDir(extractDir)
 		for _, entry := range entries {
 			if strings.HasSuffix(entry.Name(), ".app") {
+				// 记录原 zip 路径：.app 是目录无法整体计算 SHA，恢复校验时对 zip 计算
+				archivePath = finalPath
 				finalPath = filepath.Join(extractDir, entry.Name())
 				break
 			}
@@ -891,6 +943,7 @@ func (us *UpdateService) verifyAndFinalize(tempPath, finalPath string, info *Upd
 	// 更新状态
 	us.mu.Lock()
 	us.downloadState.TempFilePath = finalPath
+	us.downloadState.ArchivePath = archivePath
 	us.downloadState.DownloadedBytes = us.downloadedBytes
 	us.state = StateReady
 	us.mu.Unlock()
@@ -935,9 +988,7 @@ func (us *UpdateService) launchUpdater(pending *PendingApply) error {
 // launchWindowsUpdater Windows 更新器
 func (us *UpdateService) launchWindowsUpdater(pending *PendingApply) error {
 	if pending.Method == "installer" {
-		// 安装版：直接运行 installer
-		cmd := exec.Command(pending.FilePath, "/S") // NSIS 静默安装
-		return cmd.Start()
+		return us.launchWindowsInstaller(pending)
 	}
 
 	// 便携版：使用 PowerShell 脚本
@@ -1013,6 +1064,69 @@ Remove-Item $newExe -Force -ErrorAction SilentlyContinue
 `, psSingleQuote(exePath), psSingleQuote(pending.FilePath), pid)
 
 	scriptPath := filepath.Join(us.dataDir, "update.ps1")
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-ExecutionPolicy", "Bypass",
+		"-File", scriptPath,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Start()
+}
+
+// launchWindowsInstaller Windows 安装版更新器
+// 安装器带 requireAdministrator manifest，应用自身以 asInvoker 运行时直接 CreateProcess
+// 会报 740（需要提权），必须经 ShellExecute 的 runas 动词触发 UAC；
+// 同时需等旧进程退出后再安装（避免覆盖占用中的 exe），装完重新拉起应用
+func (us *UpdateService) launchWindowsInstaller(pending *PendingApply) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	pid := os.Getpid()
+	script := fmt.Sprintf(`
+$ErrorActionPreference = 'Stop'
+$installer = %s
+$appExe = %s
+$targetPid = %d
+$maxWait = 60
+
+# 等待旧进程退出
+$waited = 0
+while ($waited -lt $maxWait) {
+    try {
+        $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
+        if (-not $proc) { break }
+    } catch { break }
+    Start-Sleep -Milliseconds 500
+    $waited += 0.5
+}
+
+if ($waited -ge $maxWait) {
+    Write-Error "Timeout waiting for process to exit"
+    exit 1
+}
+
+# runas 触发 UAC 提权静默安装并等待完成；用户拒绝 UAC 时抛错退出，
+# pending 标记保留，下次启动经校验恢复 ready 状态
+$proc = Start-Process -FilePath $installer -ArgumentList '/S' -Verb RunAs -Wait -PassThru
+if ($proc -and $null -ne $proc.ExitCode -and $proc.ExitCode -ne 0) {
+    Write-Error "Installer exited with code $($proc.ExitCode)"
+    exit 1
+}
+
+# 安装完成后重新启动应用
+Start-Process -FilePath $appExe -WorkingDirectory (Split-Path $appExe)
+`, psSingleQuote(pending.FilePath), psSingleQuote(exePath), pid)
+
+	scriptPath := filepath.Join(us.dataDir, "update_installer.ps1")
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
 		return err
 	}
@@ -1109,17 +1223,26 @@ func psSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// shSingleQuote 生成 POSIX shell 单引号字面量（'\'' 转义内嵌单引号）。
+// shSingleQuote 生成 POSIX shell 单引号字面量，内嵌单引号用 '\'' 序列转义。
 func shSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // launchLinuxUpdater Linux 更新器
 func (us *UpdateService) launchLinuxUpdater(pending *PendingApply) error {
-	// AppImage 更新
-	exePath, err := os.Executable()
-	if err != nil {
-		return err
+	// AppImage 运行时 os.Executable() 指向只读 FUSE 挂载内的二进制（应用退出后挂载即消失），
+	// 真实的 .AppImage 文件路径在 APPIMAGE 环境变量里，替换目标必须用它
+	exePath := os.Getenv("APPIMAGE")
+	if exePath == "" {
+		var err error
+		exePath, err = os.Executable()
+		if err != nil {
+			return err
+		}
+		// 非 AppImage 形态（如 deb/rpm 装到系统目录）目标不可写时无法自替换，报错提示手动升级
+		if !us.canWriteToDir(filepath.Dir(exePath)) {
+			return fmt.Errorf("cannot self-update: %s is not writable, please update manually", exePath)
+		}
 	}
 
 	pid := os.Getpid()
@@ -1189,9 +1312,9 @@ func (us *UpdateService) checkPendingApply() {
 
 	// 检查是否更新成功
 	if us.isNewerOrEqualVersion(pending.TargetVersion) {
-		// 更新成功，清理
+		// 更新成功，清理（darwin 下 FilePath 可能是 .app 目录，需 RemoveAll）
 		os.Remove(pendingPath)
-		os.Remove(pending.FilePath)
+		os.RemoveAll(pending.FilePath)
 
 		// 清理下载目录
 		downloadsDir := filepath.Join(us.dataDir, "downloads")
@@ -1204,11 +1327,17 @@ func (us *UpdateService) checkPendingApply() {
 	if pending.FilePath != "" {
 		if _, err := os.Stat(pending.FilePath); err == nil {
 			if pending.FileSHA256 != "" {
-				hash, _ := computeSHA256(pending.FilePath)
+				// darwin 下 FilePath 是解压出的 .app 目录，SHA 校验对原 zip 进行
+				hashTarget := pending.FilePath
+				if pending.ArchivePath != "" {
+					hashTarget = pending.ArchivePath
+				}
+				hash, _ := computeSHA256(hashTarget)
 				if strings.EqualFold(hash, pending.FileSHA256) {
 					us.state = StateReady
 					us.downloadState = &DownloadState{
 						TempFilePath:   pending.FilePath,
+						ArchivePath:    pending.ArchivePath,
 						ExpectedSHA256: pending.FileSHA256,
 					}
 					us.targetInfo = &UpdateInfo{
@@ -1220,9 +1349,12 @@ func (us *UpdateService) checkPendingApply() {
 		}
 	}
 
-	// 文件不存在或校验失败，清理并回到 idle
+	// 文件不存在或校验失败，清理并回到 idle（darwin 下 FilePath 可能是 .app 目录）
 	os.Remove(pendingPath)
-	os.Remove(pending.FilePath)
+	os.RemoveAll(pending.FilePath)
+	if pending.ArchivePath != "" {
+		os.Remove(pending.ArchivePath)
+	}
 }
 
 // ==================== 辅助方法 ====================
@@ -1236,8 +1368,10 @@ func (us *UpdateService) detectPolicy() UpdatePolicy {
 
 // detectPolicyLocked 检测更新策略（需持有锁）
 func (us *UpdateService) detectPolicyLocked() UpdatePolicy {
-	// 可以通过构建时注入 UpdatePolicy 变量来覆盖
-	// 这里实现运行时检测
+	// 构建时注入的 UpdatePolicy（经构造函数透传）优先于运行时检测
+	if us.forcedPolicy != "" {
+		return us.forcedPolicy
+	}
 
 	exePath, err := os.Executable()
 	if err != nil {

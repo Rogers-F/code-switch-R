@@ -1143,11 +1143,10 @@ const handleDirectApply = async (card: AutomationCard) => {
     } else if (tab === 'codex') {
       await Call.ByName('codeswitch/services.CodexSettingsService.ApplySingleProvider', card.id)
     } else if (tab === 'gemini') {
-      // Gemini 使用字符串 ID，需要从 cache 中找到原始 provider
-      const index = cards.gemini.findIndex(c => c.id === card.id)
-      if (index === -1 || !geminiProvidersCache.value[index]) return
-      const realId = geminiProvidersCache.value[index].id
-      await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', realId)
+      // Gemini 使用字符串 ID，需要按名称从 cache 中找到原始 provider（卡片列表已重排序，下标不可靠）
+      const original = findGeminiProviderByName(card.name)
+      if (!original) return
+      await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', original.id)
     }
     await refreshDirectAppliedStatus(tab)
     showToast(t('components.main.directApply.success', { name: card.name }), 'success')
@@ -1162,9 +1161,9 @@ const isDirectApplied = (card: AutomationCard) => {
   if (appliedId === null) return false
 
   if (activeTab.value === 'gemini') {
-    const index = cards.gemini.findIndex(c => c.id === card.id)
-    if (index === -1 || !geminiProvidersCache.value[index]) return false
-    return geminiProvidersCache.value[index].id === appliedId
+    const original = findGeminiProviderByName(card.name)
+    if (!original) return false
+    return original.id === appliedId
   }
   return card.id === appliedId
 }
@@ -1560,6 +1559,11 @@ const getCustomProviderKind = (toolId: string): string => `custom:${toolId}`
 // 存储 Gemini 原始数据，用于转换回去
 const geminiProvidersCache = ref<GeminiProvider[]>([])
 
+// cards.gemini 会按启用状态/Level 重新排序，与后端顺序的缓存下标不再一一对应，
+// 统一按名称在缓存中定位原始 provider（persistProviders 也以 name 作为唯一标识）
+const findGeminiProviderByName = (name: string) =>
+  geminiProvidersCache.value.find(p => p.name === name)
+
 const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; error?: string }> => {
   try {
     if (tabId === 'others') {
@@ -1597,6 +1601,7 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
             apiKey: card.apiKey,
             websiteUrl: card.officialSite,
             enabled: card.enabled,
+            level: card.level || 1,
           }
           await AddGeminiProvider(newProvider)
         }
@@ -1702,6 +1707,8 @@ const loadCustomCliProviders = async (toolId: string) => {
   try {
     const kind = getCustomProviderKind(toolId)
     const saved = await LoadProviders(kind)
+    // 等待期间用户可能已切换工具:丢弃过期响应,避免把上一个工具的列表写入当前工具后被误保存
+    if (toolId !== selectedToolId.value) return
     if (Array.isArray(saved)) {
       cards.others.splice(0, cards.others.length, ...createAutomationCards(saved as AutomationCard[]))
       sortProvidersByLevel(cards.others)
@@ -1711,6 +1718,7 @@ const loadCustomCliProviders = async (toolId: string) => {
     }
   } catch (error) {
     console.error(`Failed to load providers for tool ${toolId}`, error)
+    if (toolId !== selectedToolId.value) return
     cards.others.splice(0, cards.others.length)
   }
 }
@@ -1776,9 +1784,18 @@ const refreshProxyState = async (tab: ProviderTab) => {
   }
 }
 
-const onProxyToggle = async () => {
+const onProxyToggle = async (event?: Event) => {
   const tab = activeTab.value
-  if (proxyBusy[tab]) return
+  // 原生 checkbox 点击后 DOM 已翻转,而失败时 proxyStates 不变、Vue 不会重新 patch,
+  // 需要手动把 DOM 状态拉回真实状态,避免"显示已开启、实际未生效"
+  const input = event?.target instanceof HTMLInputElement ? event.target : null
+  const syncCheckbox = () => {
+    if (input) input.checked = proxyStates[tab]
+  }
+  if (proxyBusy[tab]) {
+    syncCheckbox()
+    return
+  }
   proxyBusy[tab] = true
   const nextState = !proxyStates[tab]
   try {
@@ -1810,8 +1827,10 @@ const onProxyToggle = async () => {
     proxyStates[tab] = nextState
   } catch (error) {
     console.error(`Failed to toggle proxy for ${tab}`, error)
+    showToast(t('components.main.relayToggle.toggleFailed') + ': ' + extractErrorMessage(error), 'error')
   } finally {
     proxyBusy[tab] = false
+    syncCheckbox()
   }
 }
 
@@ -2333,13 +2352,24 @@ const handleTestConnectivity = async () => {
 
   try {
     const platform = modalState.tabId
+    // connectivityTestModel / connectivityTestEndpoint 是已废弃字段：表单里没有任何输入绑定，
+    // 保存时后端还会把它们清零，恒为空串。真正的用户配置在可用性高级配置与 API 端点里，
+    // 这里必须按同一优先级取值，否则自定义端点的供应商永远被测到默认端点上、必然误报失败。
+    const testModel = modalState.form.availabilityConfig?.testModel?.trim()
+      || modalState.form.connectivityTestModel
+      || ''
+    const testEndpoint = modalState.form.availabilityConfig?.testEndpoint?.trim()
+      || modalState.form.connectivityTestEndpoint
+      || modalState.form.apiEndpoint?.trim()
+      || getDefaultEndpoint(platform)
+
     const result = await Call.ByName(
       'codeswitch/services.ConnectivityTestService.TestProviderManual',
       platform,
       modalState.form.apiUrl,
       modalState.form.apiKey,
-      modalState.form.connectivityTestModel || '',
-      modalState.form.connectivityTestEndpoint || getDefaultEndpoint(platform),
+      testModel,
+      testEndpoint,
       resolveEffectiveAuthType()
     )
 
@@ -2652,7 +2682,12 @@ const submitModal = async (): Promise<boolean> => {
 
   if (editingCard.value) {
     // 若 name 发生变化,先走独立 RenameProvider RPC(后端事务改名 request_log/blacklist/health_check_history 并写 48h alias)。
-    // Gemini 不走此路径(它的 persistProviders 通过 delete+add 处理改名)。
+    // Gemini 不走此路径:改名时同步更新缓存中的名称,让 persistProviders 按新名称匹配到原始 provider,
+    // 走 UpdateProvider 而非 delete+add,避免预设写入的 envConfig/model/category 等字段被丢弃。
+    if (modalState.tabId === 'gemini' && name && name !== editingCard.value.name) {
+      const cached = findGeminiProviderByName(editingCard.value.name)
+      if (cached) cached.name = name
+    }
     if (name && name !== editingCard.value.name && modalState.tabId !== 'gemini') {
       // others tab 需要 custom:{toolId} 格式，与 persistProviders 逻辑保持一致
       let renameKind: string
@@ -2759,6 +2794,7 @@ const submitModal = async (): Promise<boolean> => {
   }
 
   // 保存 CLI 配置（仅支持 claude/codex/gemini 平台）
+  let cliConfigSaved = true
   const cliConfig = modalState.form.cliConfig
   const supportedPlatforms: CLIPlatform[] = ['claude', 'codex', 'gemini']
   if (cliConfig && Object.keys(cliConfig).length > 0 && supportedPlatforms.includes(modalState.tabId as CLIPlatform)) {
@@ -2766,6 +2802,9 @@ const submitModal = async (): Promise<boolean> => {
       await saveCLIConfig(modalState.tabId as CLIPlatform, cliConfig)
     } catch (error) {
       console.error('保存 CLI 配置失败:', error)
+      // 供应商配置已保存,但 CLI 配置写入失败:明确提示用户,并让"保存并应用"流程中止,避免成功 toast 掩盖失败
+      cliConfigSaved = false
+      showToast(t('components.main.form.cliConfigSaveFailed') + ': ' + extractErrorMessage(error), 'error')
     }
   }
 
@@ -2773,7 +2812,7 @@ const submitModal = async (): Promise<boolean> => {
 
   // 通知可用性页面刷新
   window.dispatchEvent(new CustomEvent('providers-updated'))
-  return true
+  return cliConfigSaved
 }
 
 // 保存并应用：先保存供应商配置，再直连应用到 CLI
@@ -2801,11 +2840,10 @@ const submitAndApplyModal = async () => {
     } else if (tabId === 'codex') {
       await Call.ByName('codeswitch/services.CodexSettingsService.ApplySingleProvider', editingId)
     } else if (tabId === 'gemini') {
-      // Gemini 使用字符串 ID，需要从 cache 中找到原始 provider
-      const index = cards.gemini.findIndex(c => c.id === editingId)
-      if (index !== -1 && geminiProvidersCache.value[index]) {
-        const realId = geminiProvidersCache.value[index].id
-        await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', realId)
+      // Gemini 使用字符串 ID，需要按名称从 cache 中找到原始 provider（卡片列表已重排序，下标不可靠）
+      const original = findGeminiProviderByName(editingCard.name)
+      if (original) {
+        await Call.ByName('codeswitch/services.GeminiService.ApplySingleProvider', original.id)
       }
     }
     await refreshDirectAppliedStatus(tabId)
@@ -2825,8 +2863,12 @@ const remove = async (id: number, tabId: ProviderTab = activeTab.value) => {
   if (!list) return
   const index = list.findIndex((card) => card.id === id)
   if (index > -1) {
-    list.splice(index, 1)
-    await persistProviders(tabId)
+    const [removed] = list.splice(index, 1)
+    const saveResult = await persistProviders(tabId)
+    if (!saveResult.ok) {
+      // 保存失败时把被删卡片放回原位，避免界面与磁盘状态分叉（与新建路径的失败回滚保持一致）
+      list.splice(Math.min(index, list.length), 0, removed)
+    }
   }
 }
 
@@ -2842,14 +2884,14 @@ const handleDuplicate = async (card: AutomationCard) => {
     const tab = activeTab.value
 
     if (tab === 'gemini') {
-      // Gemini 使用字符串 ID，需要从 cache 中找到原始 provider
-      const index = cards.gemini.findIndex(c => c.id === card.id)
-      if (index === -1 || !geminiProvidersCache.value[index]) {
+      // Gemini 使用字符串 ID，需要按名称从 cache 中找到原始 provider（卡片列表已重排序，下标不可靠）
+      const originalProvider = findGeminiProviderByName(card.name)
+      if (!originalProvider) {
         console.error('[Duplicate] 未找到 Gemini provider')
+        showToast(t('components.main.controls.duplicateFailed'), 'error')
         return
       }
 
-      const originalProvider = geminiProvidersCache.value[index]
       // 调用 Gemini 的 DuplicateProvider API（字符串 ID）
       const newProvider = await Call.ByName(
         'codeswitch/services.GeminiService.DuplicateProvider',
@@ -2858,6 +2900,7 @@ const handleDuplicate = async (card: AutomationCard) => {
 
       if (!newProvider) {
         console.warn('[Duplicate] DuplicateProvider 返回空结果，已跳过刷新')
+        showToast(t('components.main.controls.duplicateFailed'), 'error')
         return
       }
 
@@ -2867,6 +2910,7 @@ const handleDuplicate = async (card: AutomationCard) => {
       const newProvider = await DuplicateProvider(tab, card.id)
       if (!newProvider) {
         console.warn('[Duplicate] DuplicateProvider 返回空结果，已跳过刷新')
+        showToast(t('components.main.controls.duplicateFailed'), 'error')
         return
       }
       console.log(`[Duplicate] Provider "${card.name}" duplicated as "${newProvider.name}"`)
@@ -2876,6 +2920,7 @@ const handleDuplicate = async (card: AutomationCard) => {
     await loadProvidersFromDisk()
   } catch (error) {
     console.error('[Duplicate] Failed to duplicate provider:', error)
+    showToast(t('components.main.controls.duplicateFailed') + ': ' + extractErrorMessage(error), 'error')
   }
 }
 

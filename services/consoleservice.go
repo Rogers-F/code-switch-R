@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,7 @@ type ConsoleService struct {
 	writer       *consoleWriter
 	oldStdout    *os.File
 	oldStderr    *os.File
-	pauseLogging bool // 暂停日志捕获标志
+	pauseLogging atomic.Bool // 暂停日志捕获标志(原子读写,避免与 readPipe/addLog 的并发访问产生数据竞争)
 }
 
 // consoleWriter 自定义 writer，同时写入控制台和缓存
@@ -102,7 +103,7 @@ func (cs *ConsoleService) readPipe(reader *os.File, level string, output *os.Fil
 // addLog 添加日志到缓存
 func (cs *ConsoleService) addLog(level, message string) {
 	// 如果暂停日志捕获，直接返回
-	if cs.pauseLogging {
+	if cs.pauseLogging.Load() {
 		return
 	}
 
@@ -112,7 +113,6 @@ func (cs *ConsoleService) addLog(level, message string) {
 	}
 
 	cs.mutex.Lock()
-	defer cs.mutex.Unlock()
 
 	log := ConsoleLog{
 		Timestamp: time.Now(),
@@ -128,11 +128,20 @@ func (cs *ConsoleService) addLog(level, message string) {
 	}
 
 	// 清理3天前的日志
-	cs.cleanOldLogs()
+	cleaned := cs.cleanOldLogs()
+	cs.mutex.Unlock()
+
+	// 清理提示打印移出临界区，且直接写向原始 stdout：
+	// 若仍在持锁期间写向被本服务劫持的 os.Stdout 管道，一旦管道缓冲写满，
+	// 而唯一能读走管道数据的 readPipe 又需要抢同一把锁才能继续消费，
+	// 两边就会互相等待形成死锁，挂死整个应用的日志输出
+	if cleaned > 0 {
+		fmt.Fprintf(cs.oldStdout, "[ConsoleService] 清理了 %d 条超过3天的日志\n", cleaned)
+	}
 }
 
-// cleanOldLogs 清理3天前的日志
-func (cs *ConsoleService) cleanOldLogs() {
+// cleanOldLogs 清理3天前的日志，返回被清理的条数；调用者需已持有 cs.mutex
+func (cs *ConsoleService) cleanOldLogs() int {
 	// 无需加锁，因为调用者 addLog 已经加锁
 	threeDaysAgo := time.Now().Add(-72 * time.Hour)
 
@@ -148,15 +157,15 @@ func (cs *ConsoleService) cleanOldLogs() {
 	// 如果有旧日志需要清理
 	if cutoffIndex > 0 {
 		cs.logs = cs.logs[cutoffIndex:]
-		fmt.Printf("[ConsoleService] 清理了 %d 条超过3天的日志\n", cutoffIndex)
 	}
+	return cutoffIndex
 }
 
 // GetLogs 获取所有日志
 func (cs *ConsoleService) GetLogs() []ConsoleLog {
 	// 暂停日志捕获，避免 GetLogs 本身产生的日志被记录（导致递归）
-	cs.pauseLogging = true
-	defer func() { cs.pauseLogging = false }()
+	cs.pauseLogging.Store(true)
+	defer cs.pauseLogging.Store(false)
 
 	cs.mutex.RLock()
 	defer cs.mutex.RUnlock()
@@ -170,8 +179,8 @@ func (cs *ConsoleService) GetLogs() []ConsoleLog {
 // GetRecentLogs 获取最近 N 条日志
 func (cs *ConsoleService) GetRecentLogs(count int) []ConsoleLog {
 	// 暂停日志捕获，避免递归
-	cs.pauseLogging = true
-	defer func() { cs.pauseLogging = false }()
+	cs.pauseLogging.Store(true)
+	defer cs.pauseLogging.Store(false)
 
 	cs.mutex.RLock()
 	defer cs.mutex.RUnlock()
@@ -193,8 +202,8 @@ func (cs *ConsoleService) GetRecentLogs(count int) []ConsoleLog {
 // ClearLogs 清空日志
 func (cs *ConsoleService) ClearLogs() {
 	// 暂停日志捕获，避免递归
-	cs.pauseLogging = true
-	defer func() { cs.pauseLogging = false }()
+	cs.pauseLogging.Store(true)
+	defer cs.pauseLogging.Store(false)
 
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()

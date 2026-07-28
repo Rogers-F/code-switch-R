@@ -345,6 +345,8 @@ const refreshAll = async () => {
   try {
     const settings = await fetchAppSettings()
     await Promise.all(cards.map((card) => card.refresh(settings)))
+  } catch (error) {
+    console.error('failed to refresh tray data', error)
   } finally {
     refreshBusy = false
     updateAllDerivedLabels()

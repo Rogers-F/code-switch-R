@@ -530,7 +530,7 @@ func TestProviderLevelGrouping(t *testing.T) {
 			name: "默认 Level（未设置）",
 			providers: []Provider{
 				{ID: 1, Name: "Provider-A", Level: 0}, // 0 应默认为 1
-				{ID: 2, Name: "Provider-B"},            // 未设置应默认为 1
+				{ID: 2, Name: "Provider-B"},           // 未设置应默认为 1
 			},
 			expected: map[int][]string{
 				1: {"Provider-A", "Provider-B"},
@@ -738,19 +738,18 @@ func findSubstring(s, substr string) bool {
 
 // ==================== 供应商复制测试 ====================
 
+// TestDuplicateProvider 调用真实的 ProviderService.DuplicateProvider,
+// 在隔离的 HOME(含 USERPROFILE)+ 独立 DB 环境下验证副本命名/禁用态/Level 继承/map 复制与落盘。
 func TestDuplicateProvider(t *testing.T) {
-	// 注意：此测试依赖真实文件系统，仅用于开发验证
-	// 生产环境应使用 mock 或依赖注入
-
 	tests := []struct {
 		name        string
-		original    Provider
+		source      Provider
 		expectName  string
 		expectLevel int
 	}{
 		{
 			name: "复制基础供应商",
-			original: Provider{
+			source: Provider{
 				ID:      1,
 				Name:    "Test Provider",
 				APIURL:  "https://api.example.com",
@@ -763,7 +762,7 @@ func TestDuplicateProvider(t *testing.T) {
 		},
 		{
 			name: "复制带模型映射的供应商",
-			original: Provider{
+			source: Provider{
 				ID:      10,
 				Name:    "OpenRouter",
 				APIURL:  "https://openrouter.ai/api",
@@ -786,29 +785,13 @@ func TestDuplicateProvider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 验证复制后的属性
-			cloned := Provider{
-				ID:      tt.original.ID + 1,
-				Name:    tt.original.Name + " (副本)",
-				APIURL:  tt.original.APIURL,
-				APIKey:  tt.original.APIKey,
-				Enabled: false, // 复制后默认禁用
-				Level:   tt.original.Level,
-			}
+			setupRenameTestEnv(t)
+			ps := NewProviderService()
+			saveProviderFixture(t, ps, []Provider{tt.source})
 
-			// 深拷贝 map
-			if tt.original.SupportedModels != nil {
-				cloned.SupportedModels = make(map[string]bool, len(tt.original.SupportedModels))
-				for k, v := range tt.original.SupportedModels {
-					cloned.SupportedModels[k] = v
-				}
-			}
-
-			if tt.original.ModelMapping != nil {
-				cloned.ModelMapping = make(map[string]string, len(tt.original.ModelMapping))
-				for k, v := range tt.original.ModelMapping {
-					cloned.ModelMapping[k] = v
-				}
+			cloned, err := ps.DuplicateProvider("claude", tt.source.ID)
+			if err != nil {
+				t.Fatalf("DuplicateProvider 失败: %v", err)
 			}
 
 			// 验证名称
@@ -821,25 +804,86 @@ func TestDuplicateProvider(t *testing.T) {
 				t.Errorf("期望复制后默认禁用，但实际启用了")
 			}
 
-			// 验证 Level
+			// 验证 Level 继承
 			if cloned.Level != tt.expectLevel {
 				t.Errorf("期望 Level %d，实际 %d", tt.expectLevel, cloned.Level)
 			}
 
-			// 验证深拷贝（修改副本不影响原件）
-			if tt.original.SupportedModels != nil {
-				cloned.SupportedModels["test-model"] = true
-				if _, exists := tt.original.SupportedModels["test-model"]; exists {
-					t.Errorf("深拷贝失败：修改副本影响了原件的 SupportedModels")
+			// 验证新 ID 为当前最大 ID + 1
+			if cloned.ID != tt.source.ID+1 {
+				t.Errorf("期望新 ID %d，实际 %d", tt.source.ID+1, cloned.ID)
+			}
+
+			// 验证基础字段复制
+			if cloned.APIURL != tt.source.APIURL || cloned.APIKey != tt.source.APIKey {
+				t.Errorf("APIURL/APIKey 应与源一致，实际 %q/%q", cloned.APIURL, cloned.APIKey)
+			}
+
+			// 验证 map 内容完整复制
+			if len(cloned.SupportedModels) != len(tt.source.SupportedModels) {
+				t.Errorf("SupportedModels 数量不匹配：实际 %d，期望 %d",
+					len(cloned.SupportedModels), len(tt.source.SupportedModels))
+			}
+			for k, v := range tt.source.SupportedModels {
+				if cloned.SupportedModels[k] != v {
+					t.Errorf("SupportedModels[%q] 应为 %v", k, v)
+				}
+			}
+			if len(cloned.ModelMapping) != len(tt.source.ModelMapping) {
+				t.Errorf("ModelMapping 数量不匹配：实际 %d，期望 %d",
+					len(cloned.ModelMapping), len(tt.source.ModelMapping))
+			}
+			for k, v := range tt.source.ModelMapping {
+				if cloned.ModelMapping[k] != v {
+					t.Errorf("ModelMapping[%q] 应为 %q，实际 %q", k, v, cloned.ModelMapping[k])
 				}
 			}
 
-			if tt.original.ModelMapping != nil {
-				cloned.ModelMapping["test-key"] = "test-value"
-				if _, exists := tt.original.ModelMapping["test-key"]; exists {
-					t.Errorf("深拷贝失败：修改副本影响了原件的 ModelMapping")
+			// 验证副本已落盘且源供应商未被改动
+			providers, err := ps.LoadProviders("claude")
+			if err != nil {
+				t.Fatalf("LoadProviders 失败: %v", err)
+			}
+			if len(providers) != 2 {
+				t.Fatalf("落盘后应有 2 个供应商，实际 %d", len(providers))
+			}
+			var diskSource, diskClone *Provider
+			for i := range providers {
+				switch providers[i].ID {
+				case tt.source.ID:
+					diskSource = &providers[i]
+				case cloned.ID:
+					diskClone = &providers[i]
 				}
 			}
+			if diskSource == nil || diskClone == nil {
+				t.Fatalf("落盘数据缺少源或副本: %+v", providers)
+			}
+			if diskSource.Name != tt.source.Name || !diskSource.Enabled || diskSource.Level != tt.source.Level {
+				t.Errorf("源供应商不应被修改，实际 %+v", diskSource)
+			}
+			if diskClone.Name != tt.expectName || diskClone.Enabled || diskClone.Level != tt.expectLevel {
+				t.Errorf("落盘副本字段不符，实际 %+v", diskClone)
+			}
 		})
+	}
+}
+
+// TestDuplicateProvider_NotFound 源 ID 不存在时应报错且不写入任何副本。
+func TestDuplicateProvider_NotFound(t *testing.T) {
+	setupRenameTestEnv(t)
+	ps := NewProviderService()
+	saveProviderFixture(t, ps, []Provider{{ID: 1, Name: "A", APIURL: "u"}})
+
+	if _, err := ps.DuplicateProvider("claude", 999); err == nil {
+		t.Fatal("源 ID 不存在应报错")
+	}
+
+	providers, err := ps.LoadProviders("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(providers) != 1 {
+		t.Errorf("失败时不应写入副本，实际 %d 个供应商", len(providers))
 	}
 }
