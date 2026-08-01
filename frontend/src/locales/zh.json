@@ -331,9 +331,10 @@
         "duplicateFailed": "复制供应商失败"
       },
       "importConfig": {
-        "tooltip": "导入 {providers} 个供应商 · {servers} 个 MCP 服务器",
-        "success": "已导入 {providers} 个供应商与 {servers} 个 MCP 服务器",
-        "empty": "cc-switch 中的供应商与 MCP 均已同步",
+        "tooltip": "导入 {providers} 个供应商 · {servers} 个 MCP 服务器 · {prompts} 个提示词",
+        "success": "已导入 {providers} 个供应商、{servers} 个 MCP 服务器与 {prompts} 个提示词（提示词默认未启用）",
+        "partial": "部分导入完成：{providers} 个供应商、{servers} 个 MCP、{prompts} 个提示词；失败原因：{error}",
+        "empty": "cc-switch 中的供应商、MCP 与提示词均已同步",
         "error": "导入 cc-switch 配置失败"
       },
       "firstRun": {
@@ -679,11 +680,12 @@
         "loading": "加载中...",
         "configFound": "已找到配置文件",
         "configNotFound": "未找到配置文件",
-        "pendingCount": "{providers} 个供应商，{mcp} 个 MCP",
+        "pendingCount": "{providers} 个供应商，{mcp} 个 MCP，{prompts} 个提示词",
         "action": "导入操作",
         "importBtn": "导入配置",
         "importing": "导入中...",
-        "success": "导入成功：{providers} 个供应商，{mcp} 个 MCP 服务器",
+        "success": "导入成功：{providers} 个供应商，{mcp} 个 MCP 服务器，{prompts} 个提示词（提示词默认未启用，可在提示词页手动启用）",
+        "partial": "部分导入完成：{providers} 个供应商，{mcp} 个 MCP，{prompts} 个提示词。失败原因：{error}",
         "nothingToImport": "没有需要导入的配置（可能已全部导入）",
         "failed": "导入失败",
         "fileNotFound": "配置文件不存在，请检查路径是否正确"

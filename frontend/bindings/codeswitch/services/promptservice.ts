@@ -52,6 +52,18 @@ export function ImportFromFile(platform: string): $CancellablePromise<string> {
 }
 
 /**
+ * ImportPrompts 批量导入提示词（batch 的键为平台 claude/codex/gemini）。
+ * 按 ID 与名称（不区分大小写）查重，全部强制 Enabled=false 后一次性落盘，
+ * 绝不改写 CLI 提示词文件。强制禁用的原因：标记 Enabled=true 但不写文件，
+ * 首次 GetPrompts 会用磁盘上的旧内容覆盖导入正文；写文件则导入动作会
+ * 静默覆盖用户当前 CLI 的全局提示词——两条路都不可接受。
+ * 保存失败时回滚内存状态。返回实际新增数量。
+ */
+export function ImportPrompts(batch: { [_ in string]?: $models.Prompt[] }): $CancellablePromise<number> {
+    return $Call.ByID(1587407428, batch);
+}
+
+/**
  * Start Wails生命周期方法
  */
 export function Start(): $CancellablePromise<void> {
@@ -63,6 +75,17 @@ export function Start(): $CancellablePromise<void> {
  */
 export function Stop(): $CancellablePromise<void> {
     return $Call.ByID(3274727284);
+}
+
+/**
+ * StoredPrompts 返回已保存的提示词快照（只读，不触发外部文件同步）。
+ * 供导入等后台流程查重使用：GetPrompts 的首次访问会把 CLI 提示词文件
+ * 内容回填进 Enabled 项并落盘，状态检查不应产生这种写入副作用。
+ */
+export function StoredPrompts(platform: string): $CancellablePromise<{ [_ in string]?: $models.Prompt }> {
+    return $Call.ByID(3989474382, platform).then(($result: any) => {
+        return $$createType1($result);
+    });
 }
 
 /**

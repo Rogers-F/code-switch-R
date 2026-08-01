@@ -1263,7 +1263,7 @@ let highlightTimer: number | undefined
 const showImportButton = computed(() => {
   const status = importStatus.value
   if (!status) return false
-  return status.config_exists && (status.pending_providers || status.pending_mcp)
+  return status.config_exists && (status.pending_providers || status.pending_mcp || status.pending_prompts)
 })
 
 const importButtonTooltip = computed(() => {
@@ -1277,6 +1277,7 @@ const importButtonTooltip = computed(() => {
   return t('components.main.importConfig.tooltip', {
     providers: status.pending_provider_count,
     servers: status.pending_mcp_count,
+    prompts: status.pending_prompt_count,
   })
 })
 
@@ -1508,6 +1509,10 @@ const cards = reactive<Record<ProviderTab, AutomationCard[]>>({
 })
 const draggingId = ref<number | null>(null)
 
+// 空对象转 undefined：避免把 {} 写进 gemini-providers.json（后端 omitempty 语义）
+const emptyRecordToUndefined = <T extends Record<string, any>>(obj?: T | null): T | undefined =>
+  obj && Object.keys(obj).length > 0 ? obj : undefined
+
 // Gemini Provider 到 AutomationCard 的转换
 const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard => ({
   id: 300 + index, // Gemini 使用 300+ 的 ID 范围
@@ -1521,6 +1526,9 @@ const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard =
   enabled: provider.enabled,
   level: provider.level || 1,
   insecureSkipVerify: provider.insecureSkipVerify ?? false,
+  // 模型白名单/映射：与 claude/codex 同一套编辑器与调度语义
+  supportedModels: (provider.supportedModels as Record<string, boolean> | undefined) || undefined,
+  modelMapping: (provider.modelMapping as Record<string, string> | undefined) || undefined,
   // 可用性监控配置（Gemini 暂不支持，使用默认值）
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
@@ -1537,6 +1545,8 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
   enabled: card.enabled,
   level: card.level || 1,
   insecureSkipVerify: card.insecureSkipVerify || undefined,
+  supportedModels: emptyRecordToUndefined(card.supportedModels),
+  modelMapping: emptyRecordToUndefined(card.modelMapping),
   // 注意：Gemini 不支持可用性监控配置，这些字段不会保存
 })
 
@@ -1617,6 +1627,8 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
             enabled: card.enabled,
             level: card.level || 1,
             insecureSkipVerify: card.insecureSkipVerify || undefined,
+            supportedModels: emptyRecordToUndefined(card.supportedModels),
+            modelMapping: emptyRecordToUndefined(card.modelMapping),
           }
           await AddGeminiProvider(newProvider)
         }
@@ -3018,14 +3030,28 @@ const handleImportClick = async () => {
     importStatus.value = result?.status ?? null
     const importedProviders = result?.imported_providers ?? 0
     const importedMCP = result?.imported_mcp ?? 0
+    const importedPrompts = result?.imported_prompts ?? 0
+    const stageErrors = result?.errors ?? []
     if (importedProviders > 0) {
       await loadProvidersFromDisk()
     }
-    if (importedProviders > 0 || importedMCP > 0) {
+    if (stageErrors.length > 0) {
+      // 部分成功：已完成阶段的计数照常展示，失败阶段明确提示
+      showToast(
+        t('components.main.importConfig.partial', {
+          providers: importedProviders,
+          servers: importedMCP,
+          prompts: importedPrompts,
+          error: stageErrors[0],
+        }),
+        'warning'
+      )
+    } else if (importedProviders > 0 || importedMCP > 0 || importedPrompts > 0) {
       showToast(
         t('components.main.importConfig.success', {
           providers: importedProviders,
           servers: importedMCP,
+          prompts: importedPrompts,
         })
       )
     } else if (result?.status?.config_exists) {

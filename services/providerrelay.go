@@ -619,6 +619,21 @@ func (prs *ProviderRelayService) validateConfig() []string {
 		}
 	}
 
+	// Gemini：同样在启动期暴露白名单/映射配置错误，
+	// 否则要等真实流量打到该 provider 才会在日志里刷出来
+	if prs.geminiService != nil {
+		for _, p := range prs.geminiService.GetProviders() {
+			if !p.Enabled {
+				continue
+			}
+			if errs := p.ValidateConfiguration(); len(errs) > 0 {
+				for _, errMsg := range errs {
+					warnings = append(warnings, fmt.Sprintf("[gemini/%s] %s", p.Name, errMsg))
+				}
+			}
+		}
+	}
+
 	return warnings
 }
 
@@ -2029,6 +2044,9 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 判断是否为流式请求
 		isStream := strings.Contains(endpoint, ":streamGenerateContent") || strings.Contains(query, "alt=sse")
 
+		// 从 endpoint 提取请求模型名（Gemini 的模型在 URL 路径而非请求体中）
+		requestedModel := extractGeminiModelFromEndpoint(endpoint)
+
 		// 加载 Gemini providers
 		providers := prs.geminiService.GetProviders()
 		if len(providers) == 0 {
@@ -2036,11 +2054,36 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			return
 		}
 
-		// 1. 过滤可用的 providers（启用 + BaseURL 配置 + 未被拉黑）
+		// 1. 过滤可用的 providers（启用 + BaseURL 配置 + 配置合法 + 支持请求模型 + 未被拉黑）
 		var activeProviders []GeminiProvider
+		skippedIncompatible := 0
 		for _, p := range providers {
 			if !p.Enabled || p.BaseURL == "" {
 				continue
+			}
+			// 配置验证：失败自动跳过（与 Claude/Codex 行为一致）
+			if errs := p.ValidateConfiguration(); len(errs) > 0 {
+				fmt.Printf("[Gemini] ⚠️ Provider %s 配置验证失败，已自动跳过: %v\n", p.Name, errs)
+				skippedIncompatible++
+				continue
+			}
+			if requestedModel != "" {
+				// 模型白名单过滤：不支持请求模型的 provider 直接跳过
+				if !p.IsModelSupported(requestedModel) {
+					fmt.Printf("[Gemini] ℹ️ Provider %s 不支持模型 %s，已跳过\n", p.Name, requestedModel)
+					skippedIncompatible++
+					continue
+				}
+				// 白名单非空时，最终转发的 effective model 必须仍在白名单内。
+				// 不能只在"映射改变了模型名"时才查——恒等通配符映射
+				// （gemini-* -> gemini-*）会让白名单外的模型原样通过初筛
+				if len(p.SupportedModels) > 0 {
+					if effective := p.GetEffectiveModel(requestedModel); !modelInWhitelist(p.SupportedModels, effective) {
+						fmt.Printf("[Gemini] ⚠️ Provider %s 映射结果 %s 不在白名单中，已跳过\n", p.Name, effective)
+						skippedIncompatible++
+						continue
+					}
+				}
 			}
 			// 检查黑名单
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted("gemini", p.Name); isBlacklisted {
@@ -2055,7 +2098,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}
 
 		if len(activeProviders) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no active gemini provider (all disabled or blacklisted)"})
+			if requestedModel != "" && skippedIncompatible > 0 {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedIncompatible),
+				})
+			} else {
+				c.JSON(http.StatusNotFound, gin.H{"error": "no active gemini provider (all disabled or blacklisted)"})
+			}
 			return
 		}
 
@@ -2157,6 +2206,17 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					requestLog.Provider = provider.Name
 					requestLog.Model = provider.Model
 
+					// 模型映射：Gemini 的模型在 URL 路径里，映射即按 provider 重写路径段。
+					// 必须用局部变量，绝不能改写外层 endpoint——否则 A 失败降级后
+					// B 会拿到 A 的映射结果
+					providerEndpoint := endpoint
+					if requestedModel != "" {
+						if effectiveModel := provider.GetEffectiveModel(requestedModel); effectiveModel != requestedModel {
+							providerEndpoint = rewriteGeminiModelInEndpoint(endpoint, requestedModel, effectiveModel)
+							fmt.Printf("[Gemini] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+						}
+					}
+
 					// 同 Provider 内重试循环
 					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
 						totalAttempts++
@@ -2170,7 +2230,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
 							provider.Name, level, retryCount+1, maxRetryPerProvider)
 
-						ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+						ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
 						if ok {
 							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
 							_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
@@ -2279,7 +2339,16 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				requestLog.Provider = provider.Name
 				requestLog.Model = provider.Model
 
-				ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, endpoint, bodyBytes, isStream, requestLog)
+				// 模型映射：按 provider 用局部变量重写路径段，绝不改写外层 endpoint
+				providerEndpoint := endpoint
+				if requestedModel != "" {
+					if effectiveModel := provider.GetEffectiveModel(requestedModel); effectiveModel != requestedModel {
+						providerEndpoint = rewriteGeminiModelInEndpoint(endpoint, requestedModel, effectiveModel)
+						fmt.Printf("[Gemini] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+					}
+				}
+
+				ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
 				if ok {
 					_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
 					// 记录最后使用的供应商
@@ -2335,30 +2404,64 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 	}
 }
 
+// geminiModelSpan 定位 endpoint 路径中 "models/<model>" 段里模型名的 [start,end) 下标。
+// 未找到返回 (-1,-1)。只认路径段边界（"/models/" 或串首 "models/"），
+// 避免 "notmodels/" 之类子串误匹配；查询串里的 "/models/" 不算路径；
+// 模型名终止于 ':'、'?'、'#' 或串尾。'/' 不作终止符——模型映射目标
+// 可以带斜杠（如 vendor/gemini-x），在 '/' 截断会让请求日志只记到 "vendor"。
+func geminiModelSpan(endpoint string) (int, int) {
+	pathEnd := len(endpoint)
+	if q := strings.IndexByte(endpoint, '?'); q >= 0 {
+		pathEnd = q
+	}
+	path := endpoint[:pathEnd]
+
+	var start int
+	if strings.HasPrefix(path, "models/") {
+		start = len("models/")
+	} else if idx := strings.Index(path, "/models/"); idx >= 0 {
+		start = idx + len("/models/")
+	} else {
+		return -1, -1
+	}
+
+	end := start
+	for end < pathEnd {
+		c := endpoint[end]
+		if c == ':' || c == '#' {
+			break
+		}
+		end++
+	}
+	if end == start {
+		return -1, -1
+	}
+	return start, end
+}
+
 // extractGeminiModelFromEndpoint 从 Gemini API endpoint 中提取模型名
 // 例如 "/v1beta/models/gemini-2.5-pro:generateContent?alt=sse" -> "gemini-2.5-pro"
 func extractGeminiModelFromEndpoint(endpoint string) string {
-	if endpoint == "" {
+	start, end := geminiModelSpan(endpoint)
+	if start == -1 {
 		return ""
 	}
-	// 移除查询参数
-	if qIdx := strings.Index(endpoint, "?"); qIdx >= 0 {
-		endpoint = endpoint[:qIdx]
+	return strings.TrimSpace(endpoint[start:end])
+}
+
+// rewriteGeminiModelInEndpoint 把 endpoint 路径中的模型名从 from 替换为 to。
+// Gemini 的模型在 URL 路径而非请求体里，模型映射只能改写路径段。
+// 仅当 models/ 段正好等于 from 时才替换，否则原样返回（与提取共用同一
+// 边界解析，提取成功即重写必然命中同一区间）。
+func rewriteGeminiModelInEndpoint(endpoint, from, to string) string {
+	if from == "" || to == "" || from == to {
+		return endpoint
 	}
-	// 查找 models/ 后面的部分
-	idx := strings.Index(endpoint, "models/")
-	if idx == -1 {
-		return ""
+	start, end := geminiModelSpan(endpoint)
+	if start == -1 || endpoint[start:end] != from {
+		return endpoint
 	}
-	rest := endpoint[idx+len("models/"):]
-	if rest == "" {
-		return ""
-	}
-	// 移除动作部分（如 :generateContent, :streamGenerateContent）
-	if colonIdx := strings.Index(rest, ":"); colonIdx >= 0 {
-		rest = rest[:colonIdx]
-	}
-	return strings.TrimSpace(rest)
+	return endpoint[:start] + to + endpoint[end:]
 }
 
 // forwardGeminiRequest 转发 Gemini 请求到指定 provider

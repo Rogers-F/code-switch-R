@@ -136,7 +136,7 @@ func main() {
 	skillService := services.NewSkillService()
 	promptService := services.NewPromptService()
 	envCheckService := services.NewEnvCheckService()
-	importService := services.NewImportService(providerService, mcpService)
+	importService := services.NewImportService(providerService, mcpService, geminiService, promptService)
 	deeplinkService := services.NewDeepLinkService(providerService)
 	speedTestService := services.NewSpeedTestService()
 	connectivityTestService := services.NewConnectivityTestService(providerService, blacklistService, settingsService, defaultModelPolicy)

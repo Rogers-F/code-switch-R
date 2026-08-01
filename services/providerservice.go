@@ -562,38 +562,39 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 	return cloned, nil
 }
 
-// IsModelSupported 检查 provider 是否支持指定的模型
-// 支持条件：1) 模型在 SupportedModels 中（精确或通配符匹配）
-//  2. 模型在 ModelMapping 的 key 中（精确或通配符匹配）
-func (p *Provider) IsModelSupported(modelName string) bool {
-	// 向后兼容：如果未配置白名单和映射，假设支持所有模型
-	if (p.SupportedModels == nil || len(p.SupportedModels) == 0) &&
-		(p.ModelMapping == nil || len(p.ModelMapping) == 0) {
+// modelInWhitelist 检查模型是否命中白名单（精确或通配符）。
+// 值为 false 的条目视为未声明，精确与通配符路径都不算命中。
+func modelInWhitelist(supported map[string]bool, modelName string) bool {
+	if supported[modelName] {
 		return true
 	}
-
-	// 场景 A：Provider 原生支持该模型（精确匹配）
-	if p.SupportedModels != nil && p.SupportedModels[modelName] {
-		return true
-	}
-
-	// 场景 A+：Provider 原生支持该模型（通配符匹配）
-	if p.SupportedModels != nil {
-		for supportedModel := range p.SupportedModels {
-			if matchWildcard(supportedModel, modelName) {
-				return true
-			}
-		}
-	}
-
-	// 场景 B：Provider 通过映射支持该模型（精确匹配）
-	if p.ModelMapping != nil {
-		if _, exists := p.ModelMapping[modelName]; exists {
+	for pattern, allowed := range supported {
+		if allowed && matchWildcard(pattern, modelName) {
 			return true
 		}
+	}
+	return false
+}
 
-		// 场景 B+：通过通配符映射支持
-		for pattern := range p.ModelMapping {
+// modelSupportedBy 判断白名单/映射组合是否支持指定模型。
+// Provider（claude/codex）与 GeminiProvider 共用这一份逻辑。
+func modelSupportedBy(supported map[string]bool, mapping map[string]string, modelName string) bool {
+	// 向后兼容：如果未配置白名单和映射，假设支持所有模型
+	if len(supported) == 0 && len(mapping) == 0 {
+		return true
+	}
+
+	// 场景 A：原生支持该模型（精确或通配符）
+	if modelInWhitelist(supported, modelName) {
+		return true
+	}
+
+	// 场景 B：通过映射支持该模型（精确或通配符）
+	if mapping != nil {
+		if _, exists := mapping[modelName]; exists {
+			return true
+		}
+		for pattern := range mapping {
 			if matchWildcard(pattern, modelName) {
 				return true
 			}
@@ -604,27 +605,50 @@ func (p *Provider) IsModelSupported(modelName string) bool {
 	return false
 }
 
-// GetEffectiveModel 获取实际应该使用的模型名
-// 如果存在映射（精确或通配符），返回映射后的模型名；否则返回原模型名
-func (p *Provider) GetEffectiveModel(requestedModel string) string {
-	if p.ModelMapping == nil || len(p.ModelMapping) == 0 {
+// effectiveModelFor 返回映射后的模型名；无命中映射时原样返回。
+// 精确映射优先；多条通配符同时命中时按"字面量最长优先，等长按字典序"
+// 确定性取胜——Go map 迭代序随机，不定序会让同一份配置在不同进程里
+// 把同一个请求改写成不同模型。
+func effectiveModelFor(mapping map[string]string, requestedModel string) string {
+	if len(mapping) == 0 {
 		return requestedModel
 	}
 
 	// 优先查找精确映射
-	if mappedModel, exists := p.ModelMapping[requestedModel]; exists {
+	if mappedModel, exists := mapping[requestedModel]; exists {
 		return mappedModel
 	}
 
-	// 查找通配符映射
-	for pattern, replacement := range p.ModelMapping {
-		if matchWildcard(pattern, requestedModel) {
-			return applyWildcardMapping(pattern, replacement, requestedModel)
+	// 通配符映射：收集所有命中项后确定性选择
+	bestPattern := ""
+	bestLiteral := -1
+	for pattern := range mapping {
+		if !matchWildcard(pattern, requestedModel) {
+			continue
+		}
+		literal := len(strings.ReplaceAll(pattern, "*", ""))
+		if literal > bestLiteral || (literal == bestLiteral && pattern < bestPattern) {
+			bestPattern = pattern
+			bestLiteral = literal
 		}
 	}
+	if bestPattern == "" {
+		return requestedModel
+	}
+	return applyWildcardMapping(bestPattern, mapping[bestPattern], requestedModel)
+}
 
-	// 无映射，返回原模型名
-	return requestedModel
+// IsModelSupported 检查 provider 是否支持指定的模型
+// 支持条件：1) 模型在 SupportedModels 中（精确或通配符匹配）
+//  2. 模型在 ModelMapping 的 key 中（精确或通配符匹配）
+func (p *Provider) IsModelSupported(modelName string) bool {
+	return modelSupportedBy(p.SupportedModels, p.ModelMapping, modelName)
+}
+
+// GetEffectiveModel 获取实际应该使用的模型名
+// 如果存在映射（精确或通配符），返回映射后的模型名；否则返回原模型名
+func (p *Provider) GetEffectiveModel(requestedModel string) string {
+	return effectiveModelFor(p.ModelMapping, requestedModel)
 }
 
 // GetEffectiveEndpoint 获取有效的 API 端点
@@ -697,49 +721,49 @@ func (p *Provider) ResolveUpstreamProtocol(effectiveEndpoint string) UpstreamPro
 	return protocol
 }
 
-// ValidateConfiguration 验证 provider 的模型配置
-// 返回验证错误列表（空则表示验证通过）
-func (p *Provider) ValidateConfiguration() []string {
+// validateModelConfig 校验白名单/映射组合，返回错误列表（空表示通过）。
+// Provider 与 GeminiProvider 的 ValidateConfiguration 共用。
+func validateModelConfig(supported map[string]bool, mapping map[string]string) []string {
 	errors := make([]string, 0)
 
-	// 规则 1：ModelMapping 的 value 必须在 SupportedModels 中
-	// 仅当两者都有实际内容时才校验（空 map 不触发校验）
-	if len(p.ModelMapping) > 0 && len(p.SupportedModels) > 0 {
-		for externalModel, internalModel := range p.ModelMapping {
-			// 检查是否为通配符映射
-			if strings.Contains(internalModel, "*") {
-				// 通配符映射暂不验证（需要具体请求才能展开）
-				continue
-			}
+	for externalModel, internalModel := range mapping {
+		// 空目标会把请求模型改写成空串，上游必拒，直接判为配置错误
+		if strings.TrimSpace(internalModel) == "" {
+			errors = append(errors, fmt.Sprintf(
+				"模型映射无效：'%s' 的目标模型为空", externalModel))
+			continue
+		}
 
-			// 精确映射需要验证
-			supported := false
-			if p.SupportedModels[internalModel] {
-				supported = true
-			} else {
-				// 检查通配符白名单
-				for supportedPattern := range p.SupportedModels {
-					if matchWildcard(supportedPattern, internalModel) {
-						supported = true
-						break
-					}
-				}
-			}
+		// 规则 1：ModelMapping 的 value 必须在 SupportedModels 中
+		// 仅当白名单有实际内容时才校验（空白名单不限制映射目标）
+		if len(supported) == 0 {
+			continue
+		}
 
-			if !supported {
-				errors = append(errors, fmt.Sprintf(
-					"模型映射无效：'%s' -> '%s'，目标模型 '%s' 不在 supportedModels 中",
-					externalModel, internalModel, internalModel,
-				))
-			}
+		// 通配符映射暂不静态验证（需要具体请求才能展开；
+		// Gemini 转发路径会对展开后的 effective model 再做白名单校验）
+		if strings.Contains(internalModel, "*") {
+			continue
+		}
+
+		if !modelInWhitelist(supported, internalModel) {
+			errors = append(errors, fmt.Sprintf(
+				"模型映射无效：'%s' -> '%s'，目标模型 '%s' 不在 supportedModels 中",
+				externalModel, internalModel, internalModel,
+			))
 		}
 	}
 
 	// 允许仅配置 modelMapping（无 supportedModels 时不阻塞保存）
 	// 用户可能只想映射模型名，不需要白名单过滤
 
-	// 规则 3 移除：自映射不会破坏功能，最多是无效配置，不阻塞保存
+	return errors
+}
 
+// ValidateConfiguration 验证 provider 的模型配置
+// 返回验证错误列表（空则表示验证通过）
+func (p *Provider) ValidateConfiguration() []string {
+	errors := validateModelConfig(p.SupportedModels, p.ModelMapping)
 	p.configErrors = errors
 	return errors
 }
@@ -757,6 +781,12 @@ func matchWildcard(pattern, text string) bool {
 	if len(parts) == 2 {
 		// 前缀 + * 或 * + 后缀
 		prefix, suffix := parts[0], parts[1]
+		// * 匹配 0 个及以上字符：text 长度不足以同时容纳前后缀时不可能命中。
+		// 漏掉该检查时 "gemini-*-pro" 会错误匹配 "gemini-pro"（前后缀在 text
+		// 中重叠），随后 applyWildcardMapping 的切片会越界 panic
+		if len(text) < len(prefix)+len(suffix) {
+			return false
+		}
 		return strings.HasPrefix(text, prefix) && strings.HasSuffix(text, suffix)
 	}
 
@@ -783,8 +813,9 @@ func applyWildcardMapping(pattern, replacement, input string) string {
 
 	prefix, suffix := parts[0], parts[1]
 
-	// 验证 input 确实匹配 pattern
-	if !strings.HasPrefix(input, prefix) || !strings.HasSuffix(input, suffix) {
+	// 验证 input 确实匹配 pattern（含长度检查，防止重叠切片越界）
+	if len(input) < len(prefix)+len(suffix) ||
+		!strings.HasPrefix(input, prefix) || !strings.HasSuffix(input, suffix) {
 		return replacement
 	}
 

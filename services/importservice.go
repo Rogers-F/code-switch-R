@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pelletier/go-toml/v2"
 	_ "modernc.org/sqlite" // SQLite driver
@@ -58,23 +60,32 @@ type ConfigImportStatus struct {
 	ConfigPath           string `json:"config_path,omitempty"`
 	PendingProviders     bool   `json:"pending_providers"`
 	PendingMCP           bool   `json:"pending_mcp"`
+	PendingPrompts       bool   `json:"pending_prompts"`
 	PendingProviderCount int    `json:"pending_provider_count"`
 	PendingMCPCount      int    `json:"pending_mcp_count"`
+	PendingPromptCount   int    `json:"pending_prompt_count"`
 }
 
 type ConfigImportResult struct {
 	Status            ConfigImportStatus `json:"status"`
 	ImportedProviders int                `json:"imported_providers"`
 	ImportedMCP       int                `json:"imported_mcp"`
+	ImportedPrompts   int                `json:"imported_prompts"`
+	// 各阶段的失败信息。导入是多文件多阶段操作，某一阶段失败不应
+	// 掩盖已完成阶段的结果：Wails 对非 nil error 会让前端 Promise 直接
+	// reject，调用方拿不到 result，所以阶段错误编码在这里而非 error 里
+	Errors []string `json:"errors,omitempty"`
 }
 
 type ImportService struct {
 	providerService *ProviderService
 	mcpService      *MCPService
+	geminiService   *GeminiService
+	promptService   *PromptService
 }
 
-func NewImportService(ps *ProviderService, ms *MCPService) *ImportService {
-	return &ImportService{providerService: ps, mcpService: ms}
+func NewImportService(ps *ProviderService, ms *MCPService, gs *GeminiService, prs *PromptService) *ImportService {
+	return &ImportService{providerService: ps, mcpService: ms, geminiService: gs, promptService: prs}
 }
 
 func (is *ImportService) Start() error { return nil }
@@ -133,7 +144,10 @@ func (is *ImportService) GetStatus() (ConfigImportStatus, error) {
 	return is.evaluateStatus(cfg)
 }
 
-// ImportFromPath 从指定路径导入 cc-switch 配置
+// ImportFromPath 从指定路径导入 cc-switch 配置。
+// 多阶段依次执行（claude/codex 供应商 → gemini 供应商 → MCP → 提示词），
+// 单个阶段失败记入 result.Errors 并继续后续阶段；重复执行按各阶段
+// 去重规则幂等。仅配置文件本身不可读/不可解析时才返回 error。
 func (is *ImportService) ImportFromPath(path string) (ConfigImportResult, error) {
 	result := ConfigImportResult{}
 	path = strings.TrimSpace(path)
@@ -153,31 +167,57 @@ func (is *ImportService) ImportFromPath(path string) (ConfigImportResult, error)
 	if !exists || cfg == nil {
 		return result, nil
 	}
+	result.Errors = append(result.Errors, cfg.LoadWarnings...)
+
+	// 阶段 1：claude/codex 供应商
 	pendingProviders, err := is.pendingProviders(cfg)
 	if err != nil {
-		return result, err
+		result.Errors = append(result.Errors, fmt.Sprintf("读取现有供应商失败: %v", err))
+	} else {
+		added, err := is.importProviders(cfg, pendingProviders)
+		result.ImportedProviders += added
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("导入供应商失败: %v", err))
+		}
 	}
-	addedProviders, err := is.importProviders(cfg, pendingProviders)
-	if err != nil {
-		return result, err
-	}
-	result.ImportedProviders = addedProviders
 
+	// 阶段 2：gemini 供应商
+	if is.geminiService != nil {
+		addedGemini, err := is.geminiService.importProviders(is.pendingGeminiProviders(cfg))
+		result.ImportedProviders += addedGemini
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("导入 Gemini 供应商失败: %v", err))
+		}
+	}
+
+	// 阶段 3：MCP
 	pendingServers, err := is.pendingMCPCandidates(cfg)
 	if err != nil {
-		return result, err
+		result.Errors = append(result.Errors, fmt.Sprintf("读取现有 MCP 失败: %v", err))
+	} else {
+		addedServers, err := is.importMCPServers(pendingServers)
+		result.ImportedMCP = addedServers
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("导入 MCP 失败: %v", err))
+		}
 	}
-	addedServers, err := is.importMCPServers(pendingServers)
-	if err != nil {
-		return result, err
+
+	// 阶段 4：提示词（仅 SQLite 数据源会带提示词快照）
+	if is.promptService != nil && len(cfg.Prompts) > 0 {
+		addedPrompts, err := is.promptService.ImportPrompts(is.pendingPromptCandidates(cfg))
+		result.ImportedPrompts = addedPrompts
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("导入提示词失败: %v", err))
+		}
 	}
-	result.ImportedMCP = addedServers
 
 	status, err := is.evaluateStatus(cfg)
 	if err != nil {
-		return result, err
+		result.Errors = append(result.Errors, fmt.Sprintf("刷新导入状态失败: %v", err))
+		return result, nil
 	}
 	status.ConfigPath = path
+	status.ConfigExists = true
 	result.Status = status
 	return result, nil
 }
@@ -198,6 +238,7 @@ func (is *ImportService) evaluateStatus(cfg *ccSwitchConfig) (ConfigImportStatus
 		return status, err
 	}
 	providerCount := len(pendingProviders["claude"]) + len(pendingProviders["codex"])
+	providerCount += len(is.pendingGeminiProviders(cfg))
 	status.PendingProviders = providerCount > 0
 	status.PendingProviderCount = providerCount
 
@@ -207,6 +248,13 @@ func (is *ImportService) evaluateStatus(cfg *ccSwitchConfig) (ConfigImportStatus
 	}
 	status.PendingMCPCount = len(pendingServers)
 	status.PendingMCP = status.PendingMCPCount > 0
+
+	promptCount := 0
+	for _, list := range is.pendingPromptCandidates(cfg) {
+		promptCount += len(list)
+	}
+	status.PendingPromptCount = promptCount
+	status.PendingPrompts = promptCount > 0
 	return status, nil
 }
 
@@ -294,30 +342,59 @@ func loadCcSwitchConfigFromSQLite(path string) (*ccSwitchConfig, bool, error) {
 	cfg := &ccSwitchConfig{
 		Claude: ccProviderSection{Providers: map[string]ccProviderEntry{}},
 		Codex:  ccProviderSection{Providers: map[string]ccProviderEntry{}},
+		Gemini: ccProviderSection{Providers: map[string]ccProviderEntry{}},
 		MCP: ccMCPSection{
 			Claude: ccMCPPlatform{Servers: map[string]ccMCPServerEntry{}},
 			Codex:  ccMCPPlatform{Servers: map[string]ccMCPServerEntry{}},
 		},
+		Prompts: map[string][]Prompt{},
+	}
+
+	// 三个数据集放同一只读事务里取一致快照：cc-switch 并发写库时，
+	// 逐条独立查询可能读到不同版本的 providers/MCP/prompts
+	var q sqliteQueryer = db
+	if tx, txErr := db.Begin(); txErr == nil {
+		defer func() { _ = tx.Rollback() }()
+		q = tx
+	} else {
+		log.Printf("⚠️  cc-switch: 开启只读事务失败，退化为独立查询: %v", txErr)
 	}
 
 	// 1. 读取 providers
-	if err := loadProvidersFromSQLite(db, cfg); err != nil {
+	if err := loadProvidersFromSQLite(q, cfg); err != nil {
 		log.Printf("⚠️  cc-switch: 读取 providers 失败: %v", err)
 		return nil, true, err
 	}
 
 	// 2. 读取 MCP servers
-	if err := loadMCPServersFromSQLite(db, cfg); err != nil {
+	if err := loadMCPServersFromSQLite(q, cfg); err != nil {
 		log.Printf("⚠️  cc-switch: 读取 MCP servers 失败: %v", err)
 		// MCP 失败不阻断，继续导入 providers
+	}
+
+	// 3. 读取提示词：缺表是旧版数据库的正常情况，静默跳过；
+	// 其余错误（字段变更、数据异常）记入告警带给调用方
+	if err := loadPromptsFromSQLite(q, cfg); err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			log.Printf("ℹ️  cc-switch: 数据库无 prompts 表（旧版），跳过提示词导入")
+		} else {
+			log.Printf("⚠️  cc-switch: 读取提示词失败: %v", err)
+			cfg.LoadWarnings = append(cfg.LoadWarnings, fmt.Sprintf("读取提示词失败: %v", err))
+		}
 	}
 
 	log.Printf("✅ cc-switch: SQLite 数据库加载成功: %s", path)
 	return cfg, true, nil
 }
 
+// sqliteQueryer 让装载函数既可吃 *sql.DB 也可吃 *sql.Tx，
+// 以便在同一只读事务里取一致快照
+type sqliteQueryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
 // loadProvidersFromSQLite 从 SQLite 读取 providers 数据
-func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
+func loadProvidersFromSQLite(db sqliteQueryer, cfg *ccSwitchConfig) error {
 	// 读取 provider_endpoints 作为 URL 补充
 	endpoints := make(map[string]string) // key: "app_type|provider_id" -> url
 	epRows, err := db.Query(`SELECT provider_id, app_type, url FROM provider_endpoints`)
@@ -383,24 +460,36 @@ func loadProvidersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 		// 从 provider_endpoints 补充 URL
 		kind := strings.ToLower(strings.TrimSpace(appType))
 		if url := endpoints[kind+"|"+id]; url != "" {
-			if kind == "claude" {
+			switch kind {
+			case "claude":
 				// Claude: 补充 ANTHROPIC_BASE_URL
 				if entry.Settings.Env["ANTHROPIC_BASE_URL"] == "" {
 					entry.Settings.Env["ANTHROPIC_BASE_URL"] = url
 				}
-			} else if kind == "codex" {
+			case "codex":
 				// Codex: 如果没有 Config，生成最小 TOML
 				if entry.Settings.Config == "" {
 					entry.Settings.Config = buildMinimalCodexConfig(url, name)
 				}
+			case "gemini":
+				// Gemini: 补充 GOOGLE_GEMINI_BASE_URL
+				if entry.Settings.Env["GOOGLE_GEMINI_BASE_URL"] == "" {
+					entry.Settings.Env["GOOGLE_GEMINI_BASE_URL"] = url
+				}
 			}
 		}
 
-		// 添加到对应平台
-		if kind == "codex" {
+		// 添加到对应平台；grokbuild/opencode/hermes 等本应用不支持的
+		// 平台显式跳过——不能兜底进 Claude 桶造成错误分类
+		switch kind {
+		case "codex":
 			cfg.Codex.Providers[id] = entry
-		} else {
+		case "gemini":
+			cfg.Gemini.Providers[id] = entry
+		case "claude":
 			cfg.Claude.Providers[id] = entry
+		default:
+			log.Printf("ℹ️  cc-switch: 跳过不支持的平台 provider [%s/%s]", kind, id)
 		}
 	}
 
@@ -424,7 +513,7 @@ func escapeTOMLString(value string) string {
 }
 
 // loadMCPServersFromSQLite 从 SQLite 读取 MCP servers 数据
-func loadMCPServersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
+func loadMCPServersFromSQLite(db sqliteQueryer, cfg *ccSwitchConfig) error {
 	rows, err := db.Query(`
 		SELECT id, name, server_config,
 		       COALESCE(description, ''), COALESCE(homepage, ''),
@@ -478,6 +567,89 @@ func loadMCPServersFromSQLite(db *sql.DB, cfg *ccSwitchConfig) error {
 	return rows.Err()
 }
 
+// loadPromptsFromSQLite 从 SQLite 读取提示词数据。
+// 只取本应用支持的平台（claude/codex/gemini）；grokbuild 等其余平台跳过
+func loadPromptsFromSQLite(db sqliteQueryer, cfg *ccSwitchConfig) error {
+	rows, err := db.Query(`
+		SELECT id, app_type, name, content, COALESCE(description, ''),
+		       created_at, updated_at
+		FROM prompts
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	scanFailures := 0
+	for rows.Next() {
+		var id, appType, name, content, description string
+		var createdAt, updatedAt sql.NullInt64
+		if err := rows.Scan(&id, &appType, &name, &content, &description, &createdAt, &updatedAt); err != nil {
+			log.Printf("⚠️  cc-switch: 扫描 prompt 行失败: %v", err)
+			scanFailures++
+			continue
+		}
+
+		platform := strings.ToLower(strings.TrimSpace(appType))
+		switch platform {
+		case "claude", "codex", "gemini":
+		default:
+			continue
+		}
+
+		if strings.TrimSpace(name) == "" || content == "" {
+			continue
+		}
+		// 非 UTF-8 内容经 JSON 序列化会被不可逆替换成乱码
+		// （与 PromptService.ImportFromFile 的约束一致）
+		if !utf8.ValidString(content) {
+			log.Printf("⚠️  cc-switch: 提示词 [%s/%s] 不是有效 UTF-8，已跳过", platform, name)
+			continue
+		}
+
+		prompt := Prompt{
+			ID:      strings.TrimSpace(id),
+			Name:    strings.TrimSpace(name),
+			Content: content,
+			Enabled: false, // 导入统一禁用，由用户手动启用
+		}
+		if description != "" {
+			desc := description
+			prompt.Description = &desc
+		}
+		if createdAt.Valid {
+			v := normalizeUnixSeconds(createdAt.Int64)
+			prompt.CreatedAt = &v
+		}
+		if updatedAt.Valid {
+			v := normalizeUnixSeconds(updatedAt.Int64)
+			prompt.UpdatedAt = &v
+		}
+
+		cfg.Prompts[platform] = append(cfg.Prompts[platform], prompt)
+	}
+	if scanFailures > 0 {
+		// 静默丢行会被误读成"无提示词可导入"，必须带出去
+		cfg.LoadWarnings = append(cfg.LoadWarnings,
+			fmt.Sprintf("提示词有 %d 行解析失败已跳过", scanFailures))
+	}
+
+	return rows.Err()
+}
+
+// normalizeUnixSeconds 把可能是毫秒/微秒的时间戳统一成 Unix 秒
+// （cc-switch 存 JS Date.now() 风格毫秒，本应用 Prompt 用秒）
+func normalizeUnixSeconds(v int64) int64 {
+	switch {
+	case v > 1e15: // 微秒
+		return v / 1e6
+	case v > 1e12: // 毫秒
+		return v / 1e3
+	default:
+		return v
+	}
+}
+
 func ccSwitchConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -511,7 +683,14 @@ func firstRunMarkerPath() (string, error) {
 type ccSwitchConfig struct {
 	Claude ccProviderSection `json:"claude"`
 	Codex  ccProviderSection `json:"codex"`
+	Gemini ccProviderSection `json:"gemini"`
 	MCP    ccMCPSection      `json:"mcp"`
+	// 提示词快照：键为平台（claude/codex/gemini）。仅 SQLite 数据源填充
+	// （cc-switch 的旧 JSON 配置没有提示词），json:"-" 确保不会从 JSON 读入
+	Prompts map[string][]Prompt `json:"-"`
+	// 装载阶段的非致命告警（如提示词表读取异常）。缺表属正常旧版兼容不入内；
+	// 其余异常必须带出去进 result.Errors，否则会被误报成"无内容可导入"
+	LoadWarnings []string `json:"-"`
 }
 
 type ccProviderSection struct {
@@ -581,6 +760,154 @@ func (is *ImportService) pendingProviders(cfg *ccSwitchConfig) (map[string][]pro
 	result["claude"] = diffProviderCandidates("claude", cfg.Claude.Providers, claudeExisting)
 	result["codex"] = diffProviderCandidates("codex", cfg.Codex.Providers, codexExisting)
 	return result, nil
+}
+
+// validGeminiImportURL 校验导入的 BaseURL：必须是绝对 http/https 地址，
+// 且不含 userinfo/query/fragment——导入绕过了 UI 的 URL 校验，坏地址会
+// 等到代理带着请求正文和供应商 Key 转发时才暴露
+func validGeminiImportURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	return u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+}
+
+// pendingGeminiProviders 计算待导入的 Gemini 供应商候选。
+// 与现有配置按名称查重，按 BaseURL+APIKey 组合查重
+// （同一地址配不同 Key 属合法多账号场景，不能只按 URL 去重）
+func (is *ImportService) pendingGeminiProviders(cfg *ccSwitchConfig) []GeminiProvider {
+	if is.geminiService == nil || len(cfg.Gemini.Providers) == 0 {
+		return nil
+	}
+
+	existing := is.geminiService.GetProviders()
+	existingNames := make(map[string]struct{}, len(existing))
+	existingURLKey := make(map[string]struct{}, len(existing))
+	for _, p := range existing {
+		if name := normalizeName(p.Name); name != "" {
+			existingNames[name] = struct{}{}
+		}
+		if u := normalizeURL(p.BaseURL); u != "" {
+			existingURLKey[u+"\x00"+p.APIKey] = struct{}{}
+		}
+	}
+
+	candidates := make([]GeminiProvider, 0, len(cfg.Gemini.Providers))
+	for key, entry := range cfg.Gemini.Providers {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			name = strings.TrimSpace(entry.ID)
+		}
+		if name == "" {
+			name = strings.TrimSpace(key)
+		}
+		if name == "" {
+			continue
+		}
+
+		baseURL := strings.TrimSpace(entry.Settings.Env["GOOGLE_GEMINI_BASE_URL"])
+		if baseURL == "" {
+			log.Printf("ℹ️  cc-switch: 跳过 gemini provider [%s]: 缺少 GOOGLE_GEMINI_BASE_URL（OAuth 官方条目走不了本地代理）", key)
+			continue
+		}
+		if !validGeminiImportURL(baseURL) {
+			log.Printf("⚠️  cc-switch: 跳过 gemini provider [%s]: BaseURL 无效: %s", key, baseURL)
+			continue
+		}
+
+		nameKey := normalizeName(name)
+		if _, exists := existingNames[nameKey]; exists {
+			continue
+		}
+		apiKey := strings.TrimSpace(entry.Settings.Env["GEMINI_API_KEY"])
+		urlKey := normalizeURL(baseURL) + "\x00" + apiKey
+		if _, exists := existingURLKey[urlKey]; exists {
+			continue
+		}
+
+		candidate := GeminiProvider{
+			Name:       name,
+			WebsiteURL: strings.TrimSpace(entry.WebsiteURL),
+			BaseURL:    baseURL,
+			APIKey:     apiKey,
+			Model:      strings.TrimSpace(entry.Settings.Env["GEMINI_MODEL"]),
+			Category:   "custom",
+			Enabled:    true, // 与 claude/codex 导入行为一致：导入即参与代理调度
+		}
+		if len(entry.Settings.Env) > 0 {
+			candidate.EnvConfig = cloneStringMap(entry.Settings.Env)
+		}
+
+		existingNames[nameKey] = struct{}{}
+		existingURLKey[urlKey] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return strings.ToLower(candidates[i].Name) < strings.ToLower(candidates[j].Name)
+	})
+	return candidates
+}
+
+// pendingPromptCandidates 计算待导入的提示词（按平台分组）。
+// 用 StoredPrompts 只读快照查重：GetPrompts 首次访问会把 CLI 提示词
+// 文件内容回填进 Enabled 项并落盘，状态检查不能踩这个副作用
+func (is *ImportService) pendingPromptCandidates(cfg *ccSwitchConfig) map[string][]Prompt {
+	if is.promptService == nil || len(cfg.Prompts) == 0 {
+		return nil
+	}
+
+	result := make(map[string][]Prompt, len(cfg.Prompts))
+	for platform, list := range cfg.Prompts {
+		if len(list) == 0 {
+			continue
+		}
+		stored, err := is.promptService.StoredPrompts(platform)
+		if err != nil {
+			log.Printf("⚠️  cc-switch: 读取 %s 现有提示词失败: %v", platform, err)
+			continue
+		}
+		existingIDs := make(map[string]struct{}, len(stored))
+		existingNames := make(map[string]struct{}, len(stored))
+		for id, p := range stored {
+			existingIDs[id] = struct{}{}
+			if name := normalizeName(p.Name); name != "" {
+				existingNames[name] = struct{}{}
+			}
+		}
+
+		pending := make([]Prompt, 0, len(list))
+		seenNames := make(map[string]struct{})
+		for _, p := range list {
+			if p.ID != "" {
+				if _, exists := existingIDs[p.ID]; exists {
+					continue
+				}
+			}
+			nameKey := normalizeName(p.Name)
+			if nameKey != "" {
+				if _, exists := existingNames[nameKey]; exists {
+					continue
+				}
+				if _, dup := seenNames[nameKey]; dup {
+					continue
+				}
+				seenNames[nameKey] = struct{}{}
+			}
+			pending = append(pending, p)
+		}
+		if len(pending) > 0 {
+			sort.SliceStable(pending, func(i, j int) bool {
+				return strings.ToLower(pending[i].Name) < strings.ToLower(pending[j].Name)
+			})
+			result[platform] = pending
+		}
+	}
+	return result
 }
 
 func diffProviderCandidates(kind string, entries map[string]ccProviderEntry, existing []Provider) []providerCandidate {

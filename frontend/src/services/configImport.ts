@@ -5,22 +5,29 @@ export type ConfigImportStatus = {
   config_path?: string
   pending_providers: boolean
   pending_mcp: boolean
+  pending_prompts: boolean
   pending_provider_count: number
   pending_mcp_count: number
+  pending_prompt_count: number
 }
 
 export type ConfigImportResult = {
   status: ConfigImportStatus
   imported_providers: number
   imported_mcp: number
+  imported_prompts: number
+  // 各阶段失败信息（部分成功时非空，后端不再用 transport error 掩盖已完成阶段）
+  errors?: string[]
 }
 
 const emptyStatus: ConfigImportStatus = {
   config_exists: false,
   pending_providers: false,
   pending_mcp: false,
+  pending_prompts: false,
   pending_provider_count: 0,
-  pending_mcp_count: 0
+  pending_mcp_count: 0,
+  pending_prompt_count: 0
 }
 
 export const fetchConfigImportStatus = async (): Promise<ConfigImportStatus> => {

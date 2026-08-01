@@ -25,7 +25,10 @@ export function ImportAll(): $CancellablePromise<$models.ConfigImportResult> {
 }
 
 /**
- * ImportFromPath 从指定路径导入 cc-switch 配置
+ * ImportFromPath 从指定路径导入 cc-switch 配置。
+ * 多阶段依次执行（claude/codex 供应商 → gemini 供应商 → MCP → 提示词），
+ * 单个阶段失败记入 result.Errors 并继续后续阶段；重复执行按各阶段
+ * 去重规则幂等。仅配置文件本身不可读/不可解析时才返回 error。
  */
 export function ImportFromPath(path: string): $CancellablePromise<$models.ConfigImportResult> {
     return $Call.ByID(2519238097, path).then(($result: any) => {

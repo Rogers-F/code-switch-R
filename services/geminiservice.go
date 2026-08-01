@@ -35,8 +35,25 @@ type GeminiProvider struct {
 	Enabled             bool              `json:"enabled"`
 	Level               int               `json:"level,omitempty"`               // 优先级分组 (1-10, 默认 1)
 	InsecureSkipVerify  bool              `json:"insecureSkipVerify,omitempty"`  // 跳过上游 TLS 证书验证（仅该供应商，存在中间人风险）
+	SupportedModels     map[string]bool   `json:"supportedModels,omitempty"`     // 模型白名单（精确或通配符），空表示不限制
+	ModelMapping        map[string]string `json:"modelMapping,omitempty"`        // 模型映射：外部模型名 -> 供应商内部模型名（支持通配符）
 	EnvConfig           map[string]string `json:"envConfig,omitempty"`           // .env 配置
 	SettingsConfig      map[string]any    `json:"settingsConfig,omitempty"`      // settings.json 配置
+}
+
+// IsModelSupported 检查供应商是否支持指定模型（与 claude/codex 的 Provider 同一套逻辑）
+func (p *GeminiProvider) IsModelSupported(modelName string) bool {
+	return modelSupportedBy(p.SupportedModels, p.ModelMapping, modelName)
+}
+
+// GetEffectiveModel 获取实际应该使用的模型名（命中映射时返回映射结果）
+func (p *GeminiProvider) GetEffectiveModel(requestedModel string) string {
+	return effectiveModelFor(p.ModelMapping, requestedModel)
+}
+
+// ValidateConfiguration 验证模型白名单/映射配置
+func (p *GeminiProvider) ValidateConfiguration() []string {
+	return validateModelConfig(p.SupportedModels, p.ModelMapping)
 }
 
 // GeminiPreset 预设供应商
@@ -402,9 +419,18 @@ func detectGeminiAuthType(provider *GeminiProvider) GeminiAuthType {
 	}
 
 	// 优先级 2: 检查供应商名称
+	// 仅当没有任何凭据配置时才按名称判 OAuth：导入或手工添加的
+	// "Google API Key" 之类条目带着 BaseURL/APIKey，若按名称误判为 OAuth，
+	// SwitchProvider 的 OAuth 分支会清空 .env，把刚配置的凭据直接丢掉
 	nameLower := strings.ToLower(provider.Name)
 	if nameLower == "google" || strings.HasPrefix(nameLower, "google ") {
-		return GeminiAuthOAuth
+		hasCreds := provider.APIKey != "" || provider.BaseURL != ""
+		if !hasCreds && provider.EnvConfig != nil {
+			hasCreds = provider.EnvConfig["GEMINI_API_KEY"] != "" || provider.EnvConfig["GOOGLE_GEMINI_BASE_URL"] != ""
+		}
+		if !hasCreds {
+			return GeminiAuthOAuth
+		}
 	}
 
 	// 优先级 3: 检查 PackyCode 关键词
@@ -1036,6 +1062,20 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		}
 	}
 
+	if source.SupportedModels != nil {
+		cloned.SupportedModels = make(map[string]bool, len(source.SupportedModels))
+		for k, v := range source.SupportedModels {
+			cloned.SupportedModels[k] = v
+		}
+	}
+
+	if source.ModelMapping != nil {
+		cloned.ModelMapping = make(map[string]string, len(source.ModelMapping))
+		for k, v := range source.ModelMapping {
+			cloned.ModelMapping[k] = v
+		}
+	}
+
 	if source.SettingsConfig != nil {
 		cloned.SettingsConfig = make(map[string]any, len(source.SettingsConfig))
 		for k, v := range source.SettingsConfig {
@@ -1083,6 +1123,73 @@ func (s *GeminiService) providerIDExists(id string) bool {
 		}
 	}
 	return false
+}
+
+// importProviders 批量导入供应商：锁内一次性查重、补 ID，单次落盘。
+// 名称（不区分大小写）已存在的候选跳过；BaseURL 与 APIKey 都相同的候选
+// 视为重复跳过——同一地址配不同 Key 属合法多账号场景，不能只按 URL 去重。
+// 保存失败时回滚内存状态，不留下半导入结果。返回实际新增数量。
+func (s *GeminiService) importProviders(candidates []GeminiProvider) (int, error) {
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existingNames := make(map[string]bool, len(s.providers))
+	existingIDs := make(map[string]bool, len(s.providers))
+	existingURLKey := make(map[string]bool, len(s.providers))
+	for _, p := range s.providers {
+		existingNames[normalizeName(p.Name)] = true
+		existingIDs[p.ID] = true
+		if url := normalizeURL(p.BaseURL); url != "" {
+			existingURLKey[url+"\x00"+p.APIKey] = true
+		}
+	}
+
+	original := s.providers
+	merged := append([]GeminiProvider(nil), s.providers...)
+	added := 0
+	seq := len(merged) + 1
+	for _, candidate := range candidates {
+		name := normalizeName(candidate.Name)
+		if name == "" || existingNames[name] {
+			continue
+		}
+		if url := normalizeURL(candidate.BaseURL); url != "" {
+			key := url + "\x00" + candidate.APIKey
+			if existingURLKey[key] {
+				continue
+			}
+			existingURLKey[key] = true
+		}
+		if candidate.ID == "" || existingIDs[candidate.ID] {
+			for {
+				id := fmt.Sprintf("gemini-%d", seq)
+				seq++
+				if !existingIDs[id] {
+					candidate.ID = id
+					break
+				}
+			}
+		}
+		existingIDs[candidate.ID] = true
+		existingNames[name] = true
+		merged = append(merged, candidate)
+		added++
+	}
+
+	if added == 0 {
+		return 0, nil
+	}
+
+	s.providers = merged
+	if err := s.saveProviders(); err != nil {
+		s.providers = original
+		return 0, err
+	}
+	return added, nil
 }
 
 // ReorderProviders 重新排序供应商（按传入的 ID 顺序）

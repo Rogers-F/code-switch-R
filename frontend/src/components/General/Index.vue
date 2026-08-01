@@ -455,11 +455,20 @@ const handleImport = async () => {
       alert(t('components.general.import.fileNotFound'))
       return
     }
-    const imported = result.imported_providers + result.imported_mcp
-    if (imported > 0) {
+    const imported = result.imported_providers + result.imported_mcp + result.imported_prompts
+    const stageErrors = result.errors ?? []
+    if (stageErrors.length > 0) {
+      alert(t('components.general.import.partial', {
+        providers: result.imported_providers,
+        mcp: result.imported_mcp,
+        prompts: result.imported_prompts,
+        error: stageErrors.join('\n')
+      }))
+    } else if (imported > 0) {
       alert(t('components.general.import.success', {
         providers: result.imported_providers,
-        mcp: result.imported_mcp
+        mcp: result.imported_mcp,
+        prompts: result.imported_prompts
       }))
     } else {
       alert(t('components.general.import.nothingToImport'))
@@ -980,10 +989,11 @@ onMounted(async () => {
             </span>
             <span class="info-text" v-else-if="importStatus?.config_exists">
               {{ $t('components.general.import.configFound') }}
-              <span v-if="importStatus.pending_provider_count > 0 || importStatus.pending_mcp_count > 0">
+              <span v-if="importStatus.pending_provider_count > 0 || importStatus.pending_mcp_count > 0 || importStatus.pending_prompt_count > 0">
                 ({{ $t('components.general.import.pendingCount', {
                   providers: importStatus.pending_provider_count,
-                  mcp: importStatus.pending_mcp_count
+                  mcp: importStatus.pending_mcp_count,
+                  prompts: importStatus.pending_prompt_count
                 }) }})
               </span>
             </span>

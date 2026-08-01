@@ -10,7 +10,7 @@ import (
 // 不得被归为 stdio 后以"需要提供 command"整批拒绝
 func TestParseMCPJSONRemoteTypes(t *testing.T) {
 	setupMCPSyncFixHome(t)
-	is := NewImportService(NewProviderService(), NewMCPService())
+	is := NewImportService(NewProviderService(), NewMCPService(), nil, nil)
 
 	cases := []struct {
 		name  string
@@ -45,7 +45,7 @@ func TestParseMCPJSONRemoteTypes(t *testing.T) {
 // 同一份 JSON 里 sse 服务器与合法 stdio 服务器应一起导入成功
 func TestParseMCPJSONMixedRemoteAndStdio(t *testing.T) {
 	setupMCPSyncFixHome(t)
-	is := NewImportService(NewProviderService(), NewMCPService())
+	is := NewImportService(NewProviderService(), NewMCPService(), nil, nil)
 
 	input := `{"mcpServers":{
 		"ctx7":{"type":"sse","url":"https://mcp.example/sse"},
@@ -151,7 +151,7 @@ func TestSaveProvidersRechecksDuplicatesInsideLock(t *testing.T) {
 		t.Fatalf("写入初始 provider 失败: %v", err)
 	}
 
-	is := NewImportService(ps, NewMCPService())
+	is := NewImportService(ps, NewMCPService(), nil, nil)
 	added, err := is.saveProviders("claude", []providerCandidate{
 		{Name: "Existing2", APIURL: "https://dup.example", APIKey: "k2"}, // URL 重复
 		{Name: "existing", APIURL: "https://new.example", APIKey: "k3"},  // 名字重复（大小写不同）
@@ -185,7 +185,7 @@ func TestImportMCPServersRechecksDuplicatesInsideLock(t *testing.T) {
 	setupMCPSyncFixHome(t)
 
 	ms := NewMCPService()
-	is := NewImportService(NewProviderService(), ms)
+	is := NewImportService(NewProviderService(), ms, nil, nil)
 	if err := ms.SaveServers([]MCPServer{{Name: "dup", Type: "stdio", Command: "npx"}}); err != nil {
 		t.Fatalf("写入初始 server 失败: %v", err)
 	}

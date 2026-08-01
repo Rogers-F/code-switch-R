@@ -330,8 +330,9 @@
         "duplicateFailed": "Failed to duplicate provider"
       },
       "importConfig": {
-        "tooltip": "Import {providers} providers · {servers} MCP servers",
-        "success": "Imported {providers} providers and {servers} MCP servers",
+        "tooltip": "Import {providers} providers · {servers} MCP servers · {prompts} prompts",
+        "success": "Imported {providers} providers, {servers} MCP servers and {prompts} prompts (prompts stay disabled)",
+        "partial": "Partially imported: {providers} providers, {servers} MCPs, {prompts} prompts; failure: {error}",
         "empty": "Everything from cc-switch is already in sync",
         "error": "Failed to import cc-switch config"
       },
@@ -678,11 +679,12 @@
         "loading": "Loading...",
         "configFound": "Config file found",
         "configNotFound": "Config file not found",
-        "pendingCount": "{providers} providers, {mcp} MCPs",
+        "pendingCount": "{providers} providers, {mcp} MCPs, {prompts} prompts",
         "action": "Import action",
         "importBtn": "Import config",
         "importing": "Importing...",
-        "success": "Imported: {providers} providers, {mcp} MCP servers",
+        "success": "Imported: {providers} providers, {mcp} MCP servers, {prompts} prompts (prompts stay disabled; enable them on the Prompts page)",
+        "partial": "Partially imported: {providers} providers, {mcp} MCPs, {prompts} prompts. Failure: {error}",
         "nothingToImport": "Nothing to import (all may have been imported)",
         "failed": "Import failed",
         "fileNotFound": "Config file not found, please check the path"

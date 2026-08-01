@@ -749,6 +749,14 @@ export class ConfigImportResult {
     "status": ConfigImportStatus;
     "imported_providers": number;
     "imported_mcp": number;
+    "imported_prompts": number;
+
+    /**
+     * 各阶段的失败信息。导入是多文件多阶段操作，某一阶段失败不应
+     * 掩盖已完成阶段的结果：Wails 对非 nil error 会让前端 Promise 直接
+     * reject，调用方拿不到 result，所以阶段错误编码在这里而非 error 里
+     */
+    "errors"?: string[];
 
     /** Creates a new ConfigImportResult instance. */
     constructor($$source: Partial<ConfigImportResult> = {}) {
@@ -761,6 +769,9 @@ export class ConfigImportResult {
         if (!("imported_mcp" in $$source)) {
             this["imported_mcp"] = 0;
         }
+        if (!("imported_prompts" in $$source)) {
+            this["imported_prompts"] = 0;
+        }
 
         Object.assign(this, $$source);
     }
@@ -770,9 +781,13 @@ export class ConfigImportResult {
      */
     static createFrom($$source: any = {}): ConfigImportResult {
         const $$createField0_0 = $$createType6;
+        const $$createField4_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("status" in $$parsedSource) {
             $$parsedSource["status"] = $$createField0_0($$parsedSource["status"]);
+        }
+        if ("errors" in $$parsedSource) {
+            $$parsedSource["errors"] = $$createField4_0($$parsedSource["errors"]);
         }
         return new ConfigImportResult($$parsedSource as Partial<ConfigImportResult>);
     }
@@ -783,8 +798,10 @@ export class ConfigImportStatus {
     "config_path"?: string;
     "pending_providers": boolean;
     "pending_mcp": boolean;
+    "pending_prompts": boolean;
     "pending_provider_count": number;
     "pending_mcp_count": number;
+    "pending_prompt_count": number;
 
     /** Creates a new ConfigImportStatus instance. */
     constructor($$source: Partial<ConfigImportStatus> = {}) {
@@ -797,11 +814,17 @@ export class ConfigImportStatus {
         if (!("pending_mcp" in $$source)) {
             this["pending_mcp"] = false;
         }
+        if (!("pending_prompts" in $$source)) {
+            this["pending_prompts"] = false;
+        }
         if (!("pending_provider_count" in $$source)) {
             this["pending_provider_count"] = 0;
         }
         if (!("pending_mcp_count" in $$source)) {
             this["pending_mcp_count"] = 0;
+        }
+        if (!("pending_prompt_count" in $$source)) {
+            this["pending_prompt_count"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -983,8 +1006,8 @@ export class CustomCliTool {
      * Creates a new CustomCliTool instance from a string or object.
      */
     static createFrom($$source: any = {}): CustomCliTool {
-        const $$createField2_0 = $$createType8;
-        const $$createField3_0 = $$createType10;
+        const $$createField2_0 = $$createType9;
+        const $$createField3_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("configFiles" in $$parsedSource) {
             $$parsedSource["configFiles"] = $$createField2_0($$parsedSource["configFiles"]);
@@ -1354,6 +1377,16 @@ export class GeminiProvider {
     "insecureSkipVerify"?: boolean;
 
     /**
+     * 模型白名单（精确或通配符），空表示不限制
+     */
+    "supportedModels"?: { [_ in string]?: boolean };
+
+    /**
+     * 模型映射：外部模型名 -> 供应商内部模型名（支持通配符）
+     */
+    "modelMapping"?: { [_ in string]?: string };
+
+    /**
      * .env 配置
      */
     "envConfig"?: { [_ in string]?: string };
@@ -1382,14 +1415,22 @@ export class GeminiProvider {
      * Creates a new GeminiProvider instance from a string or object.
      */
     static createFrom($$source: any = {}): GeminiProvider {
-        const $$createField13_0 = $$createType4;
-        const $$createField14_0 = $$createType5;
+        const $$createField13_0 = $$createType12;
+        const $$createField14_0 = $$createType4;
+        const $$createField15_0 = $$createType4;
+        const $$createField16_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("supportedModels" in $$parsedSource) {
+            $$parsedSource["supportedModels"] = $$createField13_0($$parsedSource["supportedModels"]);
+        }
+        if ("modelMapping" in $$parsedSource) {
+            $$parsedSource["modelMapping"] = $$createField14_0($$parsedSource["modelMapping"]);
+        }
         if ("envConfig" in $$parsedSource) {
-            $$parsedSource["envConfig"] = $$createField13_0($$parsedSource["envConfig"]);
+            $$parsedSource["envConfig"] = $$createField15_0($$parsedSource["envConfig"]);
         }
         if ("settingsConfig" in $$parsedSource) {
-            $$parsedSource["settingsConfig"] = $$createField14_0($$parsedSource["settingsConfig"]);
+            $$parsedSource["settingsConfig"] = $$createField16_0($$parsedSource["settingsConfig"]);
         }
         return new GeminiProvider($$parsedSource as Partial<GeminiProvider>);
     }
@@ -1520,8 +1561,8 @@ export class HealthCheckHistory {
      * Creates a new HealthCheckHistory instance from a string or object.
      */
     static createFrom($$source: any = {}): HealthCheckHistory {
-        const $$createField3_0 = $$createType12;
-        const $$createField4_0 = $$createType13;
+        const $$createField3_0 = $$createType14;
+        const $$createField4_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField3_0($$parsedSource["items"]);
@@ -1803,7 +1844,7 @@ export class LogStats {
      * Creates a new LogStats instance from a string or object.
      */
     static createFrom($$source: any = {}): LogStats {
-        const $$createField11_0 = $$createType15;
+        const $$createField11_0 = $$createType17;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("series" in $$parsedSource) {
             $$parsedSource["series"] = $$createField11_0($$parsedSource["series"]);
@@ -1888,8 +1929,8 @@ export class MCPParseResult {
      * Creates a new MCPParseResult instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPParseResult {
-        const $$createField0_0 = $$createType17;
-        const $$createField1_0 = $$createType18;
+        const $$createField0_0 = $$createType19;
+        const $$createField1_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("servers" in $$parsedSource) {
             $$parsedSource["servers"] = $$createField0_0($$parsedSource["servers"]);
@@ -1947,10 +1988,10 @@ export class MCPServer {
      * Creates a new MCPServer instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPServer {
-        const $$createField3_0 = $$createType18;
+        const $$createField3_0 = $$createType7;
         const $$createField4_0 = $$createType4;
-        const $$createField8_0 = $$createType18;
-        const $$createField12_0 = $$createType18;
+        const $$createField8_0 = $$createType7;
+        const $$createField12_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("args" in $$parsedSource) {
             $$parsedSource["args"] = $$createField3_0($$parsedSource["args"]);
@@ -2096,9 +2137,9 @@ export class ModelSyncStatus {
      * Creates a new ModelSyncStatus instance from a string or object.
      */
     static createFrom($$source: any = {}): ModelSyncStatus {
-        const $$createField4_0 = $$createType20;
-        const $$createField5_0 = $$createType21;
-        const $$createField6_0 = $$createType22;
+        const $$createField4_0 = $$createType21;
+        const $$createField5_0 = $$createType22;
+        const $$createField6_0 = $$createType23;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("providers" in $$parsedSource) {
             $$parsedSource["providers"] = $$createField4_0($$parsedSource["providers"]);
@@ -2142,7 +2183,7 @@ export class NetworkSettings {
      * Creates a new NetworkSettings instance from a string or object.
      */
     static createFrom($$source: any = {}): NetworkSettings {
-        const $$createField4_0 = $$createType23;
+        const $$createField4_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("targetCli" in $$parsedSource) {
             $$parsedSource["targetCli"] = $$createField4_0($$parsedSource["targetCli"]);
@@ -2327,7 +2368,7 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField10_0 = $$createType24;
+        const $$createField10_0 = $$createType12;
         const $$createField11_0 = $$createType4;
         const $$createField15_0 = $$createType26;
         const $$createField20_0 = $$createType28;
@@ -2482,8 +2523,8 @@ export class ProviderTimeline {
      */
     static createFrom($$source: any = {}): ProviderTimeline {
         const $$createField5_0 = $$createType26;
-        const $$createField6_0 = $$createType12;
-        const $$createField7_0 = $$createType13;
+        const $$createField6_0 = $$createType14;
+        const $$createField7_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("availabilityConfig" in $$parsedSource) {
             $$parsedSource["availabilityConfig"] = $$createField5_0($$parsedSource["availabilityConfig"]);
@@ -3025,7 +3066,7 @@ export class WSLDetection {
      * Creates a new WSLDetection instance from a string or object.
      */
     static createFrom($$source: any = {}): WSLDetection {
-        const $$createField1_0 = $$createType18;
+        const $$createField1_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("distros" in $$parsedSource) {
             $$parsedSource["distros"] = $$createField1_0($$parsedSource["distros"]);
@@ -3124,26 +3165,26 @@ const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $Create.Map($Create.Any, $Create.Any);
 const $$createType5 = $Create.Map($Create.Any, $Create.Any);
 const $$createType6 = ConfigImportStatus.createFrom;
-const $$createType7 = ConfigFile.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = ProxyInjection.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = HealthCheckResult.createFrom;
-const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = $Create.Nullable($$createType11);
-const $$createType14 = LogStatsSeries.createFrom;
-const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = MCPServer.createFrom;
+const $$createType7 = $Create.Array($Create.Any);
+const $$createType8 = ConfigFile.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = ProxyInjection.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = $Create.Map($Create.Any, $Create.Any);
+const $$createType13 = HealthCheckResult.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = $Create.Nullable($$createType13);
+const $$createType16 = LogStatsSeries.createFrom;
 const $$createType17 = $Create.Array($$createType16);
-const $$createType18 = $Create.Array($Create.Any);
-const $$createType19 = ModelSyncProviderStatus.createFrom;
-const $$createType20 = $Create.Array($$createType19);
-const $$createType21 = modelpricing$0.RebuildStats.createFrom;
-const $$createType22 = DefaultModels.createFrom;
-const $$createType23 = TargetCli.createFrom;
-const $$createType24 = $Create.Map($Create.Any, $Create.Any);
+const $$createType18 = MCPServer.createFrom;
+const $$createType19 = $Create.Array($$createType18);
+const $$createType20 = ModelSyncProviderStatus.createFrom;
+const $$createType21 = $Create.Array($$createType20);
+const $$createType22 = modelpricing$0.RebuildStats.createFrom;
+const $$createType23 = DefaultModels.createFrom;
+const $$createType24 = TargetCli.createFrom;
 const $$createType25 = AvailabilityConfig.createFrom;
 const $$createType26 = $Create.Nullable($$createType25);
 const $$createType27 = SanitizeConfig.createFrom;
 const $$createType28 = $Create.Nullable($$createType27);
-const $$createType29 = $Create.Nullable($$createType18);
+const $$createType29 = $Create.Nullable($$createType7);
