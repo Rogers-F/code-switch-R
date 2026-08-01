@@ -16,6 +16,54 @@ const loading = ref(false)
 const logsContainer = ref<HTMLElement>()
 let refreshInterval: number | null = null
 
+// 抓包模式：进程内开关，应用重启后自动关闭
+const captureEnabled = ref(false)
+const captureToggling = ref(false)
+const clearingCapture = ref(false)
+
+const loadCaptureState = async () => {
+  try {
+    captureEnabled.value = (await Call.ByName(
+      'codeswitch/services.ProviderRelayService.GetRequestCapture'
+    )) as boolean
+  } catch (error) {
+    console.error('读取抓包模式状态失败:', error)
+  }
+}
+
+const toggleCapture = async () => {
+  const target = captureEnabled.value
+  captureToggling.value = true
+  try {
+    await Call.ByName('codeswitch/services.ProviderRelayService.SetRequestCapture', target)
+  } catch (error) {
+    console.error('切换抓包模式失败:', error)
+    alert(t('components.console.captureToggleFailed') + (error as Error).message)
+  } finally {
+    // 无论成败都回读后端实际状态，杜绝界面与进程内开关不一致
+    await loadCaptureState()
+    captureToggling.value = false
+  }
+}
+
+const clearCapturedRequests = async () => {
+  if (!confirm(t('components.console.clearCaptureConfirm'))) {
+    return
+  }
+  clearingCapture.value = true
+  try {
+    const affected = (await Call.ByName(
+      'codeswitch/services.ProviderRelayService.ClearCapturedRequests'
+    )) as number
+    alert(t('components.console.clearCaptureDone', { count: affected }))
+  } catch (error) {
+    console.error('清除抓包数据失败:', error)
+    alert(t('components.console.clearCaptureFailed') + (error as Error).message)
+  } finally {
+    clearingCapture.value = false
+  }
+}
+
 const loadLogs = async () => {
   try {
     const result = await Call.ByName('codeswitch/services.ConsoleService.GetLogs')
@@ -69,6 +117,7 @@ const getLevelClass = (level: string) => {
 onMounted(async () => {
   loading.value = true
   await loadLogs()
+  await loadCaptureState()
   loading.value = false
 
   // 每秒刷新一次日志
@@ -89,6 +138,20 @@ onUnmounted(() => {
         <h1 class="app-page-title">{{ t('components.console.title') }}</h1>
       </div>
       <div class="app-page-actions">
+        <label class="auto-scroll-toggle" :title="t('components.console.captureHint')">
+          <input
+            type="checkbox"
+            v-model="captureEnabled"
+            :disabled="captureToggling"
+            @change="toggleCapture"
+          />
+          <span>{{ t('components.console.captureMode') }}</span>
+        </label>
+        <button
+          class="secondary-btn"
+          :disabled="clearingCapture"
+          @click="clearCapturedRequests"
+        >{{ t('components.console.clearCapture') }}</button>
         <label class="auto-scroll-toggle">
           <input type="checkbox" v-model="autoScroll" />
           <span>{{ t('components.console.autoScroll') }}</span>

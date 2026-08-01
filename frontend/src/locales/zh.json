@@ -557,7 +557,18 @@
         "stream": "传输",
         "duration": "耗时",
         "cost": "金额",
-        "tokens": "Token 汇总"
+        "tokens": "Token 汇总",
+        "detail": "抓包"
+      },
+      "captureDetail": {
+        "title": "出站请求详情",
+        "view": "查看",
+        "headers": "请求头（已脱敏）",
+        "body": "请求正文（已脱敏已知认证信息，仍可能包含敏感内容）",
+        "truncated": "正文超过存储上限已截断，原始大小 {bytes} 字节",
+        "empty": "该请求未录制内容",
+        "copy": "复制",
+        "loadFailed": "加载详情失败："
       },
       "tokenLabels": {
         "input": "输入",
@@ -1061,7 +1072,14 @@
       "clear": "清空日志",
       "autoScroll": "自动滚动",
       "loading": "加载中...",
-      "empty": "暂无日志"
+      "empty": "暂无日志",
+      "captureMode": "抓包模式",
+      "captureHint": "开启后转发的出站请求头/正文将写入请求日志（已脱敏已知认证信息，正文仍可能包含敏感内容），应用重启自动关闭",
+      "captureToggleFailed": "切换抓包模式失败：",
+      "clearCapture": "清除抓包数据",
+      "clearCaptureConfirm": "确定要清除所有已录制的请求详情吗？（统计数据保留）",
+      "clearCaptureDone": "已清除 {count} 条请求详情",
+      "clearCaptureFailed": "清除失败："
     }
   }
 }

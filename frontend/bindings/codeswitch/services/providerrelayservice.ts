@@ -25,6 +25,14 @@ export function BoundAddresses(): $CancellablePromise<string[]> {
 }
 
 /**
+ * ClearCapturedRequests 清空已捕获的请求详情（保留统计行本身）。
+ * 同步直写（不走批量队列）：RPC 返回成功即代表已提交。返回清理行数
+ */
+export function ClearCapturedRequests(): $CancellablePromise<number> {
+    return $Call.ByID(3424084195);
+}
+
+/**
  * GetAllLastUsedProviders 获取所有平台最后使用的供应商
  * @author sm
  */
@@ -42,6 +50,21 @@ export function GetLastUsedProvider(platform: string): $CancellablePromise<$mode
     return $Call.ByID(4045318450, platform).then(($result: any) => {
         return $$createType2($result);
     });
+}
+
+/**
+ * GetRequestCapture 读取抓包模式开关
+ */
+export function GetRequestCapture(): $CancellablePromise<boolean> {
+    return $Call.ByID(1160443259);
+}
+
+/**
+ * SetRequestCapture 设置抓包模式开关。进程内状态、重启即关：
+ * 这是调试态功能，不持久化可避免用户遗忘后长期落盘敏感请求内容
+ */
+export function SetRequestCapture(enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2074094391, enabled);
 }
 
 export function Start(): $CancellablePromise<void> {

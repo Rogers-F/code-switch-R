@@ -556,7 +556,18 @@
         "stream": "Stream",
         "duration": "Duration",
         "cost": "Cost",
-        "tokens": "Tokens"
+        "tokens": "Tokens",
+        "detail": "Capture"
+      },
+      "captureDetail": {
+        "title": "Outbound request detail",
+        "view": "View",
+        "headers": "Request headers (redacted)",
+        "body": "Request body (known credentials redacted; may still contain sensitive content)",
+        "truncated": "Body exceeded the storage limit and was truncated; original size {bytes} bytes",
+        "empty": "No content recorded for this request",
+        "copy": "Copy",
+        "loadFailed": "Failed to load detail: "
       },
       "tokenLabels": {
         "input": "Input",
@@ -1060,7 +1071,14 @@
       "clear": "Clear logs",
       "autoScroll": "Auto scroll",
       "loading": "Loading...",
-      "empty": "No logs yet"
+      "empty": "No logs yet",
+      "captureMode": "Capture mode",
+      "captureHint": "Records outbound request headers/body into request logs (known credentials redacted; body may still contain sensitive content); turns off automatically on app restart",
+      "captureToggleFailed": "Failed to toggle capture mode: ",
+      "clearCapture": "Clear captured data",
+      "clearCaptureConfirm": "Clear all recorded request details? (Statistics are kept)",
+      "clearCaptureDone": "Cleared {count} request details",
+      "clearCaptureFailed": "Failed to clear: "
     }
   }
 }

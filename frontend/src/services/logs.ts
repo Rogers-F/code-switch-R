@@ -24,6 +24,24 @@ export type RequestLog = {
   ephemeral_5m_cost?: number
   ephemeral_1h_cost?: number
   has_pricing?: boolean
+  has_capture?: boolean
+}
+
+// 抓包详情：仅当抓包模式开启时该行才有内容，按需单独拉取
+export type RequestLogDetail = {
+  id: number
+  platform: string
+  provider: string
+  model: string
+  created_at: string
+  request_headers: string
+  request_body: string
+  body_truncated: boolean
+  body_bytes: number
+}
+
+export const fetchRequestLogDetail = async (id: number): Promise<RequestLogDetail> => {
+  return Call.ByName('codeswitch/services.LogService.GetRequestLogDetail', id)
 }
 
 type RequestLogQuery = {

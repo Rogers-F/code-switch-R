@@ -78,6 +78,7 @@
             <th class="col-duration">{{ t('components.logs.table.duration') }}</th>
             <th class="col-cost">{{ t('components.logs.table.cost') }}</th>
             <th class="col-tokens">{{ t('components.logs.table.tokens') }}</th>
+            <th class="col-capture">{{ t('components.logs.table.detail') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -112,9 +113,17 @@
                 <span class="token-value">{{ formatTokenNumber(item.cache_read_tokens) }}</span>
               </div>
             </td>
+            <td class="capture-cell">
+              <button
+                v-if="item.has_capture"
+                class="capture-view-btn"
+                @click="openCaptureDetail(item)"
+              >{{ t('components.logs.captureDetail.view') }}</button>
+              <span v-else>—</span>
+            </td>
           </tr>
           <tr v-if="!pagedLogs.length && !loading">
-            <td colspan="9" class="empty">{{ t('components.logs.empty') }}</td>
+            <td colspan="10" class="empty">{{ t('components.logs.empty') }}</td>
           </tr>
         </tbody>
       </table>
@@ -174,6 +183,55 @@
         </div>
       </div>
     </BaseModal>
+
+    <!-- 抓包详情弹窗 -->
+    <BaseModal
+      :open="captureDetailModal.open"
+      :title="t('components.logs.captureDetail.title')"
+      @close="closeCaptureDetail"
+    >
+      <div class="capture-detail-modal">
+        <p v-if="captureDetailModal.loading" class="capture-detail-hint">
+          {{ t('components.logs.loading') }}
+        </p>
+        <p v-else-if="captureDetailModal.error" class="capture-detail-hint capture-detail-error">
+          {{ t('components.logs.captureDetail.loadFailed') }}{{ captureDetailModal.error }}
+        </p>
+        <template v-else-if="captureDetailModal.data">
+          <div
+            v-if="!captureDetailModal.data.request_headers && !captureDetailModal.data.request_body"
+            class="capture-detail-hint"
+          >
+            {{ t('components.logs.captureDetail.empty') }}
+          </div>
+          <template v-else>
+            <section v-if="captureDetailModal.data.request_headers" class="capture-section">
+              <div class="capture-section__header">
+                <h4>{{ t('components.logs.captureDetail.headers') }}</h4>
+                <button
+                  class="capture-copy-btn"
+                  @click="copyCaptureText(prettyJSON(captureDetailModal.data.request_headers))"
+                >{{ t('components.logs.captureDetail.copy') }}</button>
+              </div>
+              <pre class="capture-pre">{{ prettyJSON(captureDetailModal.data.request_headers) }}</pre>
+            </section>
+            <section v-if="captureDetailModal.data.request_body" class="capture-section">
+              <div class="capture-section__header">
+                <h4>{{ t('components.logs.captureDetail.body') }}</h4>
+                <button
+                  class="capture-copy-btn"
+                  @click="copyCaptureText(captureDetailModal.data.request_body)"
+                >{{ t('components.logs.captureDetail.copy') }}</button>
+              </div>
+              <p v-if="captureDetailModal.data.body_truncated" class="capture-detail-hint">
+                {{ t('components.logs.captureDetail.truncated', { bytes: captureDetailModal.data.body_bytes }) }}
+              </p>
+              <pre class="capture-pre">{{ captureDetailModal.data.request_body }}</pre>
+            </section>
+          </template>
+        </template>
+      </div>
+    </BaseModal>
     </div>
   </div>
 </template>
@@ -188,7 +246,9 @@ import {
   fetchLogProviders,
   fetchLogStats,
   fetchProviderDailyStats,
+  fetchRequestLogDetail,
   type RequestLog,
+  type RequestLogDetail,
   type LogStats,
   type LogStatsSeries,
   type LogPlatform,
@@ -236,6 +296,59 @@ const tokenDetailModal = reactive<{
 }>({
   open: false,
 })
+
+// 抓包详情弹窗状态
+const captureDetailModal = reactive<{
+  open: boolean
+  loading: boolean
+  error: string
+  data: RequestLogDetail | null
+}>({
+  open: false,
+  loading: false,
+  error: '',
+  data: null,
+})
+
+// 尝试把 JSON 文本格式化为缩进形式，非 JSON 原样返回。
+// 仅用于请求头（值全是字符串，无精度问题）；正文必须原样展示，
+// JSON.parse/stringify 会把超过 2^53 的整数改值
+const prettyJSON = (text: string): string => {
+  if (!text) return ''
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return text
+  }
+}
+
+const openCaptureDetail = async (item: RequestLog) => {
+  captureDetailModal.open = true
+  captureDetailModal.loading = true
+  captureDetailModal.error = ''
+  captureDetailModal.data = null
+  try {
+    captureDetailModal.data = await fetchRequestLogDetail(item.id)
+  } catch (error) {
+    captureDetailModal.error = String((error as Error)?.message ?? error)
+  } finally {
+    captureDetailModal.loading = false
+  }
+}
+
+const closeCaptureDetail = () => {
+  captureDetailModal.open = false
+  captureDetailModal.data = null
+  captureDetailModal.error = ''
+}
+
+const copyCaptureText = async (text: string) => {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch (error) {
+    console.error('复制失败:', error)
+  }
+}
 
 // 打开金额明细弹窗
 const openCostDetailModal = async () => {
@@ -892,5 +1005,77 @@ html.dark .token-detail-item__name {
   color: #f97316;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+/* 抓包详情 */
+.col-capture {
+  width: 64px;
+}
+.capture-cell {
+  text-align: center;
+  color: var(--mac-text-secondary);
+}
+.capture-view-btn {
+  padding: 2px 10px;
+  border: 1px solid var(--mac-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mac-accent);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.capture-view-btn:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+.capture-detail-modal {
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.capture-detail-hint {
+  color: var(--mac-text-secondary);
+  font-size: 0.85rem;
+}
+.capture-detail-error {
+  color: #ef4444;
+}
+.capture-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.capture-section__header h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.capture-copy-btn {
+  padding: 2px 10px;
+  border: 1px solid var(--mac-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.capture-copy-btn:hover {
+  color: var(--mac-accent);
+}
+.capture-pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.12);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px;
+  overflow-y: auto;
+}
+html.dark .capture-pre {
+  background: rgba(148, 163, 184, 0.16);
 }
 </style>

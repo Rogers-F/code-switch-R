@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	modelpricing "codeswitch/resources/model-pricing"
@@ -64,15 +65,25 @@ type ProviderRelayService struct {
 	// boundAddrs 本次启动实际绑定成功的地址。监听地址在启动时就已冻结，
 	// 之后改设置不会重绑，所以任何"这个地址能不能连"的判断都必须以它为准，
 	// 不能拿磁盘上的设置去推断。
-	boundAddrs []string
-	lastUsed            map[string]*LastUsedProvider // 各平台最后使用的供应商
-	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
-	rrMu                sync.Mutex                   // 轮询状态锁
-	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider Name
+	boundAddrs  []string
+	lastUsed    map[string]*LastUsedProvider // 各平台最后使用的供应商
+	lastUsedMu  sync.RWMutex                 // 保护 lastUsed 的锁
+	rrMu        sync.Mutex                   // 轮询状态锁
+	rrLastStart map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider Name
 	// endpointCooldowns 多地址供应商的地址冷却状态（进程内，issue #27）
 	endpointCooldowns *endpointCooldownStore
 	// concurrency 按供应商并发配额（进程内，issue #21）
 	concurrency *concurrencyLimiter
+	// captureRequests 抓包模式开关（进程内状态，重启即关，issue #5）
+	captureRequests atomic.Bool
+	// captureClearGen "清除抓包数据"的代次。采集时记在 requestLog 上，落库前
+	// 不一致即置空：清除动作之后才结束的在途长流请求，不得把已被用户删除的
+	// 那批抓包内容重新写回
+	captureClearGen atomic.Int64
+	// captureWriteMu 让"清除"与"落库提交"线性化：写侧以读锁包住
+	// 代次校验 + INSERT 提交，清除以写锁包住代次推进 + UPDATE。
+	// 消除"校验通过后、提交完成前恰好发生清除"的写回窗口
+	captureWriteMu sync.RWMutex
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -620,6 +631,104 @@ func (prs *ProviderRelayService) BoundAddresses() []string {
 	return append([]string(nil), prs.boundAddrs...)
 }
 
+// SetRequestCapture 设置抓包模式开关。进程内状态、重启即关：
+// 这是调试态功能，不持久化可避免用户遗忘后长期落盘敏感请求内容
+func (prs *ProviderRelayService) SetRequestCapture(enabled bool) {
+	prs.captureRequests.Store(enabled)
+	if enabled {
+		fmt.Printf("[Capture] 抓包模式已开启：后续转发的出站请求头/正文（脱敏后）将写入请求日志\n")
+	} else {
+		fmt.Printf("[Capture] 抓包模式已关闭（历史抓包数据保留，可用清除功能删除）\n")
+	}
+}
+
+// GetRequestCapture 读取抓包模式开关
+func (prs *ProviderRelayService) GetRequestCapture() bool {
+	return prs.captureRequests.Load()
+}
+
+// ClearCapturedRequests 清空已捕获的请求详情（保留统计行本身）。
+// 同步直写（不走批量队列）：RPC 返回成功即代表已提交。返回清理行数
+func (prs *ProviderRelayService) ClearCapturedRequests() (int64, error) {
+	db, err := xdb.DB("default")
+	if err != nil {
+		return 0, err
+	}
+	// 先推进代次再清库（均在写锁内）：写侧的"校验代次 + 提交"持有读锁，
+	// 因此任何在途行要么在本次 UPDATE 之前已完整提交（被 UPDATE 清掉），
+	// 要么在写锁释放后才开始校验（读到新代次而自我置空）
+	prs.captureWriteMu.Lock()
+	defer prs.captureWriteMu.Unlock()
+	prs.captureClearGen.Add(1)
+	res, err := db.Exec(`UPDATE request_log SET request_headers = '', request_body = '', body_truncated = 0, body_bytes = 0 WHERE request_headers != '' OR request_body != '' OR body_truncated != 0 OR body_bytes != 0`)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := res.RowsAffected()
+	return affected, nil
+}
+
+// stripStaleCapture 落库前的代次校验：采集发生在请求开始，长流请求可能在
+// "清除抓包数据"之后才结束，代次不一致说明这批内容已被用户要求删除
+func (prs *ProviderRelayService) stripStaleCapture(requestLog *ReqeustLog) {
+	if requestLog.captureGen != prs.captureClearGen.Load() {
+		requestLog.RequestHeaders = ""
+		requestLog.RequestBody = ""
+		requestLog.BodyTruncated = false
+		requestLog.BodyBytes = 0
+	}
+}
+
+// requestLogInsertSQL 两条写入路径共用的 18 列 INSERT，避免列清单分叉
+const requestLogInsertSQL = `
+	INSERT INTO request_log (
+		platform, model, provider, http_code,
+		input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
+		reasoning_tokens, is_stream, duration_sec,
+		ephemeral_5m_tokens, ephemeral_1h_tokens, service_tier,
+		request_headers, request_body, body_truncated, body_bytes
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+func requestLogInsertArgs(requestLog *ReqeustLog) []interface{} {
+	return []interface{}{
+		requestLog.Platform, requestLog.Model, requestLog.Provider, requestLog.HttpCode,
+		requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
+		requestLog.CacheReadTokens, requestLog.ReasoningTokens,
+		boolToInt(requestLog.IsStream), requestLog.DurationSec,
+		requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens, requestLog.ServiceTier,
+		requestLog.RequestHeaders, requestLog.RequestBody,
+		boolToInt(requestLog.BodyTruncated), requestLog.BodyBytes,
+	}
+}
+
+func requestLogHasCapture(requestLog *ReqeustLog) bool {
+	return requestLog.RequestHeaders != "" || requestLog.RequestBody != "" ||
+		requestLog.BodyTruncated || requestLog.BodyBytes != 0
+}
+
+// writeRequestLog 落库统一入口，调用方需已持有 captureWriteMu 读锁。
+// 携带抓包内容的行同步直写——提交在读锁内完成，与清除的写锁真正线性化
+// （批量队列的 ExecBatchCtx 超时后任务仍会执行，"返回"不等于"已提交"，
+// 不能作为栅栏边界）；普通行保持批量队列路径，不受清除语义约束。
+// 抓包是低频调试态，直写不构成写入热点
+func (prs *ProviderRelayService) writeRequestLog(requestLog *ReqeustLog) error {
+	if requestLogHasCapture(requestLog) {
+		db, err := xdb.DB("default")
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(requestLogInsertSQL, requestLogInsertArgs(requestLog)...)
+		return err
+	}
+	if GlobalDBQueueLogs == nil {
+		return fmt.Errorf("队列未初始化")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return GlobalDBQueueLogs.ExecBatchCtx(ctx, requestLogInsertSQL, requestLogInsertArgs(requestLog)...)
+}
+
 // validateConfig 验证所有 provider 的配置
 // 返回警告列表（非阻塞性错误）
 func (prs *ProviderRelayService) validateConfig() []string {
@@ -1054,7 +1163,6 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 					}
 				}
 
-
 				// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
 				if busySkipped == 0 {
 					break
@@ -1291,7 +1399,6 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 				fmt.Printf("[WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 			}
 
-
 			// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
 			if busySkipped == 0 {
 				break
@@ -1472,47 +1579,26 @@ func (prs *ProviderRelayService) forwardRequest(
 		Model:    model,
 		IsStream: isStream,
 	}
+	// 抓包模式：录制终态出站 headers/body（映射/清理/认证注入均已完成，
+	// 即实际进 transport 前的应用层形态）。地址池内各地址仅 URL 不同，采集一次。
+	// 代次先于开关与内容读取：清除/关停若与采集竞态，只会让本行被误清（安全方向）
+	captureGen := prs.captureClearGen.Load()
+	if prs.captureRequests.Load() {
+		requestLog.captureGen = captureGen
+		requestLog.RequestHeaders = maskCaptureHeaders(headers, provider.ConnectivityAuthType, provider.APIKey)
+		requestLog.RequestBody, requestLog.BodyTruncated, requestLog.BodyBytes = redactCaptureBody(bodyBytes, provider.APIKey)
+	}
 	start := time.Now()
 	defer func() {
 		requestLog.DurationSec = time.Since(start).Seconds()
 		// 若请求过程中发生 rename,把旧名兑换成新名再落库
 		requestLog.Provider = ResolveProviderAlias(requestLog.Platform, requestLog.Provider)
+		// 读锁覆盖"代次校验 + 提交"全程,与清除的写锁互斥,堵死校验后提交前的清除窗口
+		prs.captureWriteMu.RLock()
+		defer prs.captureWriteMu.RUnlock()
+		prs.stripStaleCapture(requestLog)
 
-		// 【修复】判空保护：避免队列未初始化时 panic
-		if GlobalDBQueueLogs == nil {
-			fmt.Printf("⚠️  写入 request_log 失败: 队列未初始化\n")
-			return
-		}
-
-		// 使用批量队列写入 request_log（高频同构操作，批量提交）
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		err := GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-			INSERT INTO request_log (
-				platform, model, provider, http_code,
-				input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-				reasoning_tokens, is_stream, duration_sec,
-				ephemeral_5m_tokens, ephemeral_1h_tokens, service_tier
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
-			requestLog.Platform,
-			requestLog.Model,
-			requestLog.Provider,
-			requestLog.HttpCode,
-			requestLog.InputTokens,
-			requestLog.OutputTokens,
-			requestLog.CacheCreateTokens,
-			requestLog.CacheReadTokens,
-			requestLog.ReasoningTokens,
-			boolToInt(requestLog.IsStream),
-			requestLog.DurationSec,
-			requestLog.Ephemeral5mTokens,
-			requestLog.Ephemeral1hTokens,
-			requestLog.ServiceTier,
-		)
-
-		if err != nil {
+		if err := prs.writeRequestLog(requestLog); err != nil {
 			fmt.Printf("写入 request_log 失败: %v\n", err)
 		}
 	}()
@@ -1929,6 +2015,10 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		{"ephemeral_5m_tokens", "INTEGER DEFAULT 0"},
 		{"ephemeral_1h_tokens", "INTEGER DEFAULT 0"},
 		{"service_tier", "TEXT DEFAULT ''"},
+		{"request_headers", "TEXT DEFAULT ''"},
+		{"request_body", "TEXT DEFAULT ''"},
+		{"body_truncated", "INTEGER DEFAULT 0"},
+		{"body_bytes", "INTEGER DEFAULT 0"},
 	}
 	for _, m := range migrations {
 		if err := ensureRequestLogColumn(db, m.column, m.definition); err != nil {
@@ -2024,6 +2114,17 @@ type ReqeustLog struct {
 	Ephemeral1hCost float64 `json:"ephemeral_1h_cost"`
 	TotalCost       float64 `json:"total_cost"`
 	HasPricing      bool    `json:"has_pricing"`
+	// HasCapture 列表查询计算列：该行是否录有抓包数据（前端据此显示"查看详情"）
+	HasCapture bool `json:"has_capture"`
+
+	// ========== 抓包字段（issue #5）==========
+	// 列表接口不返回大字段（json:"-"），详情走 RequestLogDetail DTO
+	RequestHeaders string `json:"-"`
+	RequestBody    string `json:"-"`
+	BodyTruncated  bool   `json:"-"`
+	BodyBytes      int    `json:"-"`
+	// captureGen 采集时的清除代次（stripStaleCapture 用，不落库不序列化）
+	captureGen int64
 }
 
 // claude code usage parser
@@ -2435,25 +2536,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			requestLog.DurationSec = time.Since(start).Seconds()
 			// 若请求过程中发生 rename,把旧名兑换成新名再落库
 			requestLog.Provider = ResolveProviderAlias(requestLog.Platform, requestLog.Provider)
-			if GlobalDBQueueLogs == nil {
-				return
+			// 读锁覆盖"代次校验 + 提交"全程,与清除的写锁互斥,堵死校验后提交前的清除窗口
+			prs.captureWriteMu.RLock()
+			defer prs.captureWriteMu.RUnlock()
+			prs.stripStaleCapture(requestLog)
+			if err := prs.writeRequestLog(requestLog); err != nil {
+				fmt.Printf("[Gemini] 写入 request_log 失败: %v\n", err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = GlobalDBQueueLogs.ExecBatchCtx(ctx, `
-				INSERT INTO request_log (
-					platform, model, provider, http_code,
-					input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-					reasoning_tokens, is_stream, duration_sec,
-					ephemeral_5m_tokens, ephemeral_1h_tokens, service_tier
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`,
-				requestLog.Platform, requestLog.Model, requestLog.Provider, requestLog.HttpCode,
-				requestLog.InputTokens, requestLog.OutputTokens, requestLog.CacheCreateTokens,
-				requestLog.CacheReadTokens, requestLog.ReasoningTokens,
-				boolToInt(requestLog.IsStream), requestLog.DurationSec,
-				requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens, requestLog.ServiceTier,
-			)
 		}()
 
 		// 获取拉黑功能开关状态
@@ -2629,7 +2718,6 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 					}
 				}
 
-
 				// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
 				if busySkipped == 0 {
 					break
@@ -2798,7 +2886,6 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				fmt.Printf("[Gemini] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 			}
 
-
 			// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
 			if busySkipped == 0 {
 				break
@@ -2933,6 +3020,12 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	requestLog.Provider = provider.Name
 	// 【修复】每次尝试开始前重置 HttpCode，避免重试时沿用上一次的状态码
 	requestLog.HttpCode = 0
+	// 抓包字段同步重置：多次尝试复用同一 requestLog，必须在任何提前返回之前清掉
+	// 上一家的残留，否则本家构造请求失败时会落下"新 Provider + 旧请求内容"的错配
+	requestLog.RequestHeaders = ""
+	requestLog.RequestBody = ""
+	requestLog.BodyTruncated = false
+	requestLog.BodyBytes = 0
 	// 优先从 endpoint 提取模型名（如 gemini-2.5-pro），否则回退到 provider.Model
 	if extractedModel := extractGeminiModelFromEndpoint(endpoint); extractedModel != "" {
 		requestLog.Model = extractedModel
@@ -2965,6 +3058,23 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 设置 API Key
 	if provider.APIKey != "" {
 		req.Header.Set("x-goog-api-key", provider.APIKey)
+	}
+
+	// 抓包模式：字段已在本次尝试开头统一重置，这里按开关采集终态出站请求
+	// （x-goog-api-key 注入完成、进入 transport 之前的应用层形态）。
+	// 代次先于开关与内容读取：与清除/关停竞态时只会让本行被误清（安全方向）
+	captureGen := prs.captureClearGen.Load()
+	if prs.captureRequests.Load() {
+		requestLog.captureGen = captureGen
+		flat := make(map[string]string, len(req.Header))
+		for k, vs := range req.Header {
+			// 多值头合并保留（transport 会全部发送，丢值会让详情失真）
+			if len(vs) > 0 {
+				flat[k] = strings.Join(vs, ", ")
+			}
+		}
+		requestLog.RequestHeaders = maskCaptureHeaders(flat, "", provider.APIKey)
+		requestLog.RequestBody, requestLog.BodyTruncated, requestLog.BodyBytes = redactCaptureBody(bodyBytes, provider.APIKey)
 	}
 
 	// 发送请求（与 Claude/Codex 转发共用连接池，避免每请求新建 Transport；
@@ -3390,7 +3500,6 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 					}
 				}
 
-
 				// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
 				if busySkipped == 0 {
 					break
@@ -3611,7 +3720,6 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 
 				fmt.Printf("[CustomCLI][WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 			}
-
 
 			// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
 			if busySkipped == 0 {

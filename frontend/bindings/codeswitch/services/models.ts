@@ -2691,6 +2691,11 @@ export class ReqeustLog {
     "total_cost": number;
     "has_pricing": boolean;
 
+    /**
+     * HasCapture 列表查询计算列：该行是否录有抓包数据（前端据此显示"查看详情"）
+     */
+    "has_capture": boolean;
+
     /** Creates a new ReqeustLog instance. */
     constructor($$source: Partial<ReqeustLog> = {}) {
         if (!("id" in $$source)) {
@@ -2768,6 +2773,9 @@ export class ReqeustLog {
         if (!("has_pricing" in $$source)) {
             this["has_pricing"] = false;
         }
+        if (!("has_capture" in $$source)) {
+            this["has_capture"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -2778,6 +2786,62 @@ export class ReqeustLog {
     static createFrom($$source: any = {}): ReqeustLog {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ReqeustLog($$parsedSource as Partial<ReqeustLog>);
+    }
+}
+
+/**
+ * RequestLogDetail 单条日志的抓包详情（按需读取，避免列表携带大字段）
+ */
+export class RequestLogDetail {
+    "id": number;
+    "platform": string;
+    "provider": string;
+    "model": string;
+    "created_at": string;
+    "request_headers": string;
+    "request_body": string;
+    "body_truncated": boolean;
+    "body_bytes": number;
+
+    /** Creates a new RequestLogDetail instance. */
+    constructor($$source: Partial<RequestLogDetail> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = "";
+        }
+        if (!("request_headers" in $$source)) {
+            this["request_headers"] = "";
+        }
+        if (!("request_body" in $$source)) {
+            this["request_body"] = "";
+        }
+        if (!("body_truncated" in $$source)) {
+            this["body_truncated"] = false;
+        }
+        if (!("body_bytes" in $$source)) {
+            this["body_bytes"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RequestLogDetail instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RequestLogDetail {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RequestLogDetail($$parsedSource as Partial<RequestLogDetail>);
     }
 }
 

@@ -99,6 +99,12 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 	}
 	model := xdb.New("request_log")
 	options := []xdb.Option{
+		// 显式投影：绝不把抓包大字段（request_headers/request_body）拉进列表——
+		// 一页 200 行最坏能带出十几 MB 正文。has_capture 供前端判断可否展开详情
+		xdb.Field("id, platform, model, provider, http_code, input_tokens, output_tokens, " +
+			"cache_create_tokens, cache_read_tokens, reasoning_tokens, is_stream, duration_sec, " +
+			"created_at, ephemeral_5m_tokens, ephemeral_1h_tokens, service_tier, " +
+			"(request_headers != '' OR request_body != '' OR body_truncated != 0 OR body_bytes != 0) AS has_capture"),
 		xdb.OrderByDesc("id"),
 		xdb.Limit(limit),
 	}
@@ -131,11 +137,53 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 			IsStream:          record.GetBool("is_stream"),
 			DurationSec:       record.GetFloat64("duration_sec"),
 			ServiceTier:       record.GetString("service_tier"),
+			HasCapture:        record.GetBool("has_capture"),
 		}
 		ls.decorateCost(&logEntry)
 		logs = append(logs, logEntry)
 	}
 	return logs, nil
+}
+
+// RequestLogDetail 单条日志的抓包详情（按需读取，避免列表携带大字段）
+type RequestLogDetail struct {
+	ID             int64  `json:"id"`
+	Platform       string `json:"platform"`
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	CreatedAt      string `json:"created_at"`
+	RequestHeaders string `json:"request_headers"`
+	RequestBody    string `json:"request_body"`
+	BodyTruncated  bool   `json:"body_truncated"`
+	BodyBytes      int    `json:"body_bytes"`
+}
+
+// GetRequestLogDetail 读取单条日志的出站请求详情（抓包模式录制的内容）
+func (ls *LogService) GetRequestLogDetail(id int64) (*RequestLogDetail, error) {
+	model := xdb.New("request_log")
+	records, err := model.Selects(
+		xdb.Field("id, platform, provider, model, created_at, request_headers, request_body, body_truncated, body_bytes"),
+		xdb.WhereEq("id", id),
+		xdb.Limit(1),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, fmt.Errorf("未找到 ID 为 %d 的日志", id)
+	}
+	record := records[0]
+	return &RequestLogDetail{
+		ID:             record.GetInt64("id"),
+		Platform:       record.GetString("platform"),
+		Provider:       record.GetString("provider"),
+		Model:          record.GetString("model"),
+		CreatedAt:      record.GetString("created_at"),
+		RequestHeaders: record.GetString("request_headers"),
+		RequestBody:    record.GetString("request_body"),
+		BodyTruncated:  record.GetBool("body_truncated"),
+		BodyBytes:      record.GetInt("body_bytes"),
+	}, nil
 }
 
 func (ls *LogService) ListProviders(platform string) ([]string, error) {

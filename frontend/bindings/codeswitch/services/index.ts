@@ -107,6 +107,7 @@ export {
     ProviderTimeline,
     ProxyInjection,
     ReqeustLog,
+    RequestLogDetail,
     RetryConfig,
     SanitizeConfig,
     Skill,

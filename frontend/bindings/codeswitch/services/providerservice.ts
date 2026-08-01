@@ -26,6 +26,20 @@ export function LoadProviders(kind: string): $CancellablePromise<$models.Provide
 }
 
 /**
+ * LoadProvidersWithGen 返回配对一致的 (providers, 配置代数)。
+ * 并发限流的容量热更新依赖两者配对。必须与写入方共用 ps.mu：
+ * 写入方"改名文件→递增代数"两步之间存在窗口，锁外读取可能拿到
+ * (新配置, 旧代数)，与在途旧副本同代后容量会被来回覆盖。
+ * 锁内用 loadProvidersNoLock（其迁移保存不再加锁），无递归死锁。
+ */
+export function LoadProvidersWithGen(kind: string): $CancellablePromise<[$models.Provider[], number]> {
+    return $Call.ByID(2303523163, kind).then(($result: any) => {
+        $result[0] = $$createType2($result[0]);
+        return $result;
+    });
+}
+
+/**
  * RenameProvider 改名 provider:事务更新 DB 中按 name 存储的历史数据,
  * 写入 48h alias 兜底 in-flight 请求,最后原子替换配置文件。
  * 
