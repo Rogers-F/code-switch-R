@@ -1,55 +1,50 @@
 <template>
   <div class="main-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ t('components.skill.hero.eyebrow') }}</p>
-      <button class="ghost-icon" :title="t('components.skill.actions.back')"
-        :data-tooltip="t('components.skill.actions.back')" @click="goHome">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
-            stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="ghost-icon" :title="t('components.skill.actions.refresh')"
-        :data-tooltip="t('components.skill.actions.refresh')" :disabled="refreshing" @click="refresh">
-        <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spin: refreshing }">
-          <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
-            stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M20.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
-            stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="ghost-icon" :title="t('components.skill.actions.openFolder')"
-        :data-tooltip="t('components.skill.actions.openFolder')" @click="handleOpenFolder">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
-            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="ghost-icon" :title="t('components.skill.repos.open')"
-        :data-tooltip="t('components.skill.repos.open')" @click="openRepoModal">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 5h14v6H5zM7 13h10v6H7z" fill="none" stroke="currentColor" stroke-width="1.5"
-            stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M12 7.5v1M12 15.5v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-        </svg>
-      </button>
-    </div>
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('components.skill.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('components.skill.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <button class="ghost-icon" :title="t('components.skill.actions.refresh')"
+          :aria-label="t('components.skill.actions.refresh')" :class="{ rotating: refreshing }" :disabled="refreshing"
+          @click="refresh">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.5 8a8.5 8.5 0 10-2.38 7.41" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M20.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+              stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button class="ghost-icon" :title="t('components.skill.actions.openFolder')"
+          :aria-label="t('components.skill.actions.openFolder')" @click="handleOpenFolder">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button class="ghost-icon" :title="t('components.skill.repos.open')"
+          :aria-label="t('components.skill.repos.open')" @click="openRepoModal">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 5h14v6H5zM7 13h10v6H7z" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M12 7.5v1M12 15.5v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </header>
 
-    <div class="contrib-page skill-page">
-      <header class="skill-hero">
-        <div class="skill-hero-text">
-          <h1>{{ t('components.skill.hero.title') }}</h1>
-          <p class="skill-lead">{{ t('components.skill.hero.lead') }}</p>
-        </div>
-      </header>
+    <div class="app-page-container skill-page">
 
       <!-- Platform Tabs -->
-      <div class="skill-platform-tabs">
+      <div class="tab-group" role="tablist">
         <button
           v-for="platform in platforms"
           :key="platform.value"
-          :class="['skill-platform-tab', { active: activePlatform === platform.value }]"
+          class="tab-pill"
+          :class="{ active: activePlatform === platform.value }"
           @click="switchPlatform(platform.value)"
+          role="tab"
         >
           {{ platform.label }}
         </button>
@@ -298,7 +293,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { Browser } from '@wailsio/runtime'
 import {
   fetchSkills,
@@ -317,7 +311,6 @@ import {
 import BaseModal from '../common/BaseModal.vue'
 import SkillCard from './SkillCard.vue'
 
-const router = useRouter()
 const { t } = useI18n()
 
 // Platform definitions (use computed for i18n reactivity)
@@ -556,11 +549,6 @@ const handleUninstall = async (skill: SkillSummary) => {
   }
 }
 
-// Navigation
-const goHome = () => {
-  router.push('/')
-}
-
 const openExternal = (target: string) => {
   if (!target) return
   Browser.OpenURL(target).catch(() => {
@@ -654,38 +642,6 @@ onMounted(() => {
 .skill-page {
   gap: 32px;
   color: var(--mac-text);
-}
-
-/* Platform Tabs */
-.skill-platform-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--mac-border);
-  padding-bottom: 12px;
-}
-
-.skill-platform-tab {
-  padding: 8px 16px;
-  border: 1px solid var(--mac-border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--mac-text-secondary);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.skill-platform-tab:hover {
-  background: var(--mac-surface);
-  color: var(--mac-text);
-}
-
-.skill-platform-tab.active {
-  background: var(--mac-accent);
-  color: white;
-  border-color: var(--mac-accent);
 }
 
 /* Skill Groups */
@@ -1006,21 +962,6 @@ onMounted(() => {
 }
 
 /* Common */
-.skill-hero {
-  margin: 12px 0 12px;
-}
-
-.skill-lead {
-  color: var(--mac-text-secondary);
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
-.skill-hero h1 {
-  font-size: clamp(26px, 3vw, 34px);
-  margin-bottom: 8px;
-}
-
 .skill-list-section {
   margin-top: 16px;
 }
@@ -1038,10 +979,6 @@ onMounted(() => {
 .skill-error {
   color: #f87171;
   margin-top: 16px;
-}
-
-.ghost-icon svg.spin {
-  animation: skill-spin 1s linear infinite;
 }
 
 .skill-action-spinner {
@@ -1081,11 +1018,7 @@ html.dark .skill-card.available-card {
 }
 
 @media (max-width: 768px) {
-  .skill-hero {
-    flex-direction: column;
-  }
-
-  .skill-platform-tabs {
+  .tab-group {
     flex-wrap: wrap;
   }
 }

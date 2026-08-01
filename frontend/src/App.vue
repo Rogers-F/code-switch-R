@@ -1,26 +1,10 @@
 <script setup lang="ts">
 import { RouterView, useRoute } from 'vue-router'
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import UpdateNotification from './components/common/UpdateNotification.vue'
 
-const applyTheme = () => {
-  const userTheme = localStorage.getItem('theme')
-  const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-
-  const isDark = userTheme === 'dark' || (!userTheme && systemPrefersDark)
-
-  document.documentElement.classList.toggle('dark', isDark)
-}
-
-onMounted(() => {
-  applyTheme()
-
-  // 可监听系统主题变化自动更新（可选）
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    applyTheme()
-  })
-})
+// 主题初始化与系统主题跟随由 main.ts 的 initTheme()（ThemeManager）统一负责，勿在组件层重复实现
 
 const route = useRoute()
 const isTray = computed(() => route.path === '/tray')

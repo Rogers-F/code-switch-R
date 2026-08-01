@@ -3,10 +3,17 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { fetchCurrentVersion } from '../services/version'
+import { useTheme } from '../composables/useTheme'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
+
+// 主题切换（与设置页共享同一状态源）
+const { isDark, setMode } = useTheme()
+const toggleTheme = () => {
+  setMode(isDark.value ? 'light' : 'dark')
+}
 
 // 动态版本号（从后端获取）
 const appVersion = ref('...')
@@ -181,8 +188,23 @@ const navigate = (path: string) => {
       </button>
     </div>
 
-    <div class="sidebar-footer" v-if="!isCollapsed">
-      <span class="version">{{ appVersion }}</span>
+    <div class="sidebar-footer" :class="{ collapsed: isCollapsed }">
+      <span class="version" v-if="!isCollapsed">{{ appVersion }}</span>
+      <button
+        class="theme-toggle-switch"
+        :title="isDark ? t('sidebar.switchToLight') : t('sidebar.switchToDark')"
+        :aria-label="t('sidebar.toggleTheme')"
+        :aria-pressed="isDark"
+        @click="toggleTheme"
+      >
+        <svg v-if="isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      </button>
     </div>
   </nav>
 </template>
@@ -206,8 +228,8 @@ const navigate = (path: string) => {
 }
 
 .sidebar-header {
-  /* macOS 红绿灯按钮区域约 52px 高，添加额外 padding */
-  padding: 52px 16px 16px;
+  /* macOS 红绿灯占位高度走全局变量，其余平台为常规留白 */
+  padding: var(--page-top-pad) 16px 16px;
   border-bottom: 1px solid var(--mac-border);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -224,7 +246,7 @@ const navigate = (path: string) => {
 }
 
 .mac-sidebar.collapsed .sidebar-header {
-  padding: 52px 0 16px;
+  padding: var(--page-top-pad) 0 16px;
   grid-template-columns: 1fr;
   justify-items: center;
 }
@@ -245,7 +267,7 @@ const navigate = (path: string) => {
   height: 28px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--mac-text-secondary);
   cursor: pointer;
   display: flex;
@@ -372,11 +394,51 @@ html.dark .nav-item:hover {
 .sidebar-footer {
   padding: 12px 16px;
   border-top: 1px solid var(--mac-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-footer.collapsed {
+  justify-content: center;
+  padding: 12px 0;
 }
 
 .version {
   font-size: 0.75rem;
   color: var(--mac-text-secondary);
   opacity: 0.6;
+}
+
+.theme-toggle-switch {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--mac-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.theme-toggle-switch:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--mac-text);
+}
+
+html.dark .theme-toggle-switch:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--mac-text);
+}
+
+.theme-toggle-switch svg {
+  width: 16px;
+  height: 16px;
 }
 </style>

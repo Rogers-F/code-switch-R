@@ -76,22 +76,41 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="envcheck-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('envcheck.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('envcheck.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('envcheck.hero.lead') }}</p>
-    </div>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('envcheck.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('envcheck.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <button
+          class="ghost-icon"
+          :class="{ rotating: loading }"
+          :title="t('envcheck.refresh')"
+          :aria-label="t('envcheck.refresh')"
+          @click="checkConflicts"
+          :disabled="loading"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-page-container envcheck-page">
 
     <!-- Platform Tabs -->
-    <div class="platform-tabs">
+    <div class="tab-group" role="tablist">
       <button
         v-for="platform in platforms"
         :key="platform.id"
-        class="platform-tab"
+        class="tab-pill"
         :class="{ active: activePlatform === platform.id }"
         @click="activePlatform = platform.id"
+        role="tab"
       >
         {{ platform.name }}
       </button>
@@ -166,93 +185,11 @@ onMounted(() => {
       <span>{{ t('envcheck.checking') }}</span>
     </div>
 
-    <!-- Refresh Button -->
-    <div class="page-actions">
-      <button class="refresh-btn" @click="checkConflicts" :disabled="loading">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: loading }">
-          <polyline points="23 4 23 10 17 10"></polyline>
-          <polyline points="1 20 1 14 7 14"></polyline>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-        </svg>
-        {{ t('envcheck.refresh') }}
-      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.envcheck-page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.page-hero {
-  margin-bottom: 32px;
-}
-
-.hero-eyebrow {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--mac-accent);
-  margin-bottom: 8px;
-}
-
-.hero-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--mac-text);
-  margin-bottom: 8px;
-}
-
-.hero-lead {
-  font-size: 0.95rem;
-  color: var(--mac-text-secondary);
-  line-height: 1.5;
-}
-
-.platform-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  padding: 4px;
-  background: var(--mac-surface);
-  border-radius: 12px;
-  border: 1px solid var(--mac-border);
-}
-
-.platform-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--mac-text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.platform-tab:hover {
-  color: var(--mac-text);
-  background: rgba(15, 23, 42, 0.05);
-}
-
-html.dark .platform-tab:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.platform-tab.active {
-  background: var(--mac-accent);
-  color: #fff;
-}
-
 .status-banner {
   display: flex;
   align-items: center;
@@ -406,46 +343,5 @@ html.dark code.detail-value {
   text-align: center;
   padding: 24px;
   color: #ef4444;
-}
-
-.page-actions {
-  display: flex;
-  justify-content: center;
-}
-
-.page-actions .refresh-btn {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 24px;
-  border: 1px solid var(--mac-border);
-  border-radius: 999px;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  border-color: var(--mac-accent);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.refresh-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.refresh-btn svg.spin {
-  animation: spin 1s linear infinite;
 }
 </style>

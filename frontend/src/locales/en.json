@@ -69,7 +69,10 @@
     "env": "Env Check",
     "logs": "Logs",
     "console": "Console",
-    "settings": "Settings"
+    "settings": "Settings",
+    "toggleTheme": "Toggle light / dark theme",
+    "switchToLight": "Switch to light mode",
+    "switchToDark": "Switch to dark mode"
   },
   "availability": {
     "title": "Availability Monitor",
@@ -558,7 +561,7 @@
       "streamOff": "Single response",
       "back": "Back to home",
       "nextRefresh": "Next refresh in {seconds}s",
-      "query": "Query",
+      "query": "Filter",
       "costDetail": {
         "title": "Today's Cost Breakdown",
         "empty": "No cost records today"
@@ -948,7 +951,8 @@
     "themesetting": {
       "select": {
         "opt_dark": "Dark Mode",
-        "opt_light": "Bright Mode"
+        "opt_light": "Bright Mode",
+        "opt_system": "System"
       }
     },
     "shortcut": {
@@ -1026,6 +1030,13 @@
       "tabPreview": "Preview",
       "tabCurrent": "Current",
       "saveError": "Failed to save configuration"
+    },
+    "console": {
+      "title": "Console",
+      "clear": "Clear logs",
+      "autoScroll": "Auto scroll",
+      "loading": "Loading...",
+      "empty": "No logs yet"
     }
   }
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 
 interface ConsoleLog {
@@ -9,16 +9,12 @@ interface ConsoleLog {
   message: string
 }
 
-const router = useRouter()
+const { t } = useI18n()
 const logs = ref<ConsoleLog[]>([])
 const autoScroll = ref(true)
 const loading = ref(false)
 const logsContainer = ref<HTMLElement>()
 let refreshInterval: number | null = null
-
-const goBack = () => {
-  router.push('/')
-}
 
 const loadLogs = async () => {
   try {
@@ -88,49 +84,41 @@ onUnmounted(() => {
 
 <template>
   <div class="main-shell console-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">控制台</p>
-      <div class="actions-group">
-        <button class="secondary-btn" @click="clearLogs">清空日志</button>
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('components.console.title') }}</h1>
+      </div>
+      <div class="app-page-actions">
         <label class="auto-scroll-toggle">
           <input type="checkbox" v-model="autoScroll" />
-          <span>自动滚动</span>
+          <span>{{ t('components.console.autoScroll') }}</span>
         </label>
-        <button class="ghost-icon" aria-label="返回" @click="goBack">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M15 18l-6-6 6-6"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
+        <button class="secondary-btn" @click="clearLogs">{{ t('components.console.clear') }}</button>
       </div>
-    </div>
+    </header>
 
-    <div class="console-container">
-      <div v-if="loading" class="loading-state">
-        <div class="spinner"></div>
-        <p>加载中...</p>
-      </div>
-
-      <div v-else class="console-content" ref="logsContainer">
-        <div v-if="logs.length === 0" class="empty-state">
-          <p>暂无日志</p>
+    <div class="app-page-container console-page">
+      <div class="console-container">
+        <div v-if="loading" class="loading-state">
+          <div class="spinner"></div>
+          <p>{{ t('components.console.loading') }}</p>
         </div>
 
-        <div
-          v-for="(log, index) in logs"
-          :key="index"
-          class="log-entry"
-          :class="getLevelClass(log.level)"
-        >
-          <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
-          <span class="log-level">{{ log.level }}</span>
-          <span class="log-message">{{ log.message }}</span>
+        <div v-else class="console-content" ref="logsContainer">
+          <div v-if="logs.length === 0" class="empty-state">
+            <p>{{ t('components.console.empty') }}</p>
+          </div>
+
+          <div
+            v-for="(log, index) in logs"
+            :key="index"
+            class="log-entry"
+            :class="getLevelClass(log.level)"
+          >
+            <span class="log-timestamp">{{ formatTimestamp(log.timestamp) }}</span>
+            <span class="log-level">{{ log.level }}</span>
+            <span class="log-message">{{ log.message }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -145,10 +133,8 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.actions-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.console-page {
+  min-height: 0;
 }
 
 .auto-scroll-toggle {
@@ -167,6 +153,7 @@ onUnmounted(() => {
 
 .console-container {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   background: var(--mac-surface);
   border: 1px solid var(--mac-border);

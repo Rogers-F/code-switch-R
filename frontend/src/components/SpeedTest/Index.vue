@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   TestEndpoints
@@ -52,6 +52,27 @@ function addEndpoint() {
     source: 'manual'  // 手动添加的端点
   })
   newUrl.value = ''
+}
+
+// 添加端点弹窗（仅 UI 状态，校验与写入仍走 addEndpoint）
+const showAddModal = ref(false)
+const addInputRef = ref<HTMLInputElement | null>(null)
+
+function openAddModal() {
+  newUrl.value = ''
+  showAddModal.value = true
+  nextTick(() => {
+    addInputRef.value?.focus()
+  })
+}
+
+function handleAddConfirm() {
+  const before = endpoints.value.length
+  addEndpoint()
+  // 校验失败时保持弹窗与输入不变（与原先行内输入的静默行为一致）
+  if (endpoints.value.length > before) {
+    showAddModal.value = false
+  }
 }
 
 function removeEndpoint(index: number) {
@@ -162,45 +183,80 @@ onActivated(() => {
 </script>
 
 <template>
-  <div class="speedtest-page">
-    <!-- Hero Section -->
-    <div class="page-hero">
-      <p class="hero-eyebrow">{{ t('speedtest.hero.eyebrow') }}</p>
-      <h1 class="hero-title">{{ t('speedtest.hero.title') }}</h1>
-      <p class="hero-lead">{{ t('speedtest.hero.lead') }}</p>
-    </div>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('speedtest.hero.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('speedtest.hero.lead') }}</p>
+      </div>
+      <div class="app-page-actions">
+        <!-- 添加端点 -->
+        <button
+          class="ghost-icon"
+          @click="openAddModal"
+          :title="t('speedtest.add')"
+          :aria-label="t('speedtest.add')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
 
-    <!-- URL Input -->
-    <div class="input-section">
-      <input
-        v-model="newUrl"
-        type="url"
-        class="url-input"
-        :placeholder="t('speedtest.placeholder')"
-        @keyup.enter="addEndpoint"
-      />
-      <button class="add-btn" @click="addEndpoint" :disabled="!newUrl.trim()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        {{ t('speedtest.add') }}
-      </button>
-      <button
-        class="sync-btn"
-        :class="{ syncing: isLoadingProviders }"
-        @click="syncProviderEndpoints"
-        :disabled="isLoadingProviders"
-        :title="t('speedtest.syncButton')"
-      >
-        <svg v-if="!isLoadingProviders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 6v6l4 2"></path>
-        </svg>
-      </button>
+        <!-- 同步供应商端点 -->
+        <button
+          class="ghost-icon"
+          :class="{ rotating: isLoadingProviders }"
+          @click="syncProviderEndpoints"
+          :disabled="isLoadingProviders"
+          :title="t('speedtest.syncButton')"
+          :aria-label="t('speedtest.syncButton')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+          </svg>
+        </button>
+
+        <!-- 开始测试 -->
+        <button
+          class="ghost-icon"
+          :class="{ rotating: isTesting }"
+          @click="runTest"
+          :disabled="isTesting || endpointCount === 0"
+          :title="isTesting ? t('speedtest.testing') : t('speedtest.start')"
+          :aria-label="isTesting ? t('speedtest.testing') : t('speedtest.start')"
+        >
+          <svg v-if="!isTesting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 6v6l4 2"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-page-container speedtest-page">
+
+    <!-- 延迟图例 -->
+    <div class="legend">
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #10b981;"></span>
+        <span>&lt; 300ms</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #f59e0b;"></span>
+        <span>300-500ms</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #f97316;"></span>
+        <span>500-800ms</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #ef4444;"></span>
+        <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
+      </div>
     </div>
 
     <!-- 加载状态提示 -->
@@ -218,21 +274,6 @@ onActivated(() => {
       <span class="list-title">
         {{ t('speedtest.endpoints', { count: endpointCount }) }}
       </span>
-      <button
-        class="test-btn"
-        :class="{ testing: isTesting }"
-        @click="runTest"
-        :disabled="isTesting || endpointCount === 0"
-      >
-        <svg v-if="!isTesting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 6v6l4 2"></path>
-        </svg>
-        {{ isTesting ? t('speedtest.testing') : t('speedtest.start') }}
-      </button>
     </div>
 
     <!-- Endpoint List -->
@@ -285,136 +326,44 @@ onActivated(() => {
       </div>
     </div>
 
-    <!-- Legend -->
-    <div class="legend">
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #10b981;"></span>
-        <span>&lt; 300ms</span>
+    <!-- 添加端点弹窗 -->
+    <div
+      v-if="showAddModal"
+      class="modal-overlay"
+      @click.self="showAddModal = false"
+      @keydown.esc="showAddModal = false"
+    >
+      <div class="modal-content" role="dialog" aria-modal="true" :aria-label="t('speedtest.add')">
+        <h2 class="modal-title">{{ t('speedtest.add') }}</h2>
+
+        <div class="form-group">
+          <label>{{ t('speedtest.placeholder') }}</label>
+          <input
+            v-model="newUrl"
+            type="url"
+            class="form-input"
+            placeholder="https://api.example.com"
+            @keyup.enter="handleAddConfirm"
+            ref="addInputRef"
+          />
+        </div>
+
+        <div class="modal-actions">
+          <button class="action-btn" @click="showAddModal = false">
+            {{ t('common.cancel') }}
+          </button>
+          <button class="primary-btn" @click="handleAddConfirm" :disabled="!newUrl.trim()">
+            {{ t('speedtest.add') }}
+          </button>
+        </div>
       </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #f59e0b;"></span>
-        <span>300-500ms</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #f97316;"></span>
-        <span>500-800ms</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-dot" style="background: #ef4444;"></span>
-        <span>&gt; 800ms / {{ t('speedtest.failed') }}</span>
-      </div>
+    </div>
+
     </div>
   </div>
 </template>
 
 <style scoped>
-.speedtest-page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.page-hero {
-  margin-bottom: 32px;
-}
-
-.hero-eyebrow {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--mac-accent);
-  margin-bottom: 8px;
-}
-
-.hero-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--mac-text);
-  margin-bottom: 8px;
-}
-
-.hero-lead {
-  font-size: 0.95rem;
-  color: var(--mac-text-secondary);
-  line-height: 1.5;
-}
-
-.input-section {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.url-input {
-  flex: 1;
-  padding: 12px 16px;
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  font-size: 0.9rem;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  transition: all 0.15s ease;
-}
-
-.url-input:focus {
-  outline: none;
-  border-color: var(--mac-accent);
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
-}
-
-.input-section .add-btn {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.input-section .sync-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border: 1px solid var(--mac-border);
-  border-radius: 12px;
-  background: var(--mac-surface);
-  color: var(--mac-text);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.sync-btn:hover:not(:disabled) {
-  border-color: var(--mac-accent);
-  color: var(--mac-accent);
-}
-
-.sync-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.sync-btn svg {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.sync-btn.syncing svg.spin {
-  animation: spin 1s linear infinite;
-}
-
 .loading-tip {
   padding: 12px 16px;
   margin-bottom: 16px;
@@ -445,21 +394,6 @@ onActivated(() => {
   color: #f87171;
 }
 
-.add-btn:hover:not(:disabled) {
-  border-color: var(--mac-accent);
-}
-
-.add-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.add-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
 .list-header {
   display: flex;
   align-items: center;
@@ -470,47 +404,6 @@ onActivated(() => {
 .list-title {
   font-size: 0.9rem;
   color: var(--mac-text-secondary);
-}
-
-.list-header .test-btn {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 999px;
-  background: var(--mac-accent);
-  color: #fff;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.test-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.test-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.test-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.test-btn.testing svg.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .endpoint-list {
@@ -661,5 +554,71 @@ onActivated(() => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+/* 添加端点弹窗 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--mac-surface);
+  border-radius: 16px;
+  padding: 24px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--mac-border);
+}
+
+.modal-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--mac-text);
+  margin-bottom: 24px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--mac-text);
+  margin-bottom: 8px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--mac-surface-strong);
+  color: var(--mac-text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>

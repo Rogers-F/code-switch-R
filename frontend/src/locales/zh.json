@@ -69,7 +69,10 @@
     "env": "环境",
     "logs": "日志",
     "console": "控制台",
-    "settings": "设置"
+    "settings": "设置",
+    "toggleTheme": "切换明暗主题",
+    "switchToLight": "切换到亮色模式",
+    "switchToDark": "切换到暗色模式"
   },
   "availability": {
     "title": "可用性监控",
@@ -559,7 +562,7 @@
       "streamOff": "非流",
       "back": "返回主页",
       "nextRefresh": "距离下次刷新 {seconds}s",
-      "query": "查询",
+      "query": "过滤",
       "costDetail": {
         "title": "今日消费明细",
         "empty": "今日暂无消费记录"
@@ -949,7 +952,8 @@
     "themesetting": {
       "select": {
         "opt_light": "亮色模式",
-        "opt_dark": "暗色模式"
+        "opt_dark": "暗色模式",
+        "opt_system": "跟随系统"
       }
     },
     "shortcut": {
@@ -1027,6 +1031,13 @@
       "tabPreview": "预览效果",
       "tabCurrent": "当前磁盘",
       "saveError": "保存配置失败"
+    },
+    "console": {
+      "title": "控制台",
+      "clear": "清空日志",
+      "autoScroll": "自动滚动",
+      "loading": "加载中...",
+      "empty": "暂无日志"
     }
   }
 }

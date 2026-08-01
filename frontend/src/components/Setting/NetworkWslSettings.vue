@@ -134,7 +134,7 @@
       <!-- Configure Now Button -->
       <div v-if="wslAutoConfig && wslDetected" class="configure-action">
         <button
-          class="mac-button primary"
+          class="primary-btn"
           :disabled="configuring"
           @click="handleConfigureNow"
         >
@@ -522,33 +522,9 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.mac-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
+.configure-action .primary-btn {
+  /* 加载态只剩 spinner 时保持宽度稳定，避免两态切换跳变 */
   min-width: 120px;
-}
-
-.mac-button.primary {
-  background: var(--mac-accent);
-  color: white;
-}
-
-.mac-button.primary:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.mac-button.primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .button-spinner {

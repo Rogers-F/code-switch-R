@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { Call } from '@wailsio/runtime'
 import { GetSyncStatus, SyncNow, RestoreBuiltinPricing } from '../../../bindings/codeswitch/services/modelsyncservice'
 import type { ModelSyncStatus } from '../../../bindings/codeswitch/services/models'
@@ -16,7 +15,6 @@ import { extractErrorMessage } from '../../utils/error'
 
 const { t } = useI18n()
 
-const router = useRouter()
 // 从 localStorage 读取缓存值作为初始值，避免加载时的视觉闪烁
 const getCachedValue = (key: string, defaultValue: boolean): boolean => {
   const cached = localStorage.getItem(`app-settings-${key}`)
@@ -78,10 +76,6 @@ const importStatus = ref<ConfigImportStatus | null>(null)
 const importPath = ref('')
 const importing = ref(false)
 const importLoading = ref(true)
-
-const goBack = () => {
-  router.push('/')
-}
 
 const normalizeBudgetForecastMethod = (value: string) => {
   const trimmed = value?.trim()
@@ -491,21 +485,11 @@ onMounted(async () => {
 
 <template>
   <div class="main-shell general-shell">
-    <div class="global-actions">
-      <p class="global-eyebrow">{{ $t('components.general.title.application') }}</p>
-      <button class="ghost-icon" :aria-label="$t('components.general.buttons.back')" @click="goBack">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M15 18l-6-6 6-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-    </div>
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ $t('sidebar.settings') }}</h1>
+      </div>
+    </header>
 
     <div class="general-page">
       <section>

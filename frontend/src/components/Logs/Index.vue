@@ -1,16 +1,21 @@
 <template>
-  <div class="logs-page">
-    <div class="logs-header">
-      <BaseButton variant="outline" type="button" @click="backToHome">
-        {{ t('components.logs.back') }}
-      </BaseButton>
-      <div class="refresh-indicator">
-        <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
-        <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
-          {{ t('components.logs.refresh') }}
-        </BaseButton>
+  <div class="main-shell">
+    <header class="app-page-header">
+      <div class="app-page-title-group">
+        <h1 class="app-page-title">{{ t('components.logs.title') }}</h1>
+        <p class="app-page-subtitle">{{ t('components.logs.subtitle') }}</p>
       </div>
-    </div>
+      <div class="app-page-actions">
+        <div class="refresh-indicator">
+          <span>{{ t('components.logs.nextRefresh', { seconds: countdown }) }}</span>
+          <BaseButton size="sm" :disabled="loading" @click="manualRefresh">
+            {{ t('components.logs.refresh') }}
+          </BaseButton>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-page-container logs-page">
 
     <section class="logs-summary" v-if="statsCards.length">
       <article
@@ -169,12 +174,12 @@
         </div>
       </div>
     </BaseModal>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
@@ -204,7 +209,6 @@ import { Line } from 'vue-chartjs'
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
 const { t } = useI18n()
-const router = useRouter()
 
 const logs = ref<RequestLog[]>([])
 const stats = ref<LogStats | null>(null)
@@ -519,10 +523,6 @@ const prevPage = () => {
   if (page.value > 1) {
     page.value -= 1
   }
-}
-
-const backToHome = () => {
-  router.push('/')
 }
 
 const padHour = (num: number) => num.toString().padStart(2, '0')
