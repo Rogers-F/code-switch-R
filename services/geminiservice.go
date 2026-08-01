@@ -1157,7 +1157,9 @@ func (s *GeminiService) importProviders(candidates []GeminiProvider) (int, error
 		if name == "" || existingNames[name] {
 			continue
 		}
-		if url := normalizeURL(candidate.BaseURL); url != "" {
+		// 空 Key 只按名称去重（脱敏包/OAuth 类条目），
+		// 按 URL+空Key 去重会把同地址多账号合并掉
+		if url := normalizeURL(candidate.BaseURL); url != "" && candidate.APIKey != "" {
 			key := url + "\x00" + candidate.APIKey
 			if existingURLKey[key] {
 				continue

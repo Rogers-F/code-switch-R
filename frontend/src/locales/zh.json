@@ -689,6 +689,20 @@
         "nothingToImport": "没有需要导入的配置（可能已全部导入）",
         "failed": "导入失败",
         "fileNotFound": "配置文件不存在，请检查路径是否正确"
+      },
+      "export": {
+        "title": "配置导出",
+        "includeSecrets": "包含明文凭据",
+        "redactedHint": "默认脱敏：清除已识别的密钥字段（不扫描提示词等自由文本）",
+        "secretsWarning": "导出文件将包含明文凭据（密钥/令牌等），请勿放入共享或同步目录",
+        "confirmSecrets": "确定要导出包含明文凭据的配置包吗？拿到该文件的任何人都能使用你的密钥与令牌。",
+        "action": "导出操作",
+        "exportBtn": "导出配置包",
+        "exporting": "导出中...",
+        "success": "已导出到 {path}：{providers} 个供应商，{mcp} 个 MCP，{prompts} 个提示词",
+        "redactedNote": "已清除 {count} 处凭据字段；该包可导回本应用，恢复的供应商为禁用状态，补上凭据即可启用",
+        "secretsNote": "该文件包含明文凭据，请妥善保管",
+        "failed": "导出失败"
       }
     },
     "mcp": {

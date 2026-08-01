@@ -688,6 +688,20 @@
         "nothingToImport": "Nothing to import (all may have been imported)",
         "failed": "Import failed",
         "fileNotFound": "Config file not found, please check the path"
+      },
+      "export": {
+        "title": "Config Export",
+        "includeSecrets": "Include plaintext credentials",
+        "redactedHint": "Default: recognized credential fields are cleared (free text such as prompts is not scanned)",
+        "secretsWarning": "The exported file will contain plaintext credentials. Keep it out of shared or synced folders.",
+        "confirmSecrets": "Export a bundle containing plaintext credentials? Anyone with this file can use your keys and tokens.",
+        "action": "Export action",
+        "exportBtn": "Export bundle",
+        "exporting": "Exporting...",
+        "success": "Exported to {path}: {providers} providers, {mcp} MCPs, {prompts} prompts",
+        "redactedNote": "{count} credential fields cleared. The bundle can be imported back; restored providers stay disabled until you refill credentials.",
+        "secretsNote": "This file contains plaintext credentials. Keep it safe.",
+        "failed": "Export failed"
       }
     },
     "mcp": {

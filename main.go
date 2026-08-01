@@ -137,6 +137,7 @@ func main() {
 	promptService := services.NewPromptService()
 	envCheckService := services.NewEnvCheckService()
 	importService := services.NewImportService(providerService, mcpService, geminiService, promptService)
+	exportService := services.NewExportService(providerService, geminiService, mcpService, promptService, func() string { return AppVersion })
 	deeplinkService := services.NewDeepLinkService(providerService)
 	speedTestService := services.NewSpeedTestService()
 	connectivityTestService := services.NewConnectivityTestService(providerService, blacklistService, settingsService, defaultModelPolicy)
@@ -237,6 +238,7 @@ func main() {
 		application.NewService(promptService),
 		application.NewService(envCheckService),
 		application.NewService(importService),
+		application.NewService(exportService),
 		application.NewService(deeplinkService),
 		application.NewService(speedTestService),
 		application.NewService(connectivityTestService),

@@ -758,6 +758,11 @@ export class ConfigImportResult {
      */
     "errors"?: string[];
 
+    /**
+     * 非失败类提醒（如脱敏包恢复的供应商已禁用待补密钥）
+     */
+    "warnings"?: string[];
+
     /** Creates a new ConfigImportResult instance. */
     constructor($$source: Partial<ConfigImportResult> = {}) {
         if (!("status" in $$source)) {
@@ -782,12 +787,16 @@ export class ConfigImportResult {
     static createFrom($$source: any = {}): ConfigImportResult {
         const $$createField0_0 = $$createType6;
         const $$createField4_0 = $$createType7;
+        const $$createField5_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("status" in $$parsedSource) {
             $$parsedSource["status"] = $$createField0_0($$parsedSource["status"]);
         }
         if ("errors" in $$parsedSource) {
             $$parsedSource["errors"] = $$createField4_0($$parsedSource["errors"]);
+        }
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField5_0($$parsedSource["warnings"]);
         }
         return new ConfigImportResult($$parsedSource as Partial<ConfigImportResult>);
     }
@@ -1267,6 +1276,54 @@ export class EnvConflict {
     static createFrom($$source: any = {}): EnvConflict {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new EnvConflict($$parsedSource as Partial<EnvConflict>);
+    }
+}
+
+/**
+ * ExportResult 导出结果
+ */
+export class ExportResult {
+    "path": string;
+    "canceled": boolean;
+    "providers": number;
+    "mcp": number;
+    "prompts": number;
+    "redacted": boolean;
+    "redactedFields": number;
+
+    /** Creates a new ExportResult instance. */
+    constructor($$source: Partial<ExportResult> = {}) {
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("canceled" in $$source)) {
+            this["canceled"] = false;
+        }
+        if (!("providers" in $$source)) {
+            this["providers"] = 0;
+        }
+        if (!("mcp" in $$source)) {
+            this["mcp"] = 0;
+        }
+        if (!("prompts" in $$source)) {
+            this["prompts"] = 0;
+        }
+        if (!("redacted" in $$source)) {
+            this["redacted"] = false;
+        }
+        if (!("redactedFields" in $$source)) {
+            this["redactedFields"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ExportResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ExportResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ExportResult($$parsedSource as Partial<ExportResult>);
     }
 }
 

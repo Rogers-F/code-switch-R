@@ -75,6 +75,8 @@ type ConfigImportResult struct {
 	// 掩盖已完成阶段的结果：Wails 对非 nil error 会让前端 Promise 直接
 	// reject，调用方拿不到 result，所以阶段错误编码在这里而非 error 里
 	Errors []string `json:"errors,omitempty"`
+	// 非失败类提醒（如脱敏包恢复的供应商已禁用待补密钥）
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type ImportService struct {
@@ -169,15 +171,36 @@ func (is *ImportService) ImportFromPath(path string) (ConfigImportResult, error)
 	}
 	result.Errors = append(result.Errors, cfg.LoadWarnings...)
 
-	// 阶段 1：claude/codex 供应商
-	pendingProviders, err := is.pendingProviders(cfg)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("读取现有供应商失败: %v", err))
+	// 阶段 1：claude/codex 供应商。
+	// 本应用导出包走原生 extra 恢复路径（字段全量保真）；
+	// cc-switch 源维持 legacy 候选解析
+	if cfg.BundleMeta != nil {
+		for _, kind := range []string{"claude", "codex"} {
+			section := cfg.Claude
+			if kind == "codex" {
+				section = cfg.Codex
+			}
+			candidates, err := is.pendingNativeProviders(kind, section, cfg.BundleMeta.Redacted)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("读取现有 %s 供应商失败: %v", kind, err))
+				continue
+			}
+			added, err := is.providerService.importNativeProviders(kind, candidates)
+			result.ImportedProviders += added
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("导入 %s 供应商失败: %v", kind, err))
+			}
+		}
 	} else {
-		added, err := is.importProviders(cfg, pendingProviders)
-		result.ImportedProviders += added
+		pendingProviders, err := is.pendingProviders(cfg)
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("导入供应商失败: %v", err))
+			result.Errors = append(result.Errors, fmt.Sprintf("读取现有供应商失败: %v", err))
+		} else {
+			added, err := is.importProviders(cfg, pendingProviders)
+			result.ImportedProviders += added
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("导入供应商失败: %v", err))
+			}
 		}
 	}
 
@@ -188,6 +211,11 @@ func (is *ImportService) ImportFromPath(path string) (ConfigImportResult, error)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("导入 Gemini 供应商失败: %v", err))
 		}
+	}
+
+	if cfg.BundleMeta != nil && cfg.BundleMeta.Redacted && result.ImportedProviders > 0 {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("脱敏导出包不含凭据：恢复的 %d 个供应商已置为禁用，补填凭据后再启用", result.ImportedProviders))
 	}
 
 	// 阶段 3：MCP
@@ -233,11 +261,26 @@ func (is *ImportService) ImportAll() (ConfigImportResult, error) {
 
 func (is *ImportService) evaluateStatus(cfg *ccSwitchConfig) (ConfigImportStatus, error) {
 	status := ConfigImportStatus{ConfigExists: true}
-	pendingProviders, err := is.pendingProviders(cfg)
-	if err != nil {
-		return status, err
+	providerCount := 0
+	if cfg.BundleMeta != nil {
+		for _, kind := range []string{"claude", "codex"} {
+			section := cfg.Claude
+			if kind == "codex" {
+				section = cfg.Codex
+			}
+			candidates, err := is.pendingNativeProviders(kind, section, cfg.BundleMeta.Redacted)
+			if err != nil {
+				return status, err
+			}
+			providerCount += len(candidates)
+		}
+	} else {
+		pendingProviders, err := is.pendingProviders(cfg)
+		if err != nil {
+			return status, err
+		}
+		providerCount = len(pendingProviders["claude"]) + len(pendingProviders["codex"])
 	}
-	providerCount := len(pendingProviders["claude"]) + len(pendingProviders["codex"])
 	providerCount += len(is.pendingGeminiProviders(cfg))
 	status.PendingProviders = providerCount > 0
 	status.PendingProviderCount = providerCount
@@ -295,6 +338,42 @@ func loadCcSwitchConfigFromPath(path string) (*ccSwitchConfig, bool, error) {
 		log.Printf("ℹ️  cc-switch: 配置文件为空: %s", path)
 		return &ccSwitchConfig{}, true, nil
 	}
+
+	// 两阶段解析：先探测 exportMeta，识别为本应用导出包才解析
+	// extra/prompts 扩展段；普通 cc-switch JSON 永远走 legacy 路径。
+	// 探测必须分两步：先只取 app 标识——若整个 exportMeta 一步反序列化，
+	// 类型畸形（如 schemaVersion 写成字符串）会静默降级成 legacy 导入，
+	// 扩展段被丢掉还只恢复一半
+	var metaProbe struct {
+		ExportMeta json.RawMessage `json:"exportMeta"`
+	}
+	if err := json.Unmarshal(data, &metaProbe); err == nil && len(metaProbe.ExportMeta) > 0 && string(metaProbe.ExportMeta) != "null" {
+		var appOnly struct {
+			App string `json:"app"`
+		}
+		_ = json.Unmarshal(metaProbe.ExportMeta, &appOnly)
+		if appOnly.App == exportAppID {
+			var meta exportMeta
+			if err := json.Unmarshal(metaProbe.ExportMeta, &meta); err != nil {
+				err = fmt.Errorf("导出包元数据解析失败（文件可能已损坏或被篡改）: %w", err)
+				log.Printf("⚠️  %v", err)
+				return nil, true, err
+			}
+			// 精确匹配 v1：更高版本明确要求升级；缺失/0/负数属非法包
+			if meta.SchemaVersion > exportSchemaVersion {
+				err := fmt.Errorf("导出包格式版本 %d 高于当前支持的 %d，请先升级应用再导入", meta.SchemaVersion, exportSchemaVersion)
+				log.Printf("⚠️  %v", err)
+				return nil, true, err
+			}
+			if meta.SchemaVersion != exportSchemaVersion {
+				err := fmt.Errorf("导出包缺少有效的格式版本号（schemaVersion=%d），文件可能已损坏或被篡改", meta.SchemaVersion)
+				log.Printf("⚠️  %v", err)
+				return nil, true, err
+			}
+			return loadOwnExportBundle(data, path)
+		}
+	}
+
 	var cfg ccSwitchConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		log.Printf("⚠️  cc-switch: JSON 解析失败: %s - %v", path, err)
@@ -302,6 +381,69 @@ func loadCcSwitchConfigFromPath(path string) (*ccSwitchConfig, bool, error) {
 	}
 	log.Printf("✅ cc-switch: 配置文件加载成功: %s", path)
 	return &cfg, true, nil
+}
+
+// loadOwnExportBundle 解析本应用自己的导出包。
+// 提示词沿用 SQLite 路径同一套约束：平台白名单、名称/内容非空、
+// UTF-8、强制禁用——包内的 Enabled 值一律不信任。
+func loadOwnExportBundle(data []byte, path string) (*ccSwitchConfig, bool, error) {
+	// 必须在 JSON 解码前校验原始字节：encoding/json 会把非法 UTF-8
+	// 静默替换成 U+FFFD，解码后再查永远查不出来
+	if !utf8.Valid(data) {
+		err := fmt.Errorf("导出包不是有效的 UTF-8 编码: %s", path)
+		log.Printf("⚠️  %v", err)
+		return nil, true, err
+	}
+	var bundle exportBundle
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		log.Printf("⚠️  导出包解析失败: %s - %v", path, err)
+		return nil, true, err
+	}
+
+	cfg := &ccSwitchConfig{
+		Claude:  bundle.Claude,
+		Codex:   bundle.Codex,
+		Gemini:  bundle.Gemini,
+		MCP:     bundle.MCP,
+		Prompts: map[string][]Prompt{},
+	}
+	meta := bundle.ExportMeta
+	cfg.BundleMeta = &meta
+
+	for platform, list := range bundle.Prompts {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		switch platform {
+		case "claude", "codex", "gemini":
+		default:
+			continue
+		}
+		for _, p := range list {
+			sanitized, ok := sanitizeImportedPrompt(p)
+			if !ok {
+				continue
+			}
+			cfg.Prompts[platform] = append(cfg.Prompts[platform], sanitized)
+		}
+	}
+
+	log.Printf("✅ 导出包加载成功: %s (schema v%d, redacted=%v)", path, meta.SchemaVersion, meta.Redacted)
+	return cfg, true, nil
+}
+
+// sanitizeImportedPrompt 导入提示词的统一校验：名称/内容非空、UTF-8、
+// 强制 Enabled=false（防止首访回填覆盖或改写 CLI 提示词文件）
+func sanitizeImportedPrompt(p Prompt) (Prompt, bool) {
+	if strings.TrimSpace(p.Name) == "" || p.Content == "" {
+		return Prompt{}, false
+	}
+	if !utf8.ValidString(p.Content) {
+		log.Printf("⚠️  提示词 [%s] 不是有效 UTF-8，已跳过", p.Name)
+		return Prompt{}, false
+	}
+	p.ID = strings.TrimSpace(p.ID)
+	p.Name = strings.TrimSpace(p.Name)
+	p.Enabled = false
+	return p, true
 }
 
 // isSQLiteFile 检测文件是否为 SQLite 数据库
@@ -597,21 +739,10 @@ func loadPromptsFromSQLite(db sqliteQueryer, cfg *ccSwitchConfig) error {
 			continue
 		}
 
-		if strings.TrimSpace(name) == "" || content == "" {
-			continue
-		}
-		// 非 UTF-8 内容经 JSON 序列化会被不可逆替换成乱码
-		// （与 PromptService.ImportFromFile 的约束一致）
-		if !utf8.ValidString(content) {
-			log.Printf("⚠️  cc-switch: 提示词 [%s/%s] 不是有效 UTF-8，已跳过", platform, name)
-			continue
-		}
-
 		prompt := Prompt{
 			ID:      strings.TrimSpace(id),
 			Name:    strings.TrimSpace(name),
 			Content: content,
-			Enabled: false, // 导入统一禁用，由用户手动启用
 		}
 		if description != "" {
 			desc := description
@@ -626,7 +757,13 @@ func loadPromptsFromSQLite(db sqliteQueryer, cfg *ccSwitchConfig) error {
 			prompt.UpdatedAt = &v
 		}
 
-		cfg.Prompts[platform] = append(cfg.Prompts[platform], prompt)
+		// 统一校验（名称/内容/UTF-8/强制禁用），与导出包路径同一套约束
+		sanitized, ok := sanitizeImportedPrompt(prompt)
+		if !ok {
+			continue
+		}
+
+		cfg.Prompts[platform] = append(cfg.Prompts[platform], sanitized)
 	}
 	if scanFailures > 0 {
 		// 静默丢行会被误读成"无提示词可导入"，必须带出去
@@ -691,6 +828,9 @@ type ccSwitchConfig struct {
 	// 装载阶段的非致命告警（如提示词表读取异常）。缺表属正常旧版兼容不入内；
 	// 其余异常必须带出去进 result.Errors，否则会被误报成"无内容可导入"
 	LoadWarnings []string `json:"-"`
+	// BundleMeta 非空表示数据来自本应用导出包（loadOwnExportBundle 填充）：
+	// claude/codex/gemini 走原生 extra 恢复路径；Redacted 包的供应商强制禁用
+	BundleMeta *exportMeta `json:"-"`
 }
 
 type ccProviderSection struct {
@@ -702,6 +842,10 @@ type ccProviderEntry struct {
 	Name       string            `json:"name"`
 	WebsiteURL string            `json:"websiteUrl"`
 	Settings   ccProviderSetting `json:"settingsConfig"`
+	// Extra 仅本应用导出包携带：完整原生结构（Provider / GeminiProvider）。
+	// 只有 loadOwnExportBundle 识别 exportMeta 后才会被消费，
+	// cc-switch 自己的文件没有该键
+	Extra json.RawMessage `json:"extra,omitempty"`
 }
 
 type ccProviderSetting struct {
@@ -713,6 +857,9 @@ type ccProviderSetting struct {
 type ccMCPSection struct {
 	Claude ccMCPPlatform `json:"claude"`
 	Codex  ccMCPPlatform `json:"codex"`
+	// Gemini 桶：cc-switch 旧 JSON 没有该键（零值无害），
+	// 本应用导出包用它保真 MCP 的 gemini 平台启用态
+	Gemini ccMCPPlatform `json:"gemini"`
 }
 
 type ccMCPPlatform struct {
@@ -762,6 +909,158 @@ func (is *ImportService) pendingProviders(cfg *ccSwitchConfig) (map[string][]pro
 	return result, nil
 }
 
+// pendingNativeProviders 从本应用导出包的 extra 段恢复 claude/codex 原生供应商。
+// extra 缺失或损坏的条目回退 legacy 基础字段解析；脱敏包或无密钥条目
+// 导入为禁用待补状态，而不是静默丢弃。
+func (is *ImportService) pendingNativeProviders(kind string, section ccProviderSection, redacted bool) ([]Provider, error) {
+	if len(section.Providers) == 0 {
+		return nil, nil
+	}
+	existing, err := is.providerService.LoadProviders(kind)
+	if err != nil {
+		return nil, err
+	}
+	existingNames := make(map[string]struct{}, len(existing))
+	existingURLKey := make(map[string]struct{}, len(existing))
+	for _, p := range existing {
+		if name := normalizeName(p.Name); name != "" {
+			existingNames[name] = struct{}{}
+		}
+		if u := normalizeURL(p.APIURL); u != "" {
+			existingURLKey[u+"\x00"+p.APIKey] = struct{}{}
+		}
+	}
+
+	candidates := make([]Provider, 0, len(section.Providers))
+	for key, entry := range section.Providers {
+		var p Provider
+		if len(entry.Extra) > 0 {
+			if err := json.Unmarshal(entry.Extra, &p); err != nil {
+				log.Printf("⚠️  导出包 %s provider [%s] 的 extra 无法解析，回退基础字段: %v", kind, key, err)
+				p = Provider{}
+			}
+		}
+		if strings.TrimSpace(p.APIURL) == "" || strings.TrimSpace(p.Name) == "" {
+			// 回退基础字段。不能复用 parseProviderEntry：它要求密钥非空，
+			// 而自有脱敏包的密钥本来就是空的，条目会被整个丢掉
+			name := strings.TrimSpace(entry.Name)
+			if name == "" {
+				name = strings.TrimSpace(entry.ID)
+			}
+			if name == "" {
+				name = strings.TrimSpace(key)
+			}
+			apiURL := ""
+			apiKey := ""
+			switch strings.ToLower(kind) {
+			case "claude":
+				apiURL = strings.TrimSpace(entry.Settings.Env["ANTHROPIC_BASE_URL"])
+				apiKey = strings.TrimSpace(entry.Settings.Env["ANTHROPIC_AUTH_TOKEN"])
+			case "codex":
+				apiURL = resolveCodexAPIURL(entry.Settings.Config)
+				apiKey = pickFirstNonEmpty(
+					entry.Settings.Auth["OPENAI_API_KEY"],
+					entry.Settings.Env["OPENAI_API_KEY"],
+				)
+			}
+			if name == "" || apiURL == "" {
+				continue
+			}
+			p = Provider{
+				Name:    name,
+				APIURL:  apiURL,
+				APIKey:  apiKey,
+				Site:    strings.TrimSpace(entry.WebsiteURL),
+				Enabled: true,
+			}
+		}
+		p.ID = 0
+		p.APIKey = strings.TrimSpace(p.APIKey)
+		// 仅脱敏包强制禁用待补；明文包尊重原 Enabled——
+		// 无鉴权的本地上游本来就允许空 Key 且启用
+		if redacted {
+			p.APIKey = ""
+			p.Enabled = false
+		}
+
+		name := normalizeName(p.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := existingNames[name]; exists {
+			continue
+		}
+		// 空 Key（脱敏包）只按名称去重：按 URL+空Key 去重会把
+		// 同地址多账号合并到只剩一个
+		if u := normalizeURL(p.APIURL); u != "" && p.APIKey != "" {
+			urlKey := u + "\x00" + p.APIKey
+			if _, exists := existingURLKey[urlKey]; exists {
+				continue
+			}
+			existingURLKey[urlKey] = struct{}{}
+		}
+		existingNames[name] = struct{}{}
+		candidates = append(candidates, p)
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return strings.ToLower(candidates[i].Name) < strings.ToLower(candidates[j].Name)
+	})
+	return candidates, nil
+}
+
+// importNativeProviders 批量导入原生供应商（导出包恢复路径）：
+// 锁内按名称与 URL+APIKey 再查重、重新分配本地 ID、单次落盘。
+// Enabled 等字段原样保留（脱敏包在候选阶段已强制禁用）。
+func (ps *ProviderService) importNativeProviders(kind string, candidates []Provider) (int, error) {
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	added := 0
+	err := ps.mutateProviders(kind, func(existing []Provider) ([]Provider, error) {
+		existingNames := make(map[string]struct{}, len(existing))
+		existingURLKey := make(map[string]struct{}, len(existing))
+		for _, p := range existing {
+			if name := normalizeName(p.Name); name != "" {
+				existingNames[name] = struct{}{}
+			}
+			if u := normalizeURL(p.APIURL); u != "" {
+				existingURLKey[u+"\x00"+p.APIKey] = struct{}{}
+			}
+		}
+		nextID := nextProviderID(existing)
+		merged := make([]Provider, 0, len(existing)+len(candidates))
+		merged = append(merged, existing...)
+		added = 0
+		for _, candidate := range candidates {
+			name := normalizeName(candidate.Name)
+			if name == "" {
+				continue
+			}
+			if _, exists := existingNames[name]; exists {
+				continue
+			}
+			if u := normalizeURL(candidate.APIURL); u != "" && candidate.APIKey != "" {
+				urlKey := u + "\x00" + candidate.APIKey
+				if _, exists := existingURLKey[urlKey]; exists {
+					continue
+				}
+				existingURLKey[urlKey] = struct{}{}
+			}
+			existingNames[name] = struct{}{}
+			candidate.ID = nextID
+			nextID++
+			merged = append(merged, candidate)
+			added++
+		}
+		return merged, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return added, nil
+}
+
 // validGeminiImportURL 校验导入的 BaseURL：必须是绝对 http/https 地址，
 // 且不含 userinfo/query/fragment——导入绕过了 UI 的 URL 校验，坏地址会
 // 等到代理带着请求正文和供应商 Key 转发时才暴露
@@ -796,54 +1095,84 @@ func (is *ImportService) pendingGeminiProviders(cfg *ccSwitchConfig) []GeminiPro
 		}
 	}
 
+	ownBundle := cfg.BundleMeta != nil
+	redacted := ownBundle && cfg.BundleMeta.Redacted
+
 	candidates := make([]GeminiProvider, 0, len(cfg.Gemini.Providers))
 	for key, entry := range cfg.Gemini.Providers {
-		name := strings.TrimSpace(entry.Name)
-		if name == "" {
-			name = strings.TrimSpace(entry.ID)
-		}
-		if name == "" {
-			name = strings.TrimSpace(key)
-		}
-		if name == "" {
-			continue
-		}
-
-		baseURL := strings.TrimSpace(entry.Settings.Env["GOOGLE_GEMINI_BASE_URL"])
-		if baseURL == "" {
-			log.Printf("ℹ️  cc-switch: 跳过 gemini provider [%s]: 缺少 GOOGLE_GEMINI_BASE_URL（OAuth 官方条目走不了本地代理）", key)
-			continue
-		}
-		if !validGeminiImportURL(baseURL) {
-			log.Printf("⚠️  cc-switch: 跳过 gemini provider [%s]: BaseURL 无效: %s", key, baseURL)
-			continue
+		var candidate GeminiProvider
+		fromExtra := false
+		// 本应用导出包优先走 extra 全量恢复（白名单/映射/Level 等不丢）
+		if ownBundle && len(entry.Extra) > 0 {
+			var native GeminiProvider
+			if err := json.Unmarshal(entry.Extra, &native); err == nil && strings.TrimSpace(native.BaseURL) != "" {
+				native.ID = ""
+				candidate = native
+				fromExtra = true
+			} else if err != nil {
+				log.Printf("⚠️  导出包 gemini provider [%s] 的 extra 无法解析，回退基础字段: %v", key, err)
+			}
 		}
 
-		nameKey := normalizeName(name)
+		if !fromExtra {
+			name := strings.TrimSpace(entry.Name)
+			if name == "" {
+				name = strings.TrimSpace(entry.ID)
+			}
+			if name == "" {
+				name = strings.TrimSpace(key)
+			}
+			if name == "" {
+				continue
+			}
+
+			baseURL := strings.TrimSpace(entry.Settings.Env["GOOGLE_GEMINI_BASE_URL"])
+			if baseURL == "" {
+				log.Printf("ℹ️  cc-switch: 跳过 gemini provider [%s]: 缺少 GOOGLE_GEMINI_BASE_URL（OAuth 官方条目走不了本地代理）", key)
+				continue
+			}
+
+			candidate = GeminiProvider{
+				Name:       name,
+				WebsiteURL: strings.TrimSpace(entry.WebsiteURL),
+				BaseURL:    baseURL,
+				APIKey:     strings.TrimSpace(entry.Settings.Env["GEMINI_API_KEY"]),
+				Model:      strings.TrimSpace(entry.Settings.Env["GEMINI_MODEL"]),
+				Category:   "custom",
+				Enabled:    true, // 与 claude/codex 导入行为一致：导入即参与代理调度
+			}
+			if len(entry.Settings.Env) > 0 {
+				candidate.EnvConfig = cloneStringMap(entry.Settings.Env)
+			}
+		}
+
+		if !validGeminiImportURL(candidate.BaseURL) {
+			log.Printf("⚠️  跳过 gemini provider [%s]: BaseURL 无效: %s", key, candidate.BaseURL)
+			continue
+		}
+		// 脱敏包：密钥已被清空，强制禁用待补
+		if redacted {
+			candidate.APIKey = ""
+			candidate.Enabled = false
+		}
+
+		nameKey := normalizeName(candidate.Name)
+		if nameKey == "" {
+			continue
+		}
 		if _, exists := existingNames[nameKey]; exists {
 			continue
 		}
-		apiKey := strings.TrimSpace(entry.Settings.Env["GEMINI_API_KEY"])
-		urlKey := normalizeURL(baseURL) + "\x00" + apiKey
-		if _, exists := existingURLKey[urlKey]; exists {
-			continue
-		}
-
-		candidate := GeminiProvider{
-			Name:       name,
-			WebsiteURL: strings.TrimSpace(entry.WebsiteURL),
-			BaseURL:    baseURL,
-			APIKey:     apiKey,
-			Model:      strings.TrimSpace(entry.Settings.Env["GEMINI_MODEL"]),
-			Category:   "custom",
-			Enabled:    true, // 与 claude/codex 导入行为一致：导入即参与代理调度
-		}
-		if len(entry.Settings.Env) > 0 {
-			candidate.EnvConfig = cloneStringMap(entry.Settings.Env)
+		// 空 Key（脱敏包/OAuth 类）只按名称去重，避免同地址多账号被合并
+		if candidate.APIKey != "" {
+			urlKey := normalizeURL(candidate.BaseURL) + "\x00" + candidate.APIKey
+			if _, exists := existingURLKey[urlKey]; exists {
+				continue
+			}
+			existingURLKey[urlKey] = struct{}{}
 		}
 
 		existingNames[nameKey] = struct{}{}
-		existingURLKey[urlKey] = struct{}{}
 		candidates = append(candidates, candidate)
 	}
 
@@ -1241,10 +1570,12 @@ func collectMCPServers(cfg *ccSwitchConfig) []MCPServer {
 	stores := map[string]*MCPServer{}
 	appendMCPEntries(stores, cfg.MCP.Claude.Servers, platClaudeCode)
 	appendMCPEntries(stores, cfg.MCP.Codex.Servers, platCodex)
+	appendMCPEntries(stores, cfg.MCP.Gemini.Servers, platGemini)
 	servers := make([]MCPServer, 0, len(stores))
 	for _, server := range stores {
 		server.EnabledInClaude = containsPlatform(server.EnablePlatform, platClaudeCode)
 		server.EnabledInCodex = containsPlatform(server.EnablePlatform, platCodex)
+		server.EnabledInGemini = containsPlatform(server.EnablePlatform, platGemini)
 		servers = append(servers, *server)
 	}
 	return servers

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { Call } from '@wailsio/runtime'
 import { GetSyncStatus, SyncNow, RestoreBuiltinPricing } from '../../../bindings/codeswitch/services/modelsyncservice'
+import { ExportWithDialog } from '../../../bindings/codeswitch/services/exportservice'
 import type { ModelSyncStatus } from '../../../bindings/codeswitch/services/models'
 import ListItem from '../Setting/ListRow.vue'
 import LanguageSwitcher from '../Setting/LanguageSwitcher.vue'
@@ -440,6 +441,38 @@ const loadImportStatus = async () => {
   }
 }
 
+// ===== 配置导出 =====
+const exporting = ref(false)
+// 含密钥导出开关：不持久化，每次导出后自动恢复脱敏默认
+const exportIncludeSecrets = ref(false)
+
+const handleExport = async () => {
+  if (exporting.value) return
+  if (exportIncludeSecrets.value) {
+    // 明文导出属敏感操作，必须逐次确认
+    if (!window.confirm(t('components.general.export.confirmSecrets'))) return
+  }
+  exporting.value = true
+  try {
+    const result = await ExportWithDialog(exportIncludeSecrets.value)
+    if (result?.canceled) return
+    alert(t('components.general.export.success', {
+      path: result?.path ?? '',
+      providers: result?.providers ?? 0,
+      mcp: result?.mcp ?? 0,
+      prompts: result?.prompts ?? 0,
+    }) + (result?.redacted
+      ? '\n' + t('components.general.export.redactedNote', { count: result?.redactedFields ?? 0 })
+      : '\n' + t('components.general.export.secretsNote')))
+  } catch (error) {
+    console.error('export failed', error)
+    alert(t('components.general.export.failed') + ': ' + (error as Error).message)
+  } finally {
+    exporting.value = false
+    exportIncludeSecrets.value = false
+  }
+}
+
 // 执行导入
 const handleImport = async () => {
   if (importing.value || !importPath.value.trim()) return
@@ -454,6 +487,10 @@ const handleImport = async () => {
     if (!result.status.config_exists) {
       alert(t('components.general.import.fileNotFound'))
       return
+    }
+    const warnings = result.warnings ?? []
+    if (warnings.length > 0) {
+      alert(warnings.join('\n'))
     }
     const imported = result.imported_providers + result.imported_mcp + result.imported_prompts
     const stageErrors = result.errors ?? []
@@ -1013,6 +1050,34 @@ onMounted(async () => {
       </section>
 
       <section>
+        <h2 class="mac-section-title">{{ $t('components.general.export.title') }}</h2>
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.export.includeSecrets')">
+            <div class="export-secrets-row">
+              <label class="mac-switch">
+                <input type="checkbox" v-model="exportIncludeSecrets" />
+                <span></span>
+              </label>
+              <span class="info-text warning" v-if="exportIncludeSecrets">
+                {{ $t('components.general.export.secretsWarning') }}
+              </span>
+              <span class="info-text" v-else>
+                {{ $t('components.general.export.redactedHint') }}
+              </span>
+            </div>
+          </ListItem>
+          <ListItem :label="$t('components.general.export.action')">
+            <button
+              @click="handleExport"
+              :disabled="exporting"
+              class="action-btn">
+              {{ exporting ? $t('components.general.export.exporting') : $t('components.general.export.exportBtn') }}
+            </button>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.exterior') }}</h2>
         <div class="mac-panel">
           <ListItem :label="$t('components.general.label.language')">
@@ -1028,6 +1093,13 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.export-secrets-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+}
+
 .mac-input {
   padding: 6px 12px;
   border: 1px solid var(--mac-border);

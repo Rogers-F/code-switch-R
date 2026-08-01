@@ -18,6 +18,8 @@ export type ConfigImportResult = {
   imported_prompts: number
   // 各阶段失败信息（部分成功时非空，后端不再用 transport error 掩盖已完成阶段）
   errors?: string[]
+  // 非失败类提醒（如脱敏包恢复的供应商已禁用待补密钥）
+  warnings?: string[]
 }
 
 const emptyStatus: ConfigImportStatus = {

@@ -11,6 +11,7 @@ import * as ConsoleService from "./consoleservice.js";
 import * as CustomCliService from "./customcliservice.js";
 import * as DeepLinkService from "./deeplinkservice.js";
 import * as EnvCheckService from "./envcheckservice.js";
+import * as ExportService from "./exportservice.js";
 import * as GeminiService from "./geminiservice.js";
 import * as HealthCheckService from "./healthcheckservice.js";
 import * as ImportService from "./importservice.js";
@@ -37,6 +38,7 @@ export {
     CustomCliService,
     DeepLinkService,
     EnvCheckService,
+    ExportService,
     GeminiService,
     HealthCheckService,
     ImportService,
@@ -79,6 +81,7 @@ export {
     DefaultModels,
     EndpointLatency,
     EnvConflict,
+    ExportResult,
     GeminiAuthType,
     GeminiPreset,
     GeminiProvider,
