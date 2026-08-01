@@ -53,6 +53,11 @@ type Provider struct {
 	// 留空则使用平台默认（claude: /v1/messages, codex: /responses）
 	APIEndpoint string `json:"apiEndpoint,omitempty"`
 
+	// 备用 API 地址（可选，最多 4 个）- 同一供应商的多入口容灾
+	// 主地址（APIURL）失败且属可切换错误时，同一请求内按序改试备用地址；
+	// 全部失败才算该供应商一次失败。仅 claude/codex/custom 转发路径生效
+	FallbackAPIURLs []string `json:"fallbackApiUrls,omitempty"`
+
 	// 模型白名单 - Provider 原生支持的模型名
 	// 使用 map 实现 O(1) 查找，向后兼容（omitempty）
 	SupportedModels map[string]bool `json:"supportedModels,omitempty"`
@@ -553,6 +558,10 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		}
 	}
 
+	if len(source.FallbackAPIURLs) > 0 {
+		cloned.FallbackAPIURLs = append([]string(nil), source.FallbackAPIURLs...)
+	}
+
 	// 7. 添加到列表并保存（使用内部方法避免死锁）
 	providers = append(providers, *cloned)
 	if err := ps.saveProvidersLocked(kind, providers); err != nil {
@@ -764,6 +773,7 @@ func validateModelConfig(supported map[string]bool, mapping map[string]string) [
 // 返回验证错误列表（空则表示验证通过）
 func (p *Provider) ValidateConfiguration() []string {
 	errors := validateModelConfig(p.SupportedModels, p.ModelMapping)
+	errors = append(errors, validateFallbackURLs(p.FallbackAPIURLs)...)
 	p.configErrors = errors
 	return errors
 }

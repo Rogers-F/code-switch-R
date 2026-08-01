@@ -16,6 +16,8 @@ export type AutomationCard = {
   level?: number
   // API 端点路径（可选）：覆盖平台默认端点
   apiEndpoint?: string
+  // 备用 API 地址（最多 4 个）：主地址失败时同一请求内按序兜底
+  fallbackApiUrls?: string[]
   // CLI 配置：存储供应商关联的 CLI 可编辑配置
   cliConfig?: Record<string, any>
 

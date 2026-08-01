@@ -365,6 +365,7 @@
         "labels": {
           "name": "供应商名称",
           "apiUrl": "API 地址",
+          "fallbackApiUrls": "备用 API 地址",
           "apiKey": "API 密钥",
           "apiEndpoint": "API 端点（可选）",
           "upstreamProtocol": "上游协议",
@@ -387,6 +388,7 @@
         "placeholders": {
           "name": "例如：AICoding.sh",
           "apiUrl": "https://api.aicoding.sh",
+          "fallbackApiUrls": "每行一个备用地址，最多 4 个（可留空）",
           "apiKey": "sk-xxxxx",
           "apiEndpoint": "留空使用默认，如 /v1/chat/completions",
           "officialSite": "https://vendor.com",
@@ -401,6 +403,7 @@
         },
         "noIconResults": "未找到匹配的图标",
         "hints": {
+          "fallbackApiUrls": "主地址失败且属可切换错误（网络失败/408/421/429/5xx）时，同一请求内按序改试备用地址；全部失败才算该供应商一次失败",
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "upstreamProtocol": "指定上游 API 的协议类型。选择 auto 时根据端点自动检测；选择 openai_chat 时自动转换请求和响应格式",
@@ -445,7 +448,9 @@
         "confirmDeleteTitle": "删除供应商",
         "confirmDeleteMessage": "确认删除 {name} 吗？操作不可撤销",
         "errors": {
-          "invalidUrl": "请输入合法的 API 地址"
+          "invalidUrl": "请输入合法的 API 地址",
+          "tooManyFallbacks": "备用地址最多 4 个",
+          "invalidFallbackUrl": "备用地址必须是合法的 http/https 地址"
         },
         "saveFailed": "保存供应商配置失败",
         "cliConfigSaveFailed": "CLI 配置保存失败"

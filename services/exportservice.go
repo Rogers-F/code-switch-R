@@ -623,6 +623,9 @@ func sensitiveKeyName(name string) bool {
 
 func deepCopyProvider(p Provider) Provider {
 	out := p
+	if len(p.FallbackAPIURLs) > 0 {
+		out.FallbackAPIURLs = append([]string(nil), p.FallbackAPIURLs...)
+	}
 	if p.SupportedModels != nil {
 		out.SupportedModels = make(map[string]bool, len(p.SupportedModels))
 		for k, v := range p.SupportedModels {

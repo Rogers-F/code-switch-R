@@ -68,6 +68,8 @@ type ProviderRelayService struct {
 	lastUsedMu          sync.RWMutex                 // 保护 lastUsed 的锁
 	rrMu                sync.Mutex                   // 轮询状态锁
 	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider Name
+	// endpointCooldowns 多地址供应商的地址冷却状态（进程内，issue #27）
+	endpointCooldowns *endpointCooldownStore
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -336,6 +338,7 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 			"gemini": nil,
 		},
 		rrLastStart: make(map[string]string),
+		endpointCooldowns: newEndpointCooldownStore(),
 	}
 }
 
@@ -941,6 +944,14 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							break
 						}
 
+						// 多地址池已在本次请求内整轮试过：不再按拉黑阈值原地重试
+						// （那会放大成 阈值×地址数 次网络发送），失败已计一次，
+						// 直接切下一供应商
+						if errors.Is(err, errEndpointPoolExhausted) {
+							fmt.Printf("[INFO] Provider %s 地址池耗尽，切换下一供应商\n", provider.Name)
+							break
+						}
+
 						// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开，
 						// 此时继续重试只是白烧上游额度
 						if retryCount < maxRetryPerProvider-1 {
@@ -1155,7 +1166,6 @@ func (prs *ProviderRelayService) forwardRequest(
 	isStream bool,
 	model string,
 ) (bool, error) {
-	targetURL := joinURL(provider.APIURL, endpoint)
 	headers := cloneMap(clientHeaders)
 
 	// ========== 协议转换检测 ==========
@@ -1305,6 +1315,74 @@ func (prs *ProviderRelayService) forwardRequest(
 		}
 	}()
 
+	// ========== 地址池遍历（issue #27）==========
+	// 单地址供应商：行为与旧实现完全一致（含 HTTP 层 1 次自动重试）。
+	// 多地址供应商：同一请求内每个地址至多试一次，仅传输层失败/408/421/429/5xx
+	// 且响应未提交时切下一地址；全部失败返回 errEndpointPoolExhausted，
+	// 调用方记一次供应商失败后立即换供应商。整个池遍历共用上面这一条 requestLog。
+	pool := provider.EndpointPool()
+	if len(pool) == 0 {
+		return false, fmt.Errorf("provider %s 没有可用的 API 地址", provider.Name)
+	}
+	multiAddress := len(pool) > 1
+	if multiAddress {
+		pool = prs.endpointCooldowns.Order(kind, provider.ID, pool)
+	}
+
+	var lastErr error
+	primaryKey := normalizeURL(provider.APIURL)
+	for i, addr := range pool {
+		if i > 0 {
+			// 上一地址的失败状态码不能残留进本次尝试的日志
+			requestLog.HttpCode = 0
+			// SSE 转换器有状态，跨地址复用会串流，换新
+			if sseConverter != nil {
+				sseConverter = NewOpenAIToAnthropicSSEConverter(model)
+			}
+			fmt.Printf("[INFO] Provider %s 地址兜底: 改试 %s\n", provider.Name, addr)
+		}
+
+		ok, err := prs.forwardToAddress(c, kind, provider, joinURL(addr, endpoint), query, headers, bodyBytes, isStream, sseConverter, requestLog, !multiAddress)
+		if ok {
+			if multiAddress {
+				prs.endpointCooldowns.MarkSuccess(kind, provider.ID, addr)
+				// 冷却重排后备用地址可能排在首位，不能拿下标判断主备身份
+				if normalizeURL(addr) != primaryKey {
+					fmt.Printf("[WARN] Provider %s 主地址失败或冷却中，备用地址 %s 接管本次请求\n", provider.Name, addr)
+				}
+			}
+			return true, nil
+		}
+
+		lastErr = err
+		if !multiAddress {
+			return false, err
+		}
+		if !addressSwitchableError(err) || c.Writer.Written() {
+			return false, err
+		}
+		prs.endpointCooldowns.MarkFailure(kind, provider.ID, addr, retryAfterOf(err))
+		fmt.Printf("[WARN] Provider %s 地址 %s 失败，冷却后改试下一地址: %v\n", provider.Name, addr, err)
+	}
+	return false, fmt.Errorf("%w: %v", errEndpointPoolExhausted, lastErr)
+}
+
+// forwardToAddress 向单个地址发一次请求并转发响应。
+// singleAddress=true 时保留 HTTP 层 1 次自动重试（旧行为）；
+// 多地址路径关闭隐藏重试，重试预算统一由地址池承担。
+func (prs *ProviderRelayService) forwardToAddress(
+	c *gin.Context,
+	kind string,
+	provider Provider,
+	targetURL string,
+	query map[string]string,
+	headers map[string]string,
+	bodyBytes []byte,
+	isStream bool,
+	sseConverter *OpenAIToAnthropicSSEConverter,
+	requestLog *ReqeustLog,
+	singleAddress bool,
+) (bool, error) {
 	// 绑定客户端 context：客户端取消（用户 Ctrl-C / CLI 超时断开）时立即释放上游连接，
 	// 否则处理协程与上游请求会一直挂到 32 小时超时，上游还在持续产出并计费。
 	// 超时与连接池由共享客户端统一提供，不再每请求新建 Transport。
@@ -1312,8 +1390,10 @@ func (prs *ProviderRelayService) forwardRequest(
 		SetClient(relayClientFor(provider.InsecureSkipVerify, provider.Name)).
 		WithContext(c.Request.Context()).
 		SetHeaders(headers).
-		SetQueryParams(query).
-		SetRetry(1, 500*time.Millisecond)
+		SetQueryParams(query)
+	if singleAddress {
+		req = req.SetRetry(1, 500*time.Millisecond)
+	}
 
 	reqBody := bytes.NewReader(bodyBytes)
 	req = req.SetBody(reqBody)
@@ -1334,7 +1414,8 @@ func (prs *ProviderRelayService) forwardRequest(
 		// 尝试从响应体提取供应商原始错误信息
 		if resp != nil {
 			if upstreamBody := extractUpstreamError(resp); upstreamBody != "" {
-				return false, fmt.Errorf("upstream status %d: %s", resp.StatusCode(), upstreamBody)
+				return false, newUpstreamStatusError(resp, resp.StatusCode(),
+					fmt.Sprintf("upstream status %d: %s", resp.StatusCode(), upstreamBody))
 			}
 		}
 		return false, err
@@ -1365,7 +1446,7 @@ func (prs *ProviderRelayService) forwardRequest(
 		if isClientSideUpstreamStatus(status) {
 			return false, fmt.Errorf("%w: upstream status %d: %s", errUpstreamClientError, status, errMsg)
 		}
-		return false, fmt.Errorf("upstream status %d: %s", status, errMsg)
+		return false, newUpstreamStatusError(resp, status, fmt.Sprintf("upstream status %d: %s", status, errMsg))
 	}
 
 	// 状态码为 0 且无错误：当作成功处理
@@ -1388,7 +1469,17 @@ func (prs *ProviderRelayService) forwardRequest(
 	if isClientSideUpstreamStatus(status) {
 		return false, fmt.Errorf("%w: %s", errUpstreamClientError, detail)
 	}
-	return false, errors.New(detail)
+	return false, newUpstreamStatusError(resp, status, detail)
+}
+
+// newUpstreamStatusError 构造带状态码的上游失败；429 时顺带解析 Retry-After
+// 供地址冷却使用
+func newUpstreamStatusError(resp *xrequest.Response, status int, detail string) *upstreamStatusError {
+	e := &upstreamStatusError{status: status, detail: detail}
+	if status == http.StatusTooManyRequests && resp != nil && resp.RawResponse != nil {
+		e.retryAfter = parseRetryAfter(resp.RawResponse.Header.Get("Retry-After"), time.Now())
+	}
+	return e
 }
 
 // relayResponseToClient 把上游 2xx 响应转发给客户端并区分三种收尾情况：
@@ -2880,6 +2971,12 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							break
 						}
 
+						// 多地址池已整轮试过：失败已计一次，直接切下一供应商
+						if errors.Is(err, errEndpointPoolExhausted) {
+							fmt.Printf("[CustomCLI][INFO] Provider %s 地址池耗尽，切换下一供应商\n", provider.Name)
+							break
+						}
+
 						// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开
 						if retryCount < maxRetryPerProvider-1 {
 							fmt.Printf("[CustomCLI][INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
@@ -3141,86 +3238,133 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		}
 		fmt.Printf("[%s] 使用 Provider: %s | URL: %s\n", logPrefix, selectedProvider.Name, selectedProvider.APIURL)
 
-		// 构建目标 URL（拼接 provider 的 APIURL 和 /v1/models）
-		targetURL := joinURL(selectedProvider.APIURL, "/v1/models")
-
-		req, err := http.NewRequest("GET", targetURL, nil)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to create request: %w", err)
-			continue
+		// 地址池：与聊天转发同语义——多地址供应商按冷却排序逐地址尝试，
+		// 传输失败与 408/421/429/5xx 切下一地址，凭据类 4xx 直接换供应商
+		pool := selectedProvider.EndpointPool()
+		multiAddress := len(pool) > 1
+		if multiAddress {
+			pool = prs.endpointCooldowns.Order(kind, selectedProvider.ID, pool)
 		}
 
-		// 复制客户端请求头
-		for key, values := range c.Request.Header {
-			for _, value := range values {
-				req.Header.Add(key, value)
+	addrLoop:
+		for _, addr := range pool {
+			// 构建目标 URL（拼接地址和 /v1/models）
+			targetURL := joinURL(addr, "/v1/models")
+
+			// 绑定客户端 context：客户端断开后不得继续遍历地址与供应商
+			req, err := http.NewRequestWithContext(c.Request.Context(), "GET", targetURL, nil)
+			if err != nil {
+				lastErr = fmt.Errorf("failed to create request: %w", err)
+				continue
 			}
-		}
-		// 清掉客户端自带凭据，避免用户本机 Key 被转发给第三方供应商
-		for _, name := range []string{
-			"Authorization", "Proxy-Authorization", "X-Api-Key", "Api-Key", "X-Goog-Api-Key",
-			"Accept-Encoding", "Connection", "Keep-Alive", "Te", "Upgrade",
-		} {
-			req.Header.Del(name)
-		}
 
-		// 请求清理（头部）：与聊天转发同规则，在注入供应商凭据之前作用于透传的客户端头
-		if selectedProvider.RequestSanitizeEnabled {
-			sanitizeHTTPHeaders(req.Header, selectedProvider.SanitizeConfig)
-		}
-
-		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
-		authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
-		switch authType {
-		case "x-api-key":
-			req.Header.Set("x-api-key", selectedProvider.APIKey)
-			req.Header.Set("anthropic-version", "2023-06-01")
-		case "", "bearer":
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
-		default:
-			headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
-			if headerName == "" || strings.EqualFold(headerName, "custom") {
-				headerName = "Authorization"
+			// 复制客户端请求头
+			for key, values := range c.Request.Header {
+				for _, value := range values {
+					req.Header.Add(key, value)
+				}
 			}
-			req.Header.Set(headerName, selectedProvider.APIKey)
-		}
-
-		// 设置默认 Accept 头
-		if req.Header.Get("Accept") == "" {
-			req.Header.Set("Accept", "application/json")
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			fmt.Printf("[%s] ✗ 请求失败: %s | 错误: %v | 尝试下一个\n", logPrefix, selectedProvider.Name, err)
-			lastErr = fmt.Errorf("request failed: %w", err)
-			continue
-		}
-
-		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			fmt.Printf("[%s] ✗ 读取响应失败: %s | 错误: %v | 尝试下一个\n", logPrefix, selectedProvider.Name, readErr)
-			lastErr = fmt.Errorf("failed to read response: %w", readErr)
-			continue
-		}
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			fmt.Printf("[%s] ✗ HTTP %d: %s | 尝试下一个\n", logPrefix, resp.StatusCode, selectedProvider.Name)
-			lastErr = fmt.Errorf("provider %s HTTP %d", selectedProvider.Name, resp.StatusCode)
-			continue
-		}
-
-		// 复制响应头
-		for key, values := range resp.Header {
-			for _, value := range values {
-				c.Header(key, value)
+			// 清掉客户端自带凭据，避免用户本机 Key 被转发给第三方供应商
+			for _, name := range []string{
+				"Authorization", "Proxy-Authorization", "X-Api-Key", "Api-Key", "X-Goog-Api-Key",
+				"Accept-Encoding", "Connection", "Keep-Alive", "Te", "Upgrade",
+			} {
+				req.Header.Del(name)
 			}
-		}
 
-		fmt.Printf("[%s] ✓ 成功: %s | HTTP %d\n", logPrefix, selectedProvider.Name, resp.StatusCode)
-		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
-		return nil
+			// 请求清理（头部）：与聊天转发同规则，在注入供应商凭据之前作用于透传的客户端头
+			if selectedProvider.RequestSanitizeEnabled {
+				sanitizeHTTPHeaders(req.Header, selectedProvider.SanitizeConfig)
+			}
+
+			// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
+			authType := strings.ToLower(strings.TrimSpace(selectedProvider.ConnectivityAuthType))
+			switch authType {
+			case "x-api-key":
+				req.Header.Set("x-api-key", selectedProvider.APIKey)
+				req.Header.Set("anthropic-version", "2023-06-01")
+			case "", "bearer":
+				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", selectedProvider.APIKey))
+			default:
+				headerName := strings.TrimSpace(selectedProvider.ConnectivityAuthType)
+				if headerName == "" || strings.EqualFold(headerName, "custom") {
+					headerName = "Authorization"
+				}
+				req.Header.Set(headerName, selectedProvider.APIKey)
+			}
+
+			// 设置默认 Accept 头
+			if req.Header.Get("Accept") == "" {
+				req.Header.Set("Accept", "application/json")
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				// 客户端已断开：立即停止全部尝试，不冷却地址、不换供应商
+				if c.Request.Context().Err() != nil {
+					fmt.Printf("[%s] 客户端已断开，停止尝试\n", logPrefix)
+					return fmt.Errorf("client aborted: %w", err)
+				}
+				fmt.Printf("[%s] ✗ 请求失败: %s (%s) | 错误: %v | 尝试下一个\n", logPrefix, selectedProvider.Name, addr, err)
+				lastErr = fmt.Errorf("request failed: %w", err)
+				if multiAddress {
+					prs.endpointCooldowns.MarkFailure(kind, selectedProvider.ID, addr, defaultEndpointCooldown)
+				}
+				continue // 传输层失败：可切下一地址
+			}
+
+			body, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				// 取消可能发生在响应头之后：错误从 body 读取冒出，
+				// 同样必须即刻终止，不冷却地址、不换供应商
+				if c.Request.Context().Err() != nil {
+					fmt.Printf("[%s] 客户端已断开，停止尝试\n", logPrefix)
+					return fmt.Errorf("client aborted: %w", readErr)
+				}
+				fmt.Printf("[%s] ✗ 读取响应失败: %s (%s) | 错误: %v | 尝试下一个\n", logPrefix, selectedProvider.Name, addr, readErr)
+				lastErr = fmt.Errorf("failed to read response: %w", readErr)
+				if multiAddress {
+					prs.endpointCooldowns.MarkFailure(kind, selectedProvider.ID, addr, defaultEndpointCooldown)
+				}
+				continue
+			}
+
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				fmt.Printf("[%s] ✗ HTTP %d: %s (%s) | 尝试下一个\n", logPrefix, resp.StatusCode, selectedProvider.Name, addr)
+				lastErr = fmt.Errorf("provider %s HTTP %d", selectedProvider.Name, resp.StatusCode)
+				switchable := resp.StatusCode == http.StatusRequestTimeout ||
+					resp.StatusCode == http.StatusMisdirectedRequest ||
+					resp.StatusCode == http.StatusTooManyRequests ||
+					resp.StatusCode >= 500
+				if multiAddress && switchable {
+					cooldown := defaultEndpointCooldown
+					if resp.StatusCode == http.StatusTooManyRequests {
+						if d := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()); d > 0 {
+							cooldown = d
+						}
+					}
+					prs.endpointCooldowns.MarkFailure(kind, selectedProvider.ID, addr, cooldown)
+					continue
+				}
+				break addrLoop // 凭据/请求类错误：换地址无意义，直接换供应商
+			}
+
+			if multiAddress {
+				prs.endpointCooldowns.MarkSuccess(kind, selectedProvider.ID, addr)
+			}
+
+			// 复制响应头
+			for key, values := range resp.Header {
+				for _, value := range values {
+					c.Header(key, value)
+				}
+			}
+
+			fmt.Printf("[%s] ✓ 成功: %s (%s) | HTTP %d\n", logPrefix, selectedProvider.Name, addr, resp.StatusCode)
+			c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+			return nil
+		}
 	}
 
 	fmt.Printf("[%s] ✗ 所有 %d 个 provider 均失败 | 最后错误: %v\n", logPrefix, len(ordered), lastErr)

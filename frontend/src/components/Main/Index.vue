@@ -555,6 +555,24 @@
                   />
                 </label>
 
+                <!-- 备用 API 地址（多入口容灾，gemini 平台暂不支持） -->
+                <label v-if="modalState.tabId !== 'gemini'" class="form-field">
+                  <span class="label-row">
+                    {{ t('components.main.form.labels.fallbackApiUrls') }}
+                    <span v-if="modalState.errors.fallbackApiUrls" class="field-error">
+                      {{ modalState.errors.fallbackApiUrls }}
+                    </span>
+                  </span>
+                  <textarea
+                    v-model="modalState.form.fallbackApiUrlsText"
+                    class="fallback-urls-input"
+                    :class="{ 'has-error': !!modalState.errors.fallbackApiUrls }"
+                    rows="2"
+                    :placeholder="t('components.main.form.placeholders.fallbackApiUrls')"
+                  ></textarea>
+                  <span class="field-hint">{{ t('components.main.form.hints.fallbackApiUrls') }}</span>
+                </label>
+
                 <label class="form-field">
                   <span>{{ t('components.main.form.labels.officialSite') }}</span>
                   <BaseInput
@@ -1553,6 +1571,10 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
 const serializeProviders = (providers: AutomationCard[]) =>
   providers.map((provider) => ({
     ...provider,
+    // 备用地址：空数组不落盘
+    fallbackApiUrls: provider.fallbackApiUrls && provider.fallbackApiUrls.length > 0
+      ? provider.fallbackApiUrls
+      : undefined,
     // 跳过 TLS 验证与请求清理
     insecureSkipVerify: !!provider.insecureSkipVerify,
     requestSanitizeEnabled: !!provider.requestSanitizeEnabled,
@@ -2478,6 +2500,8 @@ type VendorForm = {
   modelMapping?: Record<string, string>
   level?: number
   apiEndpoint?: string
+  // 备用地址编辑框原文（每行一个）
+  fallbackApiUrlsText?: string
   cliConfig?: Record<string, any>
   // === 可用性监控配置（新） ===
   availabilityMonitorEnabled?: boolean
@@ -2532,6 +2556,7 @@ const defaultFormValues = (platform?: string): VendorForm => ({
   modelMapping: {},
   cliConfig: {},
   apiEndpoint: '', // API 端点（可选）
+  fallbackApiUrlsText: '',
   upstreamProtocol: 'auto', // 上游协议类型（anthropic/openai_chat/auto）
   insecureSkipVerify: false, // 默认严格验证上游 TLS 证书
   requestSanitizeEnabled: false, // 请求清理默认关闭
@@ -2596,6 +2621,7 @@ const modalState = reactive({
   form: defaultFormValues(),
   errors: {
     apiUrl: '',
+    fallbackApiUrls: '',
   },
 })
 
@@ -2630,6 +2656,7 @@ const openCreateModal = () => {
   customAuthHeader.value = ''
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
+  modalState.errors.fallbackApiUrls = ''
   modalState.open = true
 }
 
@@ -2649,6 +2676,7 @@ const openEditModal = (card: AutomationCard) => {
     modelMapping: card.modelMapping || {},
     cliConfig: card.cliConfig || {},
     apiEndpoint: card.apiEndpoint || '',
+    fallbackApiUrlsText: (card.fallbackApiUrls || []).join('\n'),
     upstreamProtocol: card.upstreamProtocol || 'auto',
     insecureSkipVerify: card.insecureSkipVerify ?? false,
     requestSanitizeEnabled: card.requestSanitizeEnabled ?? false,
@@ -2688,6 +2716,7 @@ const openEditModal = (card: AutomationCard) => {
   }
   connectivityTestResult.value = null
   modalState.errors.apiUrl = ''
+  modalState.errors.fallbackApiUrls = ''
   modalState.open = true
 }
 
@@ -2709,12 +2738,37 @@ const submitModal = async (): Promise<boolean> => {
   const officialSite = modalState.form.officialSite.trim()
   const icon = (modalState.form.icon || defaultIconKey).toString().trim().toLowerCase() || defaultIconKey
   modalState.errors.apiUrl = ''
+  modalState.errors.fallbackApiUrls = ''
   try {
     const parsed = new URL(apiUrl)
     if (!/^https?:/.test(parsed.protocol)) throw new Error('protocol')
   } catch {
     modalState.errors.apiUrl = t('components.main.form.errors.invalidUrl')
     return false
+  }
+
+  // 备用地址：按行拆分、去重、上限 4，逐条校验 http/https 绝对地址
+  let fallbackApiUrls: string[] | undefined
+  if (modalState.tabId !== 'gemini') {
+    const lines = (modalState.form.fallbackApiUrlsText || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const deduped = Array.from(new Set(lines))
+    if (deduped.length > 4) {
+      modalState.errors.fallbackApiUrls = t('components.main.form.errors.tooManyFallbacks')
+      return false
+    }
+    for (const u of deduped) {
+      try {
+        const parsed = new URL(u)
+        if (!/^https?:/.test(parsed.protocol)) throw new Error('protocol')
+      } catch {
+        modalState.errors.fallbackApiUrls = t('components.main.form.errors.invalidFallbackUrl')
+        return false
+      }
+    }
+    fallbackApiUrls = deduped.length > 0 ? deduped : undefined
   }
 
   if (editingCard.value) {
@@ -2761,6 +2815,7 @@ const submitModal = async (): Promise<boolean> => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
+      fallbackApiUrls,
       upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
       insecureSkipVerify: !!modalState.form.insecureSkipVerify,
       requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
@@ -2805,6 +2860,7 @@ const submitModal = async (): Promise<boolean> => {
       modelMapping: modalState.form.modelMapping || {},
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
+      fallbackApiUrls,
       upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
       insecureSkipVerify: !!modalState.form.insecureSkipVerify,
       requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
@@ -3350,6 +3406,28 @@ const confirmDeleteCliTool = async () => {
 </script>
 
 <style scoped>
+.fallback-urls-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--mac-border);
+  border-radius: 8px;
+  background: var(--mac-surface);
+  color: var(--mac-text);
+  font-size: 13px;
+  font-family: monospace;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.fallback-urls-input:focus {
+  outline: none;
+  border-color: var(--mac-accent);
+}
+
+.fallback-urls-input.has-error {
+  border-color: #ef4444;
+}
+
 /* 正在使用的供应商卡片样式 */
 /* @author sm */
 .automation-card.is-last-used {

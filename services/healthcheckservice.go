@@ -557,16 +557,11 @@ func (hcs *HealthCheckService) checkAllProviders(platform string) []HealthCheckR
 	return results
 }
 
-// checkProvider 执行单个 Provider 的健康检查
+// checkProvider 执行单个 Provider 的健康检查。
+// 多地址供应商按主地址优先、失败后顺序探测备用地址（与转发路径的
+// 可切换错误分类一致）；备用地址成功仍记"可用"，仅在信息里标注主地址故障，
+// 不引入新的状态枚举。全部地址失败才算该供应商一次失败。
 func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provider, platform string) *HealthCheckResult {
-	result := &HealthCheckResult{
-		ProviderID:   provider.ID,
-		ProviderName: provider.Name,
-		Platform:     platform,
-		Status:       HealthStatusFailed,
-		CheckedAt:    time.Now(),
-	}
-
 	// 获取有效的测试参数
 	model := hcs.getEffectiveModel(&provider, platform)
 	// 与真实转发一致:应用供应商的模型映射后再发起探测
@@ -574,6 +569,46 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	endpoint := hcs.getEffectiveEndpoint(&provider, platform)
 	timeout := hcs.getEffectiveTimeout(&provider)
 
+	pool := provider.EndpointPool()
+	if len(pool) == 0 {
+		pool = []string{provider.APIURL}
+	}
+
+	var result *HealthCheckResult
+	for i, addr := range pool {
+		var switchable bool
+		result, switchable = hcs.probeAddress(ctx, &provider, platform, addr, model, endpoint, timeout)
+		if result.Status != HealthStatusFailed {
+			if i > 0 {
+				// 主地址失败但备用可用：状态仍为可用，只在信息里注明，
+				// 该文本仅作展示，不参与可用性判定
+				note := fmt.Sprintf("主地址失败，备用地址 %s 接管探测", addr)
+				if result.ErrorMessage == "" {
+					result.ErrorMessage = note
+				} else {
+					result.ErrorMessage = note + "；" + result.ErrorMessage
+				}
+			}
+			return result
+		}
+		// 凭据/请求类失败换地址无意义，直接定论
+		if !switchable {
+			return result
+		}
+	}
+	return result
+}
+
+// probeAddress 对单个地址做一次探测。返回结果与"失败时是否值得换下一地址"
+// （传输层失败与 408/421/429/5xx 可切，凭据/请求类 4xx 不切）。
+func (hcs *HealthCheckService) probeAddress(ctx context.Context, provider *Provider, platform, addr, model, endpoint string, timeout int) (*HealthCheckResult, bool) {
+	result := &HealthCheckResult{
+		ProviderID:   provider.ID,
+		ProviderName: provider.Name,
+		Platform:     platform,
+		Status:       HealthStatusFailed,
+		CheckedAt:    time.Now(),
+	}
 	result.Model = model
 	result.Endpoint = endpoint
 
@@ -581,11 +616,11 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	reqBody := hcs.buildTestRequest(platform, model, endpoint)
 	if reqBody == nil {
 		result.ErrorMessage = "无法构建测试请求"
-		return result
+		return result, false
 	}
 
 	// 构建目标 URL
-	baseURL := strings.TrimSuffix(provider.APIURL, "/")
+	baseURL := strings.TrimSuffix(addr, "/")
 	if !strings.HasPrefix(endpoint, "/") {
 		endpoint = "/" + endpoint
 	}
@@ -595,7 +630,7 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(reqBody))
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
-		return result
+		return result, false
 	}
 
 	// 设置 Headers
@@ -648,30 +683,51 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	result.LatencyMs = latencyMs
 
 	if err != nil {
+		// 服务停止/上层取消：不是地址故障，不再继续探测其它地址
+		if ctx.Err() != nil {
+			result.ErrorMessage = fmt.Sprintf("探测被取消: %v", err)
+			return result, false
+		}
 		// 检测是否为超时错误
 		if isTimeoutError(err) {
 			result.Status = HealthStatusFailed
 			result.ErrorMessage = fmt.Sprintf("响应超时 (>%dms)", timeout)
 			log.Printf("[HealthCheck] [%s/%s] 请求超时: %dms (阈值: %dms)",
 				platform, provider.Name, latencyMs, timeout)
-			return result
+			return result, true
 		}
 		result.ErrorMessage = fmt.Sprintf("网络错误: %v", err)
 		log.Printf("[HealthCheck] [%s/%s] 网络错误: %v", platform, provider.Name, err)
-		return result
+		return result, true
 	}
 	defer resp.Body.Close()
 
-	// 读取响应体（限制大小）
+	// 读取响应体（限制大小）。读取失败说明连接中途断开——
+	// 不能丢弃错误按 2xx 判可用，否则半死的主地址永远轮不到备用
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if err != nil {
-		body = []byte{}
+		// 取消可能发生在收到响应头之后：此时错误从 body 读取冒出，
+		// 不会走 Do 的取消分支，同样不得继续探测其它地址
+		if ctx.Err() != nil {
+			result.ErrorMessage = fmt.Sprintf("探测被取消: %v", err)
+			return result, false
+		}
+		result.Status = HealthStatusFailed
+		result.ErrorMessage = fmt.Sprintf("读取响应失败: %v", err)
+		log.Printf("[HealthCheck] [%s/%s] 读取响应失败: %v", platform, provider.Name, err)
+		return result, true
 	}
 
 	// 判定状态
 	result.Status, result.ErrorMessage = hcs.determineStatus(resp.StatusCode, latencyMs, body)
 
-	return result
+	// 与转发路径同一套可切换分类：408/421/429/5xx 值得换下一地址，
+	// 凭据/请求类 4xx 换地址也一样失败
+	switchable := resp.StatusCode == http.StatusRequestTimeout ||
+		resp.StatusCode == http.StatusMisdirectedRequest ||
+		resp.StatusCode == http.StatusTooManyRequests ||
+		resp.StatusCode >= 500
+	return result, switchable
 }
 
 // determineStatus 根据 HTTP 状态码和延迟判定健康状态

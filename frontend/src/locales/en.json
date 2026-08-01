@@ -364,6 +364,7 @@
         "labels": {
           "name": "Vendor name",
           "apiUrl": "API endpoint",
+          "fallbackApiUrls": "Fallback API URLs",
           "apiKey": "API key",
           "apiEndpoint": "API Endpoint Path (optional)",
           "upstreamProtocol": "Upstream Protocol",
@@ -386,6 +387,7 @@
         "placeholders": {
           "name": "e.g. AICoding.sh",
           "apiUrl": "https://api.aicoding.sh",
+          "fallbackApiUrls": "One fallback URL per line, up to 4 (optional)",
           "apiKey": "sk-xxxxx",
           "apiEndpoint": "Leave blank for default, e.g. /v1/chat/completions",
           "officialSite": "https://vendor.com",
@@ -400,6 +402,7 @@
         },
         "noIconResults": "No matching icons found",
         "hints": {
+          "fallbackApiUrls": "When the primary URL fails with a switchable error (network/408/421/429/5xx), fallbacks are tried in order within the same request; the provider only counts as failed after all URLs fail",
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
           "upstreamProtocol": "Specify the upstream API protocol type. Auto mode detects based on endpoint; openai_chat mode auto-converts request/response format",
@@ -444,7 +447,9 @@
         "confirmDeleteTitle": "Remove vendor",
         "confirmDeleteMessage": "Are you sure you want to remove {name}? This action cannot be undone.",
         "errors": {
-          "invalidUrl": "Please enter a valid API URL"
+          "invalidUrl": "Please enter a valid API URL",
+          "tooManyFallbacks": "At most 4 fallback URLs",
+          "invalidFallbackUrl": "Fallback URLs must be valid http/https addresses"
         },
         "saveFailed": "Failed to save provider configuration",
         "cliConfigSaveFailed": "Failed to save CLI config"

@@ -2310,6 +2310,13 @@ export class Provider {
     "apiEndpoint"?: string;
 
     /**
+     * 备用 API 地址（可选，最多 4 个）- 同一供应商的多入口容灾
+     * 主地址（APIURL）失败且属可切换错误时，同一请求内按序改试备用地址；
+     * 全部失败才算该供应商一次失败。仅 claude/codex/custom 转发路径生效
+     */
+    "fallbackApiUrls"?: string[];
+
+    /**
      * 模型白名单 - Provider 原生支持的模型名
      * 使用 map 实现 O(1) 查找，向后兼容（omitempty）
      */
@@ -2425,22 +2432,26 @@ export class Provider {
      * Creates a new Provider instance from a string or object.
      */
     static createFrom($$source: any = {}): Provider {
-        const $$createField10_0 = $$createType12;
-        const $$createField11_0 = $$createType4;
-        const $$createField15_0 = $$createType26;
-        const $$createField20_0 = $$createType28;
+        const $$createField10_0 = $$createType7;
+        const $$createField11_0 = $$createType12;
+        const $$createField12_0 = $$createType4;
+        const $$createField16_0 = $$createType26;
+        const $$createField21_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("fallbackApiUrls" in $$parsedSource) {
+            $$parsedSource["fallbackApiUrls"] = $$createField10_0($$parsedSource["fallbackApiUrls"]);
+        }
         if ("supportedModels" in $$parsedSource) {
-            $$parsedSource["supportedModels"] = $$createField10_0($$parsedSource["supportedModels"]);
+            $$parsedSource["supportedModels"] = $$createField11_0($$parsedSource["supportedModels"]);
         }
         if ("modelMapping" in $$parsedSource) {
-            $$parsedSource["modelMapping"] = $$createField11_0($$parsedSource["modelMapping"]);
+            $$parsedSource["modelMapping"] = $$createField12_0($$parsedSource["modelMapping"]);
         }
         if ("availabilityConfig" in $$parsedSource) {
-            $$parsedSource["availabilityConfig"] = $$createField15_0($$parsedSource["availabilityConfig"]);
+            $$parsedSource["availabilityConfig"] = $$createField16_0($$parsedSource["availabilityConfig"]);
         }
         if ("sanitizeConfig" in $$parsedSource) {
-            $$parsedSource["sanitizeConfig"] = $$createField20_0($$parsedSource["sanitizeConfig"]);
+            $$parsedSource["sanitizeConfig"] = $$createField21_0($$parsedSource["sanitizeConfig"]);
         }
         return new Provider($$parsedSource as Partial<Provider>);
     }
