@@ -111,7 +111,7 @@ func TestForwardRequestSendsOnlyProviderCredentials(t *testing.T) {
 		ConnectivityAuthType: "x-api-key",
 	}
 	ok, ferr := prs.forwardRequest(c, "claude", provider, "/v1/messages",
-		map[string]string{}, cloneHeaders(req.Header), []byte(`{"model":"m"}`), false, "m")
+		map[string]string{}, cloneHeaders(req.Header), []byte(`{"model":"m"}`), false, "m", 0)
 	if !ok {
 		t.Fatalf("转发应成功,实际失败: %v", ferr)
 	}
@@ -544,7 +544,7 @@ func TestForwardRequestDegradesWhenNothingWritten(t *testing.T) {
 
 	provider := Provider{Name: "p1", APIURL: upstream.URL, APIKey: "k", Enabled: true}
 	ok, err := prs.forwardRequest(c, "claude", provider, "/v1/messages",
-		map[string]string{}, map[string]string{}, []byte(`{"model":"m"}`), true, "m")
+		map[string]string{}, map[string]string{}, []byte(`{"model":"m"}`), true, "m", 0)
 
 	if ok {
 		t.Fatalf("上游中途断开不应判为成功")

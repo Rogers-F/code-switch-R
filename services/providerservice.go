@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // AvailabilityConfig 可用性监控高级配置
@@ -57,6 +58,10 @@ type Provider struct {
 	// 主地址（APIURL）失败且属可切换错误时，同一请求内按序改试备用地址；
 	// 全部失败才算该供应商一次失败。仅 claude/codex/custom 转发路径生效
 	FallbackAPIURLs []string `json:"fallbackApiUrls,omitempty"`
+
+	// 最大并发请求数（0=不限）- 仅约束代理转发的推理请求，
+	// /v1/models、健康检查等内部请求不占配额；为单进程内限制
+	MaxConcurrency int `json:"maxConcurrency,omitempty"`
 
 	// 模型白名单 - Provider 原生支持的模型名
 	// 使用 map 实现 O(1) 查找，向后兼容（omitempty）
@@ -126,6 +131,14 @@ type providerEnvelope struct {
 
 type ProviderService struct {
 	mu sync.Mutex
+	// configGen 配置代数：每次成功落盘递增。并发限流的容量热更新
+	// 以它为准，在途请求携带的旧 Provider 副本不得把容量改回旧值
+	configGen atomic.Int64
+}
+
+// configGeneration 返回当前配置代数（供转发路径在装载供应商时捕获）
+func (ps *ProviderService) configGeneration() int64 {
+	return ps.configGen.Load()
 }
 
 var safeCustomToolIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
@@ -298,7 +311,25 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	// 配置代数递增：并发限流按代数接受容量热更新
+	ps.configGen.Add(1)
+	return nil
+}
+
+// LoadProvidersWithGen 返回配对一致的 (providers, 配置代数)。
+// 并发限流的容量热更新依赖两者配对。必须与写入方共用 ps.mu：
+// 写入方"改名文件→递增代数"两步之间存在窗口，锁外读取可能拿到
+// (新配置, 旧代数)，与在途旧副本同代后容量会被来回覆盖。
+// 锁内用 loadProvidersNoLock（其迁移保存不再加锁），无递归死锁。
+func (ps *ProviderService) LoadProvidersWithGen(kind string) ([]Provider, int64, error) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	providers, err := ps.loadProvidersNoLock(kind)
+	gen := ps.configGen.Load()
+	return providers, gen, err
 }
 
 func (ps *ProviderService) LoadProviders(kind string) ([]Provider, error) {
@@ -562,6 +593,8 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		cloned.FallbackAPIURLs = append([]string(nil), source.FallbackAPIURLs...)
 	}
 
+	cloned.MaxConcurrency = source.MaxConcurrency
+
 	// 7. 添加到列表并保存（使用内部方法避免死锁）
 	providers = append(providers, *cloned)
 	if err := ps.saveProvidersLocked(kind, providers); err != nil {
@@ -774,6 +807,9 @@ func validateModelConfig(supported map[string]bool, mapping map[string]string) [
 func (p *Provider) ValidateConfiguration() []string {
 	errors := validateModelConfig(p.SupportedModels, p.ModelMapping)
 	errors = append(errors, validateFallbackURLs(p.FallbackAPIURLs)...)
+	if p.MaxConcurrency < 0 {
+		errors = append(errors, "最大并发数不能为负（0 表示不限）")
+	}
 	p.configErrors = errors
 	return errors
 }

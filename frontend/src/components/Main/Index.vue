@@ -573,6 +573,19 @@
                   <span class="field-hint">{{ t('components.main.form.hints.fallbackApiUrls') }}</span>
                 </label>
 
+                <!-- 最大并发请求数（0=不限） -->
+                <label class="form-field">
+                  <span>{{ t('components.main.form.labels.maxConcurrency') }}</span>
+                  <input
+                    v-model.number="modalState.form.maxConcurrency"
+                    type="number"
+                    min="0"
+                    class="fallback-urls-input"
+                    :placeholder="t('components.main.form.placeholders.maxConcurrency')"
+                  />
+                  <span class="field-hint">{{ t('components.main.form.hints.maxConcurrency') }}</span>
+                </label>
+
                 <label class="form-field">
                   <span>{{ t('components.main.form.labels.officialSite') }}</span>
                   <BaseInput
@@ -1544,6 +1557,7 @@ const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard =
   enabled: provider.enabled,
   level: provider.level || 1,
   insecureSkipVerify: provider.insecureSkipVerify ?? false,
+  maxConcurrency: provider.maxConcurrency || 0,
   // 模型白名单/映射：与 claude/codex 同一套编辑器与调度语义
   supportedModels: (provider.supportedModels as Record<string, boolean> | undefined) || undefined,
   modelMapping: (provider.modelMapping as Record<string, string> | undefined) || undefined,
@@ -1563,6 +1577,7 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
   enabled: card.enabled,
   level: card.level || 1,
   insecureSkipVerify: card.insecureSkipVerify || undefined,
+  maxConcurrency: card.maxConcurrency && card.maxConcurrency > 0 ? card.maxConcurrency : undefined,
   supportedModels: emptyRecordToUndefined(card.supportedModels),
   modelMapping: emptyRecordToUndefined(card.modelMapping),
   // 注意：Gemini 不支持可用性监控配置，这些字段不会保存
@@ -1574,6 +1589,10 @@ const serializeProviders = (providers: AutomationCard[]) =>
     // 备用地址：空数组不落盘
     fallbackApiUrls: provider.fallbackApiUrls && provider.fallbackApiUrls.length > 0
       ? provider.fallbackApiUrls
+      : undefined,
+    // 最大并发：0 不落盘
+    maxConcurrency: provider.maxConcurrency && provider.maxConcurrency > 0
+      ? provider.maxConcurrency
       : undefined,
     // 跳过 TLS 验证与请求清理
     insecureSkipVerify: !!provider.insecureSkipVerify,
@@ -1649,6 +1668,7 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
             enabled: card.enabled,
             level: card.level || 1,
             insecureSkipVerify: card.insecureSkipVerify || undefined,
+            maxConcurrency: card.maxConcurrency && card.maxConcurrency > 0 ? card.maxConcurrency : undefined,
             supportedModels: emptyRecordToUndefined(card.supportedModels),
             modelMapping: emptyRecordToUndefined(card.modelMapping),
           }
@@ -2502,6 +2522,8 @@ type VendorForm = {
   apiEndpoint?: string
   // 备用地址编辑框原文（每行一个）
   fallbackApiUrlsText?: string
+  // 最大并发请求数（0=不限）
+  maxConcurrency?: number
   cliConfig?: Record<string, any>
   // === 可用性监控配置（新） ===
   availabilityMonitorEnabled?: boolean
@@ -2557,6 +2579,7 @@ const defaultFormValues = (platform?: string): VendorForm => ({
   cliConfig: {},
   apiEndpoint: '', // API 端点（可选）
   fallbackApiUrlsText: '',
+  maxConcurrency: 0,
   upstreamProtocol: 'auto', // 上游协议类型（anthropic/openai_chat/auto）
   insecureSkipVerify: false, // 默认严格验证上游 TLS 证书
   requestSanitizeEnabled: false, // 请求清理默认关闭
@@ -2591,6 +2614,13 @@ const getLevelDescription = (level: number) => {
     10: t('components.main.levelDesc.lowest'),
   }
   return descriptions[level] || t('components.main.levelDesc.normal')
+}
+
+// 归一化最大并发：空/非法/负数视为 0（不限），取整
+const normalizeMaxConcurrency = (value: number | string | undefined): number => {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return 0
+  return Math.floor(num)
 }
 
 // 归一化 level：空/非法视为 1（最高优先级），范围限制 1-10
@@ -2677,6 +2707,7 @@ const openEditModal = (card: AutomationCard) => {
     cliConfig: card.cliConfig || {},
     apiEndpoint: card.apiEndpoint || '',
     fallbackApiUrlsText: (card.fallbackApiUrls || []).join('\n'),
+    maxConcurrency: card.maxConcurrency || 0,
     upstreamProtocol: card.upstreamProtocol || 'auto',
     insecureSkipVerify: card.insecureSkipVerify ?? false,
     requestSanitizeEnabled: card.requestSanitizeEnabled ?? false,
@@ -2816,6 +2847,7 @@ const submitModal = async (): Promise<boolean> => {
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
       fallbackApiUrls,
+      maxConcurrency: normalizeMaxConcurrency(modalState.form.maxConcurrency),
       upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
       insecureSkipVerify: !!modalState.form.insecureSkipVerify,
       requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
@@ -2861,6 +2893,7 @@ const submitModal = async (): Promise<boolean> => {
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
       fallbackApiUrls,
+      maxConcurrency: normalizeMaxConcurrency(modalState.form.maxConcurrency),
       upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
       insecureSkipVerify: !!modalState.form.insecureSkipVerify,
       requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,

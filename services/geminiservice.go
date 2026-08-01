@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -34,6 +35,7 @@ type GeminiProvider struct {
 	PartnerPromotionKey string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
 	Enabled             bool              `json:"enabled"`
 	Level               int               `json:"level,omitempty"`               // 优先级分组 (1-10, 默认 1)
+	MaxConcurrency      int               `json:"maxConcurrency,omitempty"`      // 最大并发请求数（0=不限，仅代理转发，单进程）
 	InsecureSkipVerify  bool              `json:"insecureSkipVerify,omitempty"`  // 跳过上游 TLS 证书验证（仅该供应商，存在中间人风险）
 	SupportedModels     map[string]bool   `json:"supportedModels,omitempty"`     // 模型白名单（精确或通配符），空表示不限制
 	ModelMapping        map[string]string `json:"modelMapping,omitempty"`        // 模型映射：外部模型名 -> 供应商内部模型名（支持通配符）
@@ -51,9 +53,13 @@ func (p *GeminiProvider) GetEffectiveModel(requestedModel string) string {
 	return effectiveModelFor(p.ModelMapping, requestedModel)
 }
 
-// ValidateConfiguration 验证模型白名单/映射配置
+// ValidateConfiguration 验证模型白名单/映射与并发配置
 func (p *GeminiProvider) ValidateConfiguration() []string {
-	return validateModelConfig(p.SupportedModels, p.ModelMapping)
+	errs := validateModelConfig(p.SupportedModels, p.ModelMapping)
+	if p.MaxConcurrency < 0 {
+		errs = append(errs, "最大并发数不能为负（0 表示不限）")
+	}
+	return errs
 }
 
 // GeminiPreset 预设供应商
@@ -85,6 +91,13 @@ type GeminiService struct {
 	providers []GeminiProvider
 	policy    *DefaultModelPolicy
 	relayAddr string
+	// configGen 配置代数：并发限流按它接受容量热更新
+	configGen atomic.Int64
+}
+
+// configGeneration 返回当前配置代数
+func (s *GeminiService) configGeneration() int64 {
+	return s.configGen.Load()
 }
 
 // NewGeminiService 创建 Gemini 服务
@@ -168,10 +181,17 @@ func (s *GeminiService) GetPresets() []GeminiPreset {
 
 // GetProviders 获取已配置的供应商列表
 func (s *GeminiService) GetProviders() []GeminiProvider {
+	providers, _ := s.providersWithGen()
+	return providers
+}
+
+// providersWithGen 锁内一致地返回 (providers, 配置代数)，
+// 供并发限流配对使用（分两步读取会让旧配置带上新代数）
+func (s *GeminiService) providersWithGen() ([]GeminiProvider, int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 返回拷贝，避免调用方在锁外与写路径共享同一底层数组造成数据竞争
-	return append([]GeminiProvider(nil), s.providers...)
+	return append([]GeminiProvider(nil), s.providers...), s.configGen.Load()
 }
 
 // AddProvider 添加供应商
@@ -201,8 +221,14 @@ func (s *GeminiService) AddProvider(provider GeminiProvider) error {
 		}
 	}
 
-	s.providers = append(s.providers, provider)
-	return s.saveProviders()
+	original := s.providers
+	s.providers = append(append([]GeminiProvider(nil), s.providers...), provider)
+	if err := s.saveProviders(); err != nil {
+		// 落盘失败必须回滚：否则内存已变而代数未增，产生同代不同容量
+		s.providers = original
+		return err
+	}
+	return nil
 }
 
 // UpdateProvider 更新供应商
@@ -216,8 +242,15 @@ func (s *GeminiService) UpdateProvider(provider GeminiProvider) error {
 			if strings.TrimSpace(provider.APIKey) == "" {
 				provider.APIKey = p.APIKey
 			}
-			s.providers[i] = provider
-			return s.saveProviders()
+			original := s.providers
+			updated := append([]GeminiProvider(nil), s.providers...)
+			updated[i] = provider
+			s.providers = updated
+			if err := s.saveProviders(); err != nil {
+				s.providers = original
+				return err
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("未找到 ID 为 '%s' 的供应商", provider.ID)
@@ -230,8 +263,15 @@ func (s *GeminiService) DeleteProvider(id string) error {
 
 	for i, p := range s.providers {
 		if p.ID == id {
-			s.providers = append(s.providers[:i], s.providers[i+1:]...)
-			return s.saveProviders()
+			original := s.providers
+			updated := append([]GeminiProvider(nil), s.providers[:i]...)
+			updated = append(updated, s.providers[i+1:]...)
+			s.providers = updated
+			if err := s.saveProviders(); err != nil {
+				s.providers = original
+				return err
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("未找到 ID 为 '%s' 的供应商", id)
@@ -357,12 +397,18 @@ func (s *GeminiService) SwitchProvider(id string) error {
 		}
 	}
 
-	// 更新启用状态
-	for i := range s.providers {
-		s.providers[i].Enabled = (s.providers[i].ID == id)
+	// 更新启用状态（副本上改，落盘失败回滚）
+	original := s.providers
+	updated := append([]GeminiProvider(nil), s.providers...)
+	for i := range updated {
+		updated[i].Enabled = (updated[i].ID == id)
 	}
-
-	return s.saveProviders()
+	s.providers = updated
+	if err := s.saveProviders(); err != nil {
+		s.providers = original
+		return err
+	}
+	return nil
 }
 
 // GetStatus 获取当前 Gemini 配置状态
@@ -716,7 +762,11 @@ func (s *GeminiService) saveProviders() error {
 	}
 
 	// 原子写入（带 fsync 与 Windows 共享冲突重试）
-	return atomicWriteFile(path, data, 0644)
+	if err := atomicWriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	s.configGen.Add(1)
+	return nil
 }
 
 // CreateProviderFromPreset 从预设创建供应商
@@ -1051,6 +1101,7 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		PartnerPromotionKey: source.PartnerPromotionKey,
 		Enabled:             false, // 默认禁用，避免与源供应商冲突
 		Level:               source.Level,
+		MaxConcurrency:      source.MaxConcurrency,
 		InsecureSkipVerify:  source.InsecureSkipVerify, // 复制 TLS 跳验开关
 	}
 
@@ -1084,9 +1135,12 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		}
 	}
 
-	// 5. 添加到列表并保存
-	s.providers = append(s.providers, cloned)
+	// 5. 添加到列表并保存（copy-on-write，落盘失败回滚，
+	// 不留下内存已变而配置代数未增的状态）
+	original := s.providers
+	s.providers = append(append([]GeminiProvider(nil), s.providers...), cloned)
 	if err := s.saveProviders(); err != nil {
+		s.providers = original
 		return nil, fmt.Errorf("保存副本失败: %w", err)
 	}
 
@@ -1225,8 +1279,13 @@ func (s *GeminiService) ReorderProviders(ids []string) error {
 		}
 	}
 
+	original := s.providers
 	s.providers = newProviders
-	return s.saveProviders()
+	if err := s.saveProviders(); err != nil {
+		s.providers = original
+		return err
+	}
+	return nil
 }
 
 // ApplySingleProvider 直连应用单一供应商（别名，统一 API 命名）

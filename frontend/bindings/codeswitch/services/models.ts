@@ -1429,6 +1429,11 @@ export class GeminiProvider {
     "level"?: number;
 
     /**
+     * 最大并发请求数（0=不限，仅代理转发，单进程）
+     */
+    "maxConcurrency"?: number;
+
+    /**
      * 跳过上游 TLS 证书验证（仅该供应商，存在中间人风险）
      */
     "insecureSkipVerify"?: boolean;
@@ -1472,22 +1477,22 @@ export class GeminiProvider {
      * Creates a new GeminiProvider instance from a string or object.
      */
     static createFrom($$source: any = {}): GeminiProvider {
-        const $$createField13_0 = $$createType12;
-        const $$createField14_0 = $$createType4;
+        const $$createField14_0 = $$createType12;
         const $$createField15_0 = $$createType4;
-        const $$createField16_0 = $$createType5;
+        const $$createField16_0 = $$createType4;
+        const $$createField17_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("supportedModels" in $$parsedSource) {
-            $$parsedSource["supportedModels"] = $$createField13_0($$parsedSource["supportedModels"]);
+            $$parsedSource["supportedModels"] = $$createField14_0($$parsedSource["supportedModels"]);
         }
         if ("modelMapping" in $$parsedSource) {
-            $$parsedSource["modelMapping"] = $$createField14_0($$parsedSource["modelMapping"]);
+            $$parsedSource["modelMapping"] = $$createField15_0($$parsedSource["modelMapping"]);
         }
         if ("envConfig" in $$parsedSource) {
-            $$parsedSource["envConfig"] = $$createField15_0($$parsedSource["envConfig"]);
+            $$parsedSource["envConfig"] = $$createField16_0($$parsedSource["envConfig"]);
         }
         if ("settingsConfig" in $$parsedSource) {
-            $$parsedSource["settingsConfig"] = $$createField16_0($$parsedSource["settingsConfig"]);
+            $$parsedSource["settingsConfig"] = $$createField17_0($$parsedSource["settingsConfig"]);
         }
         return new GeminiProvider($$parsedSource as Partial<GeminiProvider>);
     }
@@ -2317,6 +2322,12 @@ export class Provider {
     "fallbackApiUrls"?: string[];
 
     /**
+     * 最大并发请求数（0=不限）- 仅约束代理转发的推理请求，
+     * /v1/models、健康检查等内部请求不占配额；为单进程内限制
+     */
+    "maxConcurrency"?: number;
+
+    /**
      * 模型白名单 - Provider 原生支持的模型名
      * 使用 map 实现 O(1) 查找，向后兼容（omitempty）
      */
@@ -2433,25 +2444,25 @@ export class Provider {
      */
     static createFrom($$source: any = {}): Provider {
         const $$createField10_0 = $$createType7;
-        const $$createField11_0 = $$createType12;
-        const $$createField12_0 = $$createType4;
-        const $$createField16_0 = $$createType26;
-        const $$createField21_0 = $$createType28;
+        const $$createField12_0 = $$createType12;
+        const $$createField13_0 = $$createType4;
+        const $$createField17_0 = $$createType26;
+        const $$createField22_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("fallbackApiUrls" in $$parsedSource) {
             $$parsedSource["fallbackApiUrls"] = $$createField10_0($$parsedSource["fallbackApiUrls"]);
         }
         if ("supportedModels" in $$parsedSource) {
-            $$parsedSource["supportedModels"] = $$createField11_0($$parsedSource["supportedModels"]);
+            $$parsedSource["supportedModels"] = $$createField12_0($$parsedSource["supportedModels"]);
         }
         if ("modelMapping" in $$parsedSource) {
-            $$parsedSource["modelMapping"] = $$createField12_0($$parsedSource["modelMapping"]);
+            $$parsedSource["modelMapping"] = $$createField13_0($$parsedSource["modelMapping"]);
         }
         if ("availabilityConfig" in $$parsedSource) {
-            $$parsedSource["availabilityConfig"] = $$createField16_0($$parsedSource["availabilityConfig"]);
+            $$parsedSource["availabilityConfig"] = $$createField17_0($$parsedSource["availabilityConfig"]);
         }
         if ("sanitizeConfig" in $$parsedSource) {
-            $$parsedSource["sanitizeConfig"] = $$createField21_0($$parsedSource["sanitizeConfig"]);
+            $$parsedSource["sanitizeConfig"] = $$createField22_0($$parsedSource["sanitizeConfig"]);
         }
         return new Provider($$parsedSource as Partial<Provider>);
     }

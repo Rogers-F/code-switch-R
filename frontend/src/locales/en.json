@@ -365,6 +365,7 @@
           "name": "Vendor name",
           "apiUrl": "API endpoint",
           "fallbackApiUrls": "Fallback API URLs",
+          "maxConcurrency": "Max concurrent requests",
           "apiKey": "API key",
           "apiEndpoint": "API Endpoint Path (optional)",
           "upstreamProtocol": "Upstream Protocol",
@@ -388,6 +389,7 @@
           "name": "e.g. AICoding.sh",
           "apiUrl": "https://api.aicoding.sh",
           "fallbackApiUrls": "One fallback URL per line, up to 4 (optional)",
+          "maxConcurrency": "0 = unlimited",
           "apiKey": "sk-xxxxx",
           "apiEndpoint": "Leave blank for default, e.g. /v1/chat/completions",
           "officialSite": "https://vendor.com",
@@ -402,6 +404,7 @@
         },
         "noIconResults": "No matching icons found",
         "hints": {
+          "maxConcurrency": "Max in-flight proxied requests to this provider (0 = unlimited). When full, requests go to other providers first, or queue briefly if all are full. Applies to this app's proxy only",
           "fallbackApiUrls": "When the primary URL fails with a switchable error (network/408/421/429/5xx), fallbacks are tried in order within the same request; the provider only counts as failed after all URLs fail",
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",

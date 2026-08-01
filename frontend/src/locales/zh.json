@@ -366,6 +366,7 @@
           "name": "供应商名称",
           "apiUrl": "API 地址",
           "fallbackApiUrls": "备用 API 地址",
+          "maxConcurrency": "最大并发请求数",
           "apiKey": "API 密钥",
           "apiEndpoint": "API 端点（可选）",
           "upstreamProtocol": "上游协议",
@@ -389,6 +390,7 @@
           "name": "例如：AICoding.sh",
           "apiUrl": "https://api.aicoding.sh",
           "fallbackApiUrls": "每行一个备用地址，最多 4 个（可留空）",
+          "maxConcurrency": "0 表示不限",
           "apiKey": "sk-xxxxx",
           "apiEndpoint": "留空使用默认，如 /v1/chat/completions",
           "officialSite": "https://vendor.com",
@@ -403,6 +405,7 @@
         },
         "noIconResults": "未找到匹配的图标",
         "hints": {
+          "maxConcurrency": "同一时刻最多向该供应商转发的请求数（0=不限）。满载时请求会先转其它供应商，全部满载则短暂排队。仅限本机代理转发生效",
           "fallbackApiUrls": "主地址失败且属可切换错误（网络失败/408/421/429/5xx）时，同一请求内按序改试备用地址；全部失败才算该供应商一次失败",
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",

@@ -282,7 +282,7 @@ func TestForwardRequestSanitizesOutbound(t *testing.T) {
 		SanitizeConfig:         &SanitizeConfig{BlockedHeaders: slp("x-junk")},
 	}
 	ok, ferr := prs.forwardRequest(c, "claude", provider, "/v1/messages",
-		map[string]string{}, cloneHeaders(req.Header), body, false, "m")
+		map[string]string{}, cloneHeaders(req.Header), body, false, "m", 0)
 	if !ok {
 		t.Fatalf("转发应成功,实际失败: %v", ferr)
 	}

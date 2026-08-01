@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +71,8 @@ type ProviderRelayService struct {
 	rrLastStart         map[string]string            // 轮询状态：key="platform:level" → value=上次起始 Provider Name
 	// endpointCooldowns 多地址供应商的地址冷却状态（进程内，issue #27）
 	endpointCooldowns *endpointCooldownStore
+	// concurrency 按供应商并发配额（进程内，issue #21）
+	concurrency *concurrencyLimiter
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -294,6 +297,47 @@ func respondAllProvidersFailed(c *gin.Context, lastError error, allClientErrors 
 	c.JSON(status, payload)
 }
 
+// respondAllBusy 纯并发满载终态：503 + Retry-After，带稳定机器码
+// provider_concurrency_exhausted。按平台给各自协议兼容的错误结构；
+// 不用 502（那表示已联系上游失败）也不用 504（不是上游超时）。
+func respondAllBusy(c *gin.Context, kind string) {
+	c.Header("Retry-After", "1")
+	msg := "所有可用供应商均已达到并发上限，请稍后重试"
+	switch {
+	case kind == "codex":
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": gin.H{
+				"type":    "server_error",
+				"code":    "provider_concurrency_exhausted",
+				"message": msg,
+			},
+		})
+	case kind == "gemini":
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": gin.H{
+				"code":    http.StatusServiceUnavailable,
+				"status":  "UNAVAILABLE",
+				"message": msg,
+				// Google 风格 ErrorInfo：机器码走结构化字段，客户端不必解析文案
+				"details": []gin.H{{
+					"@type":  "type.googleapis.com/google.rpc.ErrorInfo",
+					"reason": "provider_concurrency_exhausted",
+				}},
+			},
+		})
+	default:
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    "overloaded_error",
+				"code":    "provider_concurrency_exhausted",
+				"message": msg,
+			},
+			"message": msg,
+		})
+	}
+}
+
 // isClientSideUpstreamStatus 判定上游 4xx 是否属于"请求内容本身有问题"。
 // 这类失败换供应商也一样，不应计入供应商失败次数；
 // 401/403/404/408/429 仍属供应商侧问题（密钥失效、路径配错、限流），保持计入。
@@ -337,8 +381,9 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 			"codex":  nil,
 			"gemini": nil,
 		},
-		rrLastStart: make(map[string]string),
+		rrLastStart:       make(map[string]string),
 		endpointCooldowns: newEndpointCooldownStore(),
+		concurrency:       newConcurrencyLimiter(),
 	}
 }
 
@@ -721,7 +766,9 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			fmt.Printf("[WARN] 请求未指定模型名，无法执行模型智能降级\n")
 		}
 
-		providers, err := prs.providerService.LoadProviders(kind)
+		// (providers, 配置代数) 配对装载：容量热更新以更高代数为准，
+		// 分两步读取会让旧配置带上新代数、降容被来回覆盖
+		providers, configGen, err := prs.providerService.LoadProvidersWithGen(kind)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load providers"})
 			return
@@ -826,150 +873,224 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			var lastProvider string
 			totalAttempts := 0
 
-			// 遍历所有 Level 和 Provider
-			for _, level := range levels {
-				providersInLevel := levelGroups[level]
-
-				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
-				if roundRobinSettingEnabled {
-					providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+			busyWaitDeadline := time.Time{}
+			enteredBusyWait := false
+			defer func() {
+				if enteredBusyWait {
+					prs.concurrency.leaveWaitPhase()
 				}
+			}()
+			busySkipped := 0
+			// 已实际尝试过的供应商：等待阶段重扫不再碰它（失败已计、重试预算不重置）
+			attemptedProviders := map[string]bool{}
+			// 因并发满被跳过、尚未真实尝试的候选
+			busyPending := map[string]concurrencyBusyRef{}
+			for {
+				busySkipped = 0
+				// 每 pass 重建：上一轮候选可能已被拉黑或删除，残留会让容量门控恒真
+				busyPending = map[string]concurrencyBusyRef{}
+				// 遍历所有 Level 和 Provider
+				for _, level := range levels {
+					providersInLevel := levelGroups[level]
 
-				fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
-
-				for _, provider := range providersInLevel {
-					// 检查是否已被拉黑（跳过已拉黑的 provider）
-					if blacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
-						fmt.Printf("[INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
-						continue
+					// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+					if roundRobinSettingEnabled {
+						providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
 					}
 
-					// 获取实际模型名
-					effectiveModel := provider.GetEffectiveModel(requestedModel)
-					currentBodyBytes := bodyBytes
-					if effectiveModel != requestedModel && requestedModel != "" {
-						fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-						if err != nil {
-							fmt.Printf("[ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
+					fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+
+					for _, provider := range providersInLevel {
+						if attemptedProviders[strconv.FormatInt(provider.ID, 10)] {
 							continue
 						}
-						currentBodyBytes = modifiedBody
-					}
-
-					// 获取有效端点
-					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
-
-					// 同 Provider 内重试循环
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
-						totalAttempts++
-
-						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
-							fmt.Printf("[INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
-							break
+						// 检查是否已被拉黑（跳过已拉黑的 provider）
+						if blacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+							fmt.Printf("[INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
+							continue
 						}
 
-						fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
-
-						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
-						duration := time.Since(startTime)
-
-						if ok {
-							fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
-								provider.Name, retryCount+1, duration.Seconds())
-							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
-								fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+						// 获取实际模型名
+						effectiveModel := provider.GetEffectiveModel(requestedModel)
+						currentBodyBytes := bodyBytes
+						if effectiveModel != requestedModel && requestedModel != "" {
+							fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+							modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+							if err != nil {
+								fmt.Printf("[ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
+								continue
 							}
-							prs.setLastUsedProvider(kind, provider.Name)
-							return
+							currentBodyBytes = modifiedBody
 						}
 
-						// 失败处理
-						lastError = err
-						lastProvider = provider.Name
+						// 获取有效端点
+						effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
-						errorMsg := "未知错误"
-						if err != nil {
-							errorMsg = err.Error()
-						}
-						fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+						// 同 Provider 内重试循环
+						for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+							totalAttempts++
 
-						// 客户端请求被拒绝（不支持的格式/功能）：直接返回 400，不重试不拉黑
-						if errors.Is(err, ErrClientRequestRejected) {
-							fmt.Printf("[INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
-							c.JSON(http.StatusBadRequest, gin.H{
-								"type":    "error",
-								"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
-								"message": errorMsg,
-							})
-							return
-						}
+							// 再次检查是否已被拉黑（重试过程中可能被拉黑）
+							if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+								fmt.Printf("[INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+								break
+							}
 
-						// 客户端中断不计入失败次数，直接返回
-						if errors.Is(err, errClientAbort) {
-							fmt.Printf("[INFO] 客户端中断，停止重试\n")
-							return
-						}
+							fmt.Printf("[INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+								provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
-						// 上游 2xx 后中途断流：响应已部分写出，不能再换供应商（会写出两段响应），
-						// 但必须计入失败，否则半死的供应商永远不会被拉黑
-						if errors.Is(err, errUpstreamStreamAborted) {
+							startTime := time.Now()
+							ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, configGen)
+							duration := time.Since(startTime)
+
+							if ok {
+								fmt.Printf("[INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+									provider.Name, retryCount+1, duration.Seconds())
+								if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+									fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+								}
+								prs.setLastUsedProvider(kind, provider.Name)
+								return
+							}
+
+							// 并发满载：不算尝试、不计失败，换下一个供应商
+							if errors.Is(err, errProviderBusy) {
+								totalAttempts--
+								// 已真实失败过的供应商重试遇忙不再进等待候选：
+								// 下一 pass 必然跳过它，等它只会把失败聚合错改成 503
+								if pk := strconv.FormatInt(provider.ID, 10); !attemptedProviders[pk] {
+									busySkipped++
+									busyPending[pk] = concurrencyBusyRef{Key: pk, Limit: provider.MaxConcurrency, Gen: configGen}
+								}
+								fmt.Printf("[INFO] Provider %s 并发已满，跳过\n", provider.Name)
+								break
+							}
+							// 实际尝试过：等待阶段重扫不再碰它
+							attemptedProviders[strconv.FormatInt(provider.ID, 10)] = true
+							delete(busyPending, strconv.FormatInt(provider.ID, 10))
+
+							// 失败处理
+							lastError = err
+							lastProvider = provider.Name
+
+							errorMsg := "未知错误"
+							if err != nil {
+								errorMsg = err.Error()
+							}
+							fmt.Printf("[WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+								provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+
+							// 客户端请求被拒绝（不支持的格式/功能）：直接返回 400，不重试不拉黑
+							if errors.Is(err, ErrClientRequestRejected) {
+								fmt.Printf("[INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+								c.JSON(http.StatusBadRequest, gin.H{
+									"type":    "error",
+									"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+									"message": errorMsg,
+								})
+								return
+							}
+
+							// 客户端中断不计入失败次数，直接返回
+							if errors.Is(err, errClientAbort) {
+								fmt.Printf("[INFO] 客户端中断，停止重试\n")
+								return
+							}
+
+							// 上游 2xx 后中途断流：响应已部分写出，不能再换供应商（会写出两段响应），
+							// 但必须计入失败，否则半死的供应商永远不会被拉黑
+							if errors.Is(err, errUpstreamStreamAborted) {
+								if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+									fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+								}
+								return
+							}
+
+							// 上游判定"请求内容本身有问题"：换供应商也一样失败，
+							// 不计入失败次数（否则一个坏请求能把全部供应商拉黑），直接换下一个供应商
+							if errors.Is(err, errUpstreamClientError) {
+								fmt.Printf("[INFO] 上游拒绝请求内容，不计供应商失败，切换到下一个: %s\n", errorMsg)
+								break
+							}
+
+							sawNonClientError = true
+
+							// 记录失败次数（可能触发拉黑）
 							if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
 								fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
-							return
-						}
 
-						// 上游判定"请求内容本身有问题"：换供应商也一样失败，
-						// 不计入失败次数（否则一个坏请求能把全部供应商拉黑），直接换下一个供应商
-						if errors.Is(err, errUpstreamClientError) {
-							fmt.Printf("[INFO] 上游拒绝请求内容，不计供应商失败，切换到下一个: %s\n", errorMsg)
-							break
-						}
+							// 检查是否刚被拉黑
+							if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+								fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+								break
+							}
 
-						sawNonClientError = true
+							// 多地址池已在本次请求内整轮试过：不再按拉黑阈值原地重试
+							// （那会放大成 阈值×地址数 次网络发送），失败已计一次，
+							// 直接切下一供应商
+							if errors.Is(err, errEndpointPoolExhausted) {
+								fmt.Printf("[INFO] Provider %s 地址池耗尽，切换下一供应商\n", provider.Name)
+								break
+							}
 
-						// 记录失败次数（可能触发拉黑）
-						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
-						}
-
-						// 检查是否刚被拉黑
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
-							fmt.Printf("[INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
-							break
-						}
-
-						// 多地址池已在本次请求内整轮试过：不再按拉黑阈值原地重试
-						// （那会放大成 阈值×地址数 次网络发送），失败已计一次，
-						// 直接切下一供应商
-						if errors.Is(err, errEndpointPoolExhausted) {
-							fmt.Printf("[INFO] Provider %s 地址池耗尽，切换下一供应商\n", provider.Name)
-							break
-						}
-
-						// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开，
-						// 此时继续重试只是白烧上游额度
-						if retryCount < maxRetryPerProvider-1 {
-							fmt.Printf("[INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
-							select {
-							case <-time.After(time.Duration(retryWaitSeconds) * time.Second):
-							case <-c.Request.Context().Done():
-								fmt.Printf("[INFO] 等待重试期间客户端已断开，停止尝试\n")
-								return
+							// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开，
+							// 此时继续重试只是白烧上游额度
+							if retryCount < maxRetryPerProvider-1 {
+								fmt.Printf("[INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
+								select {
+								case <-time.After(time.Duration(retryWaitSeconds) * time.Second):
+								case <-c.Request.Context().Done():
+									fmt.Printf("[INFO] 等待重试期间客户端已断开，停止尝试\n")
+									return
+								}
 							}
 						}
-					}
 
-					if c.Request.Context().Err() != nil {
-						fmt.Printf("[INFO] 客户端已断开，停止尝试后续 Provider\n")
-						return
+						if c.Request.Context().Err() != nil {
+							fmt.Printf("[INFO] 客户端已断开，停止尝试后续 Provider\n")
+							return
+						}
 					}
 				}
+
+
+				// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
+				if busySkipped == 0 {
+					break
+				}
+				if busyWaitDeadline.IsZero() {
+					busyWaitDeadline = time.Now().Add(prs.concurrency.waitBudget)
+					if !prs.concurrency.enterWaitPhase() {
+						respondAllBusy(c, kind)
+						return
+					}
+					enteredBusyWait = true
+				}
+				// 唤醒以"忙候选真的有空位"为门控：本轮实际尝试供应商的正常释放
+				// 也会触发全局信号，不加门控直接重扫会形成自唤醒重试风暴
+				woke := false
+				for {
+					capSignal := prs.concurrency.releaseSignal()
+					if prs.concurrency.anyCapacity(kind, busyPending) {
+						woke = true
+						break
+					}
+					if !prs.concurrency.waitForRelease(c.Request.Context(), busyWaitDeadline, capSignal) {
+						break
+					}
+				}
+				if !woke {
+					respondAllBusy(c, kind)
+					return
+				}
+				// 容量门控可能被"释放后立刻又被占走"的候选反复触发，
+				// 重扫前硬校验总预算与客户端 context，防止空转越过 deadline
+				if c.Request.Context().Err() != nil || time.Now().After(busyWaitDeadline) {
+					respondAllBusy(c, kind)
+					return
+				}
+				fmt.Printf("[INFO] 并发配额有释放，重扫供应商\n")
 			}
 
 			// 所有 Provider 都失败或被拉黑
@@ -1004,138 +1125,209 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		var lastDuration time.Duration
 		totalAttempts := 0
 
-		for _, level := range levels {
-			providersInLevel := levelGroups[level]
-
-			// 如果启用轮询，对同 Level 的 providers 进行轮询排序
-			if roundRobinEnabled {
-				providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+		busyWaitDeadline := time.Time{}
+		enteredBusyWait := false
+		defer func() {
+			if enteredBusyWait {
+				prs.concurrency.leaveWaitPhase()
 			}
+		}()
+		busySkipped := 0
+		// 已实际尝试过的供应商：等待阶段重扫不再碰它（失败已计、重试预算不重置）
+		attemptedProviders := map[string]bool{}
+		// 因并发满被跳过、尚未真实尝试的候选
+		busyPending := map[string]concurrencyBusyRef{}
+		for {
+			busySkipped = 0
+			// 每 pass 重建：上一轮候选可能已被拉黑或删除，残留会让容量门控恒真
+			busyPending = map[string]concurrencyBusyRef{}
+			for _, level := range levels {
+				providersInLevel := levelGroups[level]
 
-			fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+				if roundRobinEnabled {
+					providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+				}
 
-			for i, provider := range providersInLevel {
-				totalAttempts++
+				fmt.Printf("[INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
-				// 获取实际应该使用的模型名
-				effectiveModel := provider.GetEffectiveModel(requestedModel)
-
-				// 如果需要映射，修改请求体
-				currentBodyBytes := bodyBytes
-				if effectiveModel != requestedModel && requestedModel != "" {
-					fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-
-					modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-					if err != nil {
-						fmt.Printf("[ERROR] 替换模型名失败: %v\n", err)
-						// 映射失败不应阻止尝试其他 provider
+				for i, provider := range providersInLevel {
+					if attemptedProviders[strconv.FormatInt(provider.ID, 10)] {
 						continue
 					}
-					currentBodyBytes = modifiedBody
-				}
+					totalAttempts++
 
-				fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
+					// 获取实际应该使用的模型名
+					effectiveModel := provider.GetEffectiveModel(requestedModel)
 
-				// 尝试发送请求
-				// 获取有效的端点（用户配置优先）
-				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
-				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
-				duration := time.Since(startTime)
+					// 如果需要映射，修改请求体
+					currentBodyBytes := bodyBytes
+					if effectiveModel != requestedModel && requestedModel != "" {
+						fmt.Printf("[INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
 
-				if ok {
-					fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
-
-					// 成功：清零连续失败计数
-					if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
-						fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+						if err != nil {
+							fmt.Printf("[ERROR] 替换模型名失败: %v\n", err)
+							// 映射失败不应阻止尝试其他 provider
+							continue
+						}
+						currentBodyBytes = modifiedBody
 					}
 
-					// 记录最后使用的供应商
-					prs.setLastUsedProvider(kind, provider.Name)
+					fmt.Printf("[INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
 
-					return // 成功，立即返回
-				}
+					// 尝试发送请求
+					// 获取有效的端点（用户配置优先）
+					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
+					startTime := time.Now()
+					ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, configGen)
+					duration := time.Since(startTime)
 
-				// 失败：记录错误并尝试下一个
-				lastError = err
-				lastProvider = provider.Name
-				lastDuration = duration
+					if ok {
+						fmt.Printf("[INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
 
-				errorMsg := "未知错误"
-				if err != nil {
-					errorMsg = err.Error()
-				}
-				fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
-					level, provider.Name, errorMsg, duration.Seconds())
+						// 成功：清零连续失败计数
+						if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+							fmt.Printf("[WARN] 清零失败计数失败: %v\n", err)
+						}
 
-				// 客户端请求被拒绝（不支持的格式/功能）：直接返回 400，不重试不拉黑
-				if errors.Is(err, ErrClientRequestRejected) {
-					fmt.Printf("[INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
-					c.JSON(http.StatusBadRequest, gin.H{
-						"type":    "error",
-						"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
-						"message": errorMsg,
-					})
-					return
-				}
+						// 记录最后使用的供应商
+						prs.setLastUsedProvider(kind, provider.Name)
 
-				// 客户端中断不计入失败次数，且没必要再换供应商
-				if errors.Is(err, errClientAbort) {
-					fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-					return
-				}
-
-				// 上游 2xx 后中途断流：响应已部分写出，不能再降级，但必须计入失败
-				if errors.Is(err, errUpstreamStreamAborted) {
-					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+						return // 成功，立即返回
 					}
-					return
-				}
 
-				// 上游判定"请求内容本身有问题"：不计入供应商失败，继续尝试下一个
-				if errors.Is(err, errUpstreamClientError) {
-					fmt.Printf("[INFO] 上游拒绝请求内容，不计供应商失败: %s\n", errorMsg)
-				} else {
-					sawNonClientError = true
-					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-						fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+					// 并发满载：不算尝试、不计失败，换下一个供应商
+					if errors.Is(err, errProviderBusy) {
+						totalAttempts--
+						busySkipped++
+						pk := strconv.FormatInt(provider.ID, 10)
+						busyPending[pk] = concurrencyBusyRef{Key: pk, Limit: provider.MaxConcurrency, Gen: configGen}
+						fmt.Printf("[INFO] Provider %s 并发已满，跳过\n", provider.Name)
+						continue
 					}
-				}
+					// 实际尝试过：等待阶段重扫不再碰它
+					attemptedProviders[strconv.FormatInt(provider.ID, 10)] = true
+					delete(busyPending, strconv.FormatInt(provider.ID, 10))
 
-				if c.Request.Context().Err() != nil {
-					fmt.Printf("[INFO] 客户端已断开，停止尝试后续 Provider\n")
-					return
-				}
+					// 失败：记录错误并尝试下一个
+					lastError = err
+					lastProvider = provider.Name
+					lastDuration = duration
 
-				// 发送切换通知：检查是否有下一个可用的 provider
-				if prs.notificationService != nil {
-					nextProvider := ""
-					// 先查找同级别的下一个
-					if i+1 < len(providersInLevel) {
-						nextProvider = providersInLevel[i+1].Name
+					errorMsg := "未知错误"
+					if err != nil {
+						errorMsg = err.Error()
+					}
+					fmt.Printf("[WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
+						level, provider.Name, errorMsg, duration.Seconds())
+
+					// 客户端请求被拒绝（不支持的格式/功能）：直接返回 400，不重试不拉黑
+					if errors.Is(err, ErrClientRequestRejected) {
+						fmt.Printf("[INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+						c.JSON(http.StatusBadRequest, gin.H{
+							"type":    "error",
+							"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+							"message": errorMsg,
+						})
+						return
+					}
+
+					// 客户端中断不计入失败次数，且没必要再换供应商
+					if errors.Is(err, errClientAbort) {
+						fmt.Printf("[INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
+						return
+					}
+
+					// 上游 2xx 后中途断流：响应已部分写出，不能再降级，但必须计入失败
+					if errors.Is(err, errUpstreamStreamAborted) {
+						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
+						}
+						return
+					}
+
+					// 上游判定"请求内容本身有问题"：不计入供应商失败，继续尝试下一个
+					if errors.Is(err, errUpstreamClientError) {
+						fmt.Printf("[INFO] 上游拒绝请求内容，不计供应商失败: %s\n", errorMsg)
 					} else {
-						// 查找下一个 level 的第一个 provider
-						for _, nextLevel := range levels {
-							if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
-								nextProvider = levelGroups[nextLevel][0].Name
-								break
-							}
+						sawNonClientError = true
+						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+							fmt.Printf("[ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 					}
-					if nextProvider != "" {
-						prs.notificationService.NotifyProviderSwitch(SwitchNotification{
-							FromProvider: provider.Name,
-							ToProvider:   nextProvider,
-							Reason:       errorMsg,
-							Platform:     kind,
-						})
+
+					if c.Request.Context().Err() != nil {
+						fmt.Printf("[INFO] 客户端已断开，停止尝试后续 Provider\n")
+						return
+					}
+
+					// 发送切换通知：检查是否有下一个可用的 provider
+					if prs.notificationService != nil {
+						nextProvider := ""
+						// 先查找同级别的下一个
+						if i+1 < len(providersInLevel) {
+							nextProvider = providersInLevel[i+1].Name
+						} else {
+							// 查找下一个 level 的第一个 provider
+							for _, nextLevel := range levels {
+								if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
+									nextProvider = levelGroups[nextLevel][0].Name
+									break
+								}
+							}
+						}
+						if nextProvider != "" {
+							prs.notificationService.NotifyProviderSwitch(SwitchNotification{
+								FromProvider: provider.Name,
+								ToProvider:   nextProvider,
+								Reason:       errorMsg,
+								Platform:     kind,
+							})
+						}
 					}
 				}
+
+				fmt.Printf("[WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 			}
 
-			fmt.Printf("[WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
+
+			// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
+			if busySkipped == 0 {
+				break
+			}
+			if busyWaitDeadline.IsZero() {
+				busyWaitDeadline = time.Now().Add(prs.concurrency.waitBudget)
+				if !prs.concurrency.enterWaitPhase() {
+					respondAllBusy(c, kind)
+					return
+				}
+				enteredBusyWait = true
+			}
+			// 唤醒以"忙候选真的有空位"为门控：本轮实际尝试供应商的正常释放
+			// 也会触发全局信号，不加门控直接重扫会形成自唤醒重试风暴
+			woke := false
+			for {
+				capSignal := prs.concurrency.releaseSignal()
+				if prs.concurrency.anyCapacity(kind, busyPending) {
+					woke = true
+					break
+				}
+				if !prs.concurrency.waitForRelease(c.Request.Context(), busyWaitDeadline, capSignal) {
+					break
+				}
+			}
+			if !woke {
+				respondAllBusy(c, kind)
+				return
+			}
+			// 容量门控可能被"释放后立刻又被占走"的候选反复触发，
+			// 重扫前硬校验总预算与客户端 context，防止空转越过 deadline
+			if c.Request.Context().Err() != nil || time.Now().After(busyWaitDeadline) {
+				respondAllBusy(c, kind)
+				return
+			}
+			fmt.Printf("[INFO] 并发配额有释放，重扫供应商\n")
 		}
 
 		// 所有 provider 都失败，返回 502
@@ -1165,6 +1357,7 @@ func (prs *ProviderRelayService) forwardRequest(
 	bodyBytes []byte,
 	isStream bool,
 	model string,
+	configGen int64,
 ) (bool, error) {
 	headers := cloneMap(clientHeaders)
 
@@ -1263,6 +1456,15 @@ func (prs *ProviderRelayService) forwardRequest(
 			bodyBytes = cleaned
 		}
 	}
+
+	// 并发配额：在本地校验/协议转换之后获取——满载时不能把本应确定
+	// 返回的 400 客户端错误变成"忙"。占用覆盖地址池遍历与 SSE 转发全程
+	// （本函数同步转发到流结束才返回），defer 释放即为流结束时机。
+	concurrencyProviderKey := strconv.FormatInt(provider.ID, 10)
+	if !prs.concurrency.TryAcquire(kind, concurrencyProviderKey, provider.MaxConcurrency, configGen) {
+		return false, errProviderBusy
+	}
+	defer prs.concurrency.Release(kind, concurrencyProviderKey)
 
 	requestLog := &ReqeustLog{
 		Platform: kind,
@@ -2138,8 +2340,8 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 从 endpoint 提取请求模型名（Gemini 的模型在 URL 路径而非请求体中）
 		requestedModel := extractGeminiModelFromEndpoint(endpoint)
 
-		// 加载 Gemini providers
-		providers := prs.geminiService.GetProviders()
+		// 加载 Gemini providers（与配置代数配对）
+		providers, geminiGen := prs.geminiService.providersWithGen()
 		if len(providers) == 0 {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no gemini providers configured"})
 			return
@@ -2225,6 +2427,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 保存日志的 defer
 		defer func() {
+			// Provider 为空说明没有任何一次真实转发（如纯并发忙），
+			// 不落一条 Provider=""、HttpCode=0 的无效记录
+			if requestLog.Provider == "" {
+				return
+			}
 			requestLog.DurationSec = time.Since(start).Seconds()
 			// 若请求过程中发生 rename,把旧名兑换成新名再落库
 			requestLog.Provider = ResolveProviderAlias(requestLog.Platform, requestLog.Provider)
@@ -2275,109 +2482,190 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			var lastProvider string
 			totalAttempts := 0
 
-			// 遍历所有 Level 和 Provider
-			for _, level := range sortedLevels {
-				providersInLevel := levelGroups[level]
-
-				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
-				if roundRobinSettingEnabled {
-					providersInLevel = prs.roundRobinOrderGemini(level, providersInLevel)
+			busyWaitDeadline := time.Time{}
+			enteredBusyWait := false
+			defer func() {
+				if enteredBusyWait {
+					prs.concurrency.leaveWaitPhase()
 				}
+			}()
+			busySkipped := 0
+			// 已实际尝试过的供应商：等待阶段重扫不再碰它（失败已计、重试预算不重置）
+			attemptedProviders := map[string]bool{}
+			// 因并发满被跳过、尚未真实尝试的候选
+			busyPending := map[string]concurrencyBusyRef{}
+			for {
+				busySkipped = 0
+				// 每 pass 重建：上一轮候选可能已被拉黑或删除，残留会让容量门控恒真
+				busyPending = map[string]concurrencyBusyRef{}
+				// 遍历所有 Level 和 Provider
+				for _, level := range sortedLevels {
+					providersInLevel := levelGroups[level]
 
-				fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
-
-				for _, provider := range providersInLevel {
-					// 检查是否已被拉黑（跳过已拉黑的 provider）
-					if blacklisted, until := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
-						fmt.Printf("[Gemini] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
-						continue
+					// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+					if roundRobinSettingEnabled {
+						providersInLevel = prs.roundRobinOrderGemini(level, providersInLevel)
 					}
 
-					// 预填日志
-					requestLog.Provider = provider.Name
-					requestLog.Model = provider.Model
+					fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
-					// 模型映射：Gemini 的模型在 URL 路径里，映射即按 provider 重写路径段。
-					// 必须用局部变量，绝不能改写外层 endpoint——否则 A 失败降级后
-					// B 会拿到 A 的映射结果
-					providerEndpoint := endpoint
-					if requestedModel != "" {
-						if effectiveModel := provider.GetEffectiveModel(requestedModel); effectiveModel != requestedModel {
-							providerEndpoint = rewriteGeminiModelInEndpoint(endpoint, requestedModel, effectiveModel)
-							fmt.Printf("[Gemini] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+					for _, provider := range providersInLevel {
+						if attemptedProviders[provider.ID] {
+							continue
 						}
-					}
-
-					// 同 Provider 内重试循环
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
-						totalAttempts++
-
-						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
-							fmt.Printf("[Gemini] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
-							break
+						// 检查是否已被拉黑（跳过已拉黑的 provider）
+						if blacklisted, until := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
+							fmt.Printf("[Gemini] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
+							continue
 						}
 
-						fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider)
-
-						ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
-						if ok {
-							fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
-							_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
-							prs.setLastUsedProvider("gemini", provider.Name)
-							return
+						// 模型映射：Gemini 的模型在 URL 路径里，映射即按 provider 重写路径段。
+						// 必须用局部变量，绝不能改写外层 endpoint——否则 A 失败降级后
+						// B 会拿到 A 的映射结果
+						providerEndpoint := endpoint
+						if requestedModel != "" {
+							if effectiveModel := provider.GetEffectiveModel(requestedModel); effectiveModel != requestedModel {
+								providerEndpoint = rewriteGeminiModelInEndpoint(endpoint, requestedModel, effectiveModel)
+								fmt.Printf("[Gemini] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+							}
 						}
 
-						// 【关键修复】如果响应已写入客户端，不能重试或降级，直接返回
-						if responseWritten {
-							if errMsg == geminiClientAbortMsg {
-								fmt.Printf("[Gemini] ℹ️ 客户端中断: %s | 不计入供应商失败\n", provider.Name)
+						// 同 Provider 内重试循环
+						for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+							// 再次检查是否已被拉黑（重试过程中可能被拉黑）。
+							// 必须在占用配额之前检查：占用后 break 会永久泄漏配额
+							if blacklisted, _ := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
+								fmt.Printf("[Gemini] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+								break
+							}
+
+							// 并发配额：每次尝试独立占用，重试间隙让出；
+							// 满载不算尝试、不计失败，换下一个供应商
+							if !prs.concurrency.TryAcquire("gemini", provider.ID, provider.MaxConcurrency, geminiGen) {
+								fmt.Printf("[Gemini] Provider %s 并发已满，跳过\n", provider.Name)
+								// 已真实失败过的供应商重试遇忙不再进等待候选：
+								// 下一 pass 必然跳过它，等它只会把失败聚合错改成 503
+								if !attemptedProviders[provider.ID] {
+									busySkipped++
+									busyPending[provider.ID] = concurrencyBusyRef{Key: provider.ID, Limit: provider.MaxConcurrency, Gen: geminiGen}
+								}
+								break
+							}
+							totalAttempts++
+
+							// 预填日志：成功占用配额后才把本次请求归属到该供应商，
+							// 忙跳过的供应商不得留名在请求日志里
+							requestLog.Provider = provider.Name
+							requestLog.Model = provider.Model
+
+							fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
+								provider.Name, level, retryCount+1, maxRetryPerProvider)
+
+							ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
+							prs.concurrency.Release("gemini", provider.ID)
+							// 实际尝试过：等待阶段重扫不再碰它
+							attemptedProviders[provider.ID] = true
+							delete(busyPending, provider.ID)
+							if ok {
+								fmt.Printf("[Gemini] ✓ 成功: %s | 重试 %d 次\n", provider.Name, retryCount+1)
+								_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
+								prs.setLastUsedProvider("gemini", provider.Name)
 								return
 							}
-							fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errMsg)
+
+							// 【关键修复】如果响应已写入客户端，不能重试或降级，直接返回
+							if responseWritten {
+								if errMsg == geminiClientAbortMsg {
+									fmt.Printf("[Gemini] ℹ️ 客户端中断: %s | 不计入供应商失败\n", provider.Name)
+									return
+								}
+								fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法重试: %s | 错误: %s\n", provider.Name, errMsg)
+								_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+								return
+							}
+
+							// 客户端已取消:停止全部尝试,不计供应商失败
+							if errMsg == geminiClientAbortMsg {
+								fmt.Printf("[Gemini] ℹ️ 客户端取消请求,停止尝试\n")
+								return
+							}
+
+							// 失败处理
+							lastError = errMsg
+							lastProvider = provider.Name
+
+							fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
+								provider.Name, retryCount+1, maxRetryPerProvider, errMsg)
+
+							// 上游判定请求内容本身有问题：不计供应商失败，也别拿同一个坏请求重试，
+							// 直接换下一个供应商
+							if isGeminiClientError(errMsg) {
+								fmt.Printf("[Gemini] 上游拒绝请求内容，不计供应商失败，切换到下一个\n")
+								break
+							}
+
+							sawNonClientError = true
+
+							// 记录失败次数（可能触发拉黑）
 							_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
-							return
-						}
 
-						// 客户端已取消:停止全部尝试,不计供应商失败
-						if errMsg == geminiClientAbortMsg {
-							fmt.Printf("[Gemini] ℹ️ 客户端取消请求,停止尝试\n")
-							return
-						}
+							// 检查是否刚被拉黑
+							if blacklisted, _ := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
+								fmt.Printf("[Gemini] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+								break
+							}
 
-						// 失败处理
-						lastError = errMsg
-						lastProvider = provider.Name
-
-						fmt.Printf("[Gemini] ✗ 失败: %s | 重试 %d/%d | 错误: %s\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, errMsg)
-
-						// 上游判定请求内容本身有问题：不计供应商失败，也别拿同一个坏请求重试，
-						// 直接换下一个供应商
-						if isGeminiClientError(errMsg) {
-							fmt.Printf("[Gemini] 上游拒绝请求内容，不计供应商失败，切换到下一个\n")
-							break
-						}
-
-						sawNonClientError = true
-
-						// 记录失败次数（可能触发拉黑）
-						_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
-
-						// 检查是否刚被拉黑
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted("gemini", provider.Name); blacklisted {
-							fmt.Printf("[Gemini] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
-							break
-						}
-
-						// 等待后重试（除非是最后一次）
-						if retryCount < maxRetryPerProvider-1 {
-							fmt.Printf("[Gemini] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
-							time.Sleep(time.Duration(retryWaitSeconds) * time.Second)
+							// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开
+							if retryCount < maxRetryPerProvider-1 {
+								fmt.Printf("[Gemini] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
+								select {
+								case <-time.After(time.Duration(retryWaitSeconds) * time.Second):
+								case <-c.Request.Context().Done():
+									fmt.Printf("[Gemini] 等待重试期间客户端已断开，停止尝试\n")
+									return
+								}
+							}
 						}
 					}
 				}
+
+
+				// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
+				if busySkipped == 0 {
+					break
+				}
+				if busyWaitDeadline.IsZero() {
+					busyWaitDeadline = time.Now().Add(prs.concurrency.waitBudget)
+					if !prs.concurrency.enterWaitPhase() {
+						respondAllBusy(c, "gemini")
+						return
+					}
+					enteredBusyWait = true
+				}
+				// 唤醒以"忙候选真的有空位"为门控：本轮实际尝试供应商的正常释放
+				// 也会触发全局信号，不加门控直接重扫会形成自唤醒重试风暴
+				woke := false
+				for {
+					capSignal := prs.concurrency.releaseSignal()
+					if prs.concurrency.anyCapacity("gemini", busyPending) {
+						woke = true
+						break
+					}
+					if !prs.concurrency.waitForRelease(c.Request.Context(), busyWaitDeadline, capSignal) {
+						break
+					}
+				}
+				if !woke {
+					respondAllBusy(c, "gemini")
+					return
+				}
+				// 容量门控可能被"释放后立刻又被占走"的候选反复触发，
+				// 重扫前硬校验总预算与客户端 context，防止空转越过 deadline
+				if c.Request.Context().Err() != nil || time.Now().After(busyWaitDeadline) {
+					respondAllBusy(c, "gemini")
+					return
+				}
+				fmt.Printf("[Gemini] 并发配额有释放，重扫供应商\n")
 			}
 
 			// 所有 Provider 都失败或被拉黑
@@ -2413,70 +2701,140 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		var lastError string
 		// 只要有过一次真正的供应商故障，终态就必须维持 502 让 SDK 退避重试
 		sawNonClientError := false
-		for _, level := range sortedLevels {
-			providersInLevel := levelGroups[level]
-
-			// 如果启用轮询，对同 Level 的 providers 进行轮询排序
-			if roundRobinEnabled {
-				providersInLevel = prs.roundRobinOrderGemini(level, providersInLevel)
+		busyWaitDeadline := time.Time{}
+		enteredBusyWait := false
+		defer func() {
+			if enteredBusyWait {
+				prs.concurrency.leaveWaitPhase()
 			}
+		}()
+		busySkipped := 0
+		// 已实际尝试过的供应商：等待阶段重扫不再碰它（失败已计、重试预算不重置）
+		attemptedProviders := map[string]bool{}
+		// 因并发满被跳过、尚未真实尝试的候选
+		busyPending := map[string]concurrencyBusyRef{}
+		for {
+			busySkipped = 0
+			// 每 pass 重建：上一轮候选可能已被拉黑或删除，残留会让容量门控恒真
+			busyPending = map[string]concurrencyBusyRef{}
+			for _, level := range sortedLevels {
+				providersInLevel := levelGroups[level]
 
-			fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+				if roundRobinEnabled {
+					providersInLevel = prs.roundRobinOrderGemini(level, providersInLevel)
+				}
 
-			for idx, provider := range providersInLevel {
-				fmt.Printf("[Gemini]   [%d/%d] Provider: %s\n", idx+1, len(providersInLevel), provider.Name)
+				fmt.Printf("[Gemini] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
-				// 预填日志，失败也能落库
-				requestLog.Provider = provider.Name
-				requestLog.Model = provider.Model
-
-				// 模型映射：按 provider 用局部变量重写路径段，绝不改写外层 endpoint
-				providerEndpoint := endpoint
-				if requestedModel != "" {
-					if effectiveModel := provider.GetEffectiveModel(requestedModel); effectiveModel != requestedModel {
-						providerEndpoint = rewriteGeminiModelInEndpoint(endpoint, requestedModel, effectiveModel)
-						fmt.Printf("[Gemini] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+				for idx, provider := range providersInLevel {
+					if attemptedProviders[provider.ID] {
+						continue
 					}
-				}
+					fmt.Printf("[Gemini]   [%d/%d] Provider: %s\n", idx+1, len(providersInLevel), provider.Name)
 
-				ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
-				if ok {
-					_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
-					// 记录最后使用的供应商
-					prs.setLastUsedProvider("gemini", provider.Name)
-					fmt.Printf("[Gemini] ✓ 请求完成 | Provider: %s | 总耗时: %.2fs\n", provider.Name, time.Since(start).Seconds())
-					return // 成功，退出
-				}
+					// 并发配额：满载不算尝试、不计失败，换下一个供应商
+					if !prs.concurrency.TryAcquire("gemini", provider.ID, provider.MaxConcurrency, geminiGen) {
+						fmt.Printf("[Gemini] Provider %s 并发已满，跳过\n", provider.Name)
+						busySkipped++
+						busyPending[provider.ID] = concurrencyBusyRef{Key: provider.ID, Limit: provider.MaxConcurrency, Gen: geminiGen}
+						continue
+					}
 
-				// 【关键修复】如果响应已写入客户端，不能降级到其他 provider，直接返回
-				if responseWritten {
-					if errMsg == geminiClientAbortMsg {
-						fmt.Printf("[Gemini] ℹ️ 客户端中断: %s | 不计入供应商失败\n", provider.Name)
+					// 预填日志：成功占用配额后才归属到该供应商，失败也能落库
+					requestLog.Provider = provider.Name
+					requestLog.Model = provider.Model
+
+					// 模型映射：按 provider 用局部变量重写路径段，绝不改写外层 endpoint
+					providerEndpoint := endpoint
+					if requestedModel != "" {
+						if effectiveModel := provider.GetEffectiveModel(requestedModel); effectiveModel != requestedModel {
+							providerEndpoint = rewriteGeminiModelInEndpoint(endpoint, requestedModel, effectiveModel)
+							fmt.Printf("[Gemini] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+						}
+					}
+
+					ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
+					prs.concurrency.Release("gemini", provider.ID)
+					// 实际尝试过：等待阶段重扫不再碰它
+					attemptedProviders[provider.ID] = true
+					delete(busyPending, provider.ID)
+					if ok {
+						_ = prs.blacklistService.RecordSuccess("gemini", provider.Name)
+						// 记录最后使用的供应商
+						prs.setLastUsedProvider("gemini", provider.Name)
+						fmt.Printf("[Gemini] ✓ 请求完成 | Provider: %s | 总耗时: %.2fs\n", provider.Name, time.Since(start).Seconds())
+						return // 成功，退出
+					}
+
+					// 【关键修复】如果响应已写入客户端，不能降级到其他 provider，直接返回
+					if responseWritten {
+						if errMsg == geminiClientAbortMsg {
+							fmt.Printf("[Gemini] ℹ️ 客户端中断: %s | 不计入供应商失败\n", provider.Name)
+							return
+						}
+						fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errMsg)
+						_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
 						return
 					}
-					fmt.Printf("[Gemini] ⚠️ 响应已部分写入，无法降级: %s | 错误: %s\n", provider.Name, errMsg)
+
+					// 客户端已取消:停止全部尝试,不计供应商失败
+					if errMsg == geminiClientAbortMsg {
+						fmt.Printf("[Gemini] ℹ️ 客户端取消请求,停止尝试\n")
+						return
+					}
+
+					// 失败，记录并继续
+					lastError = errMsg
+					// 上游判定请求内容本身有问题：换供应商也一样，不计供应商失败
+					if isGeminiClientError(errMsg) {
+						fmt.Printf("[Gemini] 上游拒绝请求内容，不计供应商失败\n")
+						continue
+					}
+					sawNonClientError = true
 					_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
-					return
 				}
 
-				// 客户端已取消:停止全部尝试,不计供应商失败
-				if errMsg == geminiClientAbortMsg {
-					fmt.Printf("[Gemini] ℹ️ 客户端取消请求,停止尝试\n")
-					return
-				}
-
-				// 失败，记录并继续
-				lastError = errMsg
-				// 上游判定请求内容本身有问题：换供应商也一样，不计供应商失败
-				if isGeminiClientError(errMsg) {
-					fmt.Printf("[Gemini] 上游拒绝请求内容，不计供应商失败\n")
-					continue
-				}
-				sawNonClientError = true
-				_ = prs.blacklistService.RecordFailure("gemini", provider.Name)
+				fmt.Printf("[Gemini] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 			}
 
-			fmt.Printf("[Gemini] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
+
+			// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
+			if busySkipped == 0 {
+				break
+			}
+			if busyWaitDeadline.IsZero() {
+				busyWaitDeadline = time.Now().Add(prs.concurrency.waitBudget)
+				if !prs.concurrency.enterWaitPhase() {
+					respondAllBusy(c, "gemini")
+					return
+				}
+				enteredBusyWait = true
+			}
+			// 唤醒以"忙候选真的有空位"为门控：本轮实际尝试供应商的正常释放
+			// 也会触发全局信号，不加门控直接重扫会形成自唤醒重试风暴
+			woke := false
+			for {
+				capSignal := prs.concurrency.releaseSignal()
+				if prs.concurrency.anyCapacity("gemini", busyPending) {
+					woke = true
+					break
+				}
+				if !prs.concurrency.waitForRelease(c.Request.Context(), busyWaitDeadline, capSignal) {
+					break
+				}
+			}
+			if !woke {
+				respondAllBusy(c, "gemini")
+				return
+			}
+			// 容量门控可能被"释放后立刻又被占走"的候选反复触发，
+			// 重扫前硬校验总预算与客户端 context，防止空转越过 deadline
+			if c.Request.Context().Err() != nil || time.Now().After(busyWaitDeadline) {
+				respondAllBusy(c, "gemini")
+				return
+			}
+			fmt.Printf("[Gemini] 并发配额有释放，重扫供应商\n")
 		}
 
 		// 所有 Level 都失败
@@ -2754,7 +3112,8 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		}
 
 		// 加载该 CLI 工具的 providers
-		providers, err := prs.providerService.LoadProviders(kind)
+		// (providers, 配置代数) 配对装载
+		providers, configGen, err := prs.providerService.LoadProvidersWithGen(kind)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to load providers for %s: %v", kind, err)})
 			return
@@ -2854,146 +3213,220 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			var lastProvider string
 			totalAttempts := 0
 
-			// 遍历所有 Level 和 Provider
-			for _, level := range levels {
-				providersInLevel := levelGroups[level]
-
-				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
-				if roundRobinSettingEnabled {
-					providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+			busyWaitDeadline := time.Time{}
+			enteredBusyWait := false
+			defer func() {
+				if enteredBusyWait {
+					prs.concurrency.leaveWaitPhase()
 				}
+			}()
+			busySkipped := 0
+			// 已实际尝试过的供应商：等待阶段重扫不再碰它（失败已计、重试预算不重置）
+			attemptedProviders := map[string]bool{}
+			// 因并发满被跳过、尚未真实尝试的候选
+			busyPending := map[string]concurrencyBusyRef{}
+			for {
+				busySkipped = 0
+				// 每 pass 重建：上一轮候选可能已被拉黑或删除，残留会让容量门控恒真
+				busyPending = map[string]concurrencyBusyRef{}
+				// 遍历所有 Level 和 Provider
+				for _, level := range levels {
+					providersInLevel := levelGroups[level]
 
-				fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
-
-				for _, provider := range providersInLevel {
-					// 检查是否已被拉黑（跳过已拉黑的 provider）
-					if blacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
-						fmt.Printf("[CustomCLI][INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
-						continue
+					// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+					if roundRobinSettingEnabled {
+						providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
 					}
 
-					// 获取实际模型名
-					effectiveModel := provider.GetEffectiveModel(requestedModel)
-					currentBodyBytes := bodyBytes
-					if effectiveModel != requestedModel && requestedModel != "" {
-						fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-						if err != nil {
-							fmt.Printf("[CustomCLI][ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
+					fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+
+					for _, provider := range providersInLevel {
+						if attemptedProviders[strconv.FormatInt(provider.ID, 10)] {
 							continue
 						}
-						currentBodyBytes = modifiedBody
-					}
-
-					// 获取有效端点
-					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
-
-					// 同 Provider 内重试循环
-					for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
-						totalAttempts++
-
-						// 再次检查是否已被拉黑（重试过程中可能被拉黑）
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
-							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
-							break
+						// 检查是否已被拉黑（跳过已拉黑的 provider）
+						if blacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+							fmt.Printf("[CustomCLI][INFO] ⏭️ 跳过已拉黑的 Provider: %s (解禁时间: %v)\n", provider.Name, until)
+							continue
 						}
 
-						fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
-							provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
-
-						startTime := time.Now()
-						ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
-						duration := time.Since(startTime)
-
-						if ok {
-							fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
-								provider.Name, retryCount+1, duration.Seconds())
-							if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
-								fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+						// 获取实际模型名
+						effectiveModel := provider.GetEffectiveModel(requestedModel)
+						currentBodyBytes := bodyBytes
+						if effectiveModel != requestedModel && requestedModel != "" {
+							fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+							modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+							if err != nil {
+								fmt.Printf("[CustomCLI][ERROR] 模型映射失败: %v，跳过此 Provider\n", err)
+								continue
 							}
-							prs.setLastUsedProvider(kind, provider.Name)
-							return
+							currentBodyBytes = modifiedBody
 						}
 
-						// 失败处理
-						lastError = err
-						lastProvider = provider.Name
+						// 获取有效端点
+						effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
-						errorMsg := "未知错误"
-						if err != nil {
-							errorMsg = err.Error()
-						}
-						fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
-							provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+						// 同 Provider 内重试循环
+						for retryCount := 0; retryCount < maxRetryPerProvider; retryCount++ {
+							totalAttempts++
 
-						// 客户端请求被拒绝（协议转换不支持的格式/功能）：直接返回 400，不重试不拉黑。
-						// 与 claude/codex 路径保持一致，否则客户端自身的问题会被算成供应商故障
-						if errors.Is(err, ErrClientRequestRejected) {
-							fmt.Printf("[CustomCLI][INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
-							c.JSON(http.StatusBadRequest, gin.H{
-								"type":    "error",
-								"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
-								"message": errorMsg,
-							})
-							return
-						}
+							// 再次检查是否已被拉黑（重试过程中可能被拉黑）
+							if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+								fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 已被拉黑，切换到下一个\n", provider.Name)
+								break
+							}
 
-						// 客户端中断不计入失败次数，直接返回
-						if errors.Is(err, errClientAbort) {
-							fmt.Printf("[CustomCLI][INFO] 客户端中断，停止重试\n")
-							return
-						}
+							fmt.Printf("[CustomCLI][INFO] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d | Model: %s\n",
+								provider.Name, level, retryCount+1, maxRetryPerProvider, effectiveModel)
 
-						// 上游 2xx 后中途断流：响应已部分写出，不能再换供应商，但必须计入失败
-						if errors.Is(err, errUpstreamStreamAborted) {
+							startTime := time.Now()
+							ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, configGen)
+							duration := time.Since(startTime)
+
+							if ok {
+								fmt.Printf("[CustomCLI][INFO] ✓ 成功: %s | 重试 %d 次 | 耗时: %.2fs\n",
+									provider.Name, retryCount+1, duration.Seconds())
+								if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+									fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+								}
+								prs.setLastUsedProvider(kind, provider.Name)
+								return
+							}
+
+							// 并发满载：不算尝试、不计失败，换下一个供应商
+							if errors.Is(err, errProviderBusy) {
+								totalAttempts--
+								// 已真实失败过的供应商重试遇忙不再进等待候选：
+								// 下一 pass 必然跳过它，等它只会把失败聚合错改成 503
+								if pk := strconv.FormatInt(provider.ID, 10); !attemptedProviders[pk] {
+									busySkipped++
+									busyPending[pk] = concurrencyBusyRef{Key: pk, Limit: provider.MaxConcurrency, Gen: configGen}
+								}
+								fmt.Printf("[CustomCLI][INFO] Provider %s 并发已满，跳过\n", provider.Name)
+								break
+							}
+							// 实际尝试过：等待阶段重扫不再碰它
+							attemptedProviders[strconv.FormatInt(provider.ID, 10)] = true
+							delete(busyPending, strconv.FormatInt(provider.ID, 10))
+
+							// 失败处理
+							lastError = err
+							lastProvider = provider.Name
+
+							errorMsg := "未知错误"
+							if err != nil {
+								errorMsg = err.Error()
+							}
+							fmt.Printf("[CustomCLI][WARN] ✗ 失败: %s | 重试 %d/%d | 错误: %s | 耗时: %.2fs\n",
+								provider.Name, retryCount+1, maxRetryPerProvider, errorMsg, duration.Seconds())
+
+							// 客户端请求被拒绝（协议转换不支持的格式/功能）：直接返回 400，不重试不拉黑。
+							// 与 claude/codex 路径保持一致，否则客户端自身的问题会被算成供应商故障
+							if errors.Is(err, ErrClientRequestRejected) {
+								fmt.Printf("[CustomCLI][INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+								c.JSON(http.StatusBadRequest, gin.H{
+									"type":    "error",
+									"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+									"message": errorMsg,
+								})
+								return
+							}
+
+							// 客户端中断不计入失败次数，直接返回
+							if errors.Is(err, errClientAbort) {
+								fmt.Printf("[CustomCLI][INFO] 客户端中断，停止重试\n")
+								return
+							}
+
+							// 上游 2xx 后中途断流：响应已部分写出，不能再换供应商，但必须计入失败
+							if errors.Is(err, errUpstreamStreamAborted) {
+								if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+									fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+								}
+								return
+							}
+
+							// 上游判定"请求内容本身有问题"：不计供应商失败，直接换下一个供应商
+							if errors.Is(err, errUpstreamClientError) {
+								fmt.Printf("[CustomCLI][INFO] 上游拒绝请求内容，不计供应商失败，切换到下一个: %s\n", errorMsg)
+								break
+							}
+
+							sawNonClientError = true
+
+							// 记录失败次数（可能触发拉黑）
 							if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
 								fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 							}
-							return
-						}
 
-						// 上游判定"请求内容本身有问题"：不计供应商失败，直接换下一个供应商
-						if errors.Is(err, errUpstreamClientError) {
-							fmt.Printf("[CustomCLI][INFO] 上游拒绝请求内容，不计供应商失败，切换到下一个: %s\n", errorMsg)
-							break
-						}
+							// 检查是否刚被拉黑
+							if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
+								fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
+								break
+							}
 
-						sawNonClientError = true
+							// 多地址池已整轮试过：失败已计一次，直接切下一供应商
+							if errors.Is(err, errEndpointPoolExhausted) {
+								fmt.Printf("[CustomCLI][INFO] Provider %s 地址池耗尽，切换下一供应商\n", provider.Name)
+								break
+							}
 
-						// 记录失败次数（可能触发拉黑）
-						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
-						}
-
-						// 检查是否刚被拉黑
-						if blacklisted, _ := prs.blacklistService.IsBlacklisted(kind, provider.Name); blacklisted {
-							fmt.Printf("[CustomCLI][INFO] 🚫 Provider %s 达到失败阈值，已被拉黑，切换到下一个\n", provider.Name)
-							break
-						}
-
-						// 多地址池已整轮试过：失败已计一次，直接切下一供应商
-						if errors.Is(err, errEndpointPoolExhausted) {
-							fmt.Printf("[CustomCLI][INFO] Provider %s 地址池耗尽，切换下一供应商\n", provider.Name)
-							break
-						}
-
-						// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开
-						if retryCount < maxRetryPerProvider-1 {
-							fmt.Printf("[CustomCLI][INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
-							select {
-							case <-time.After(time.Duration(retryWaitSeconds) * time.Second):
-							case <-c.Request.Context().Done():
-								fmt.Printf("[CustomCLI][INFO] 等待重试期间客户端已断开，停止尝试\n")
-								return
+							// 等待后重试（除非是最后一次）；等待期间客户端可能已经离开
+							if retryCount < maxRetryPerProvider-1 {
+								fmt.Printf("[CustomCLI][INFO] ⏳ 等待 %d 秒后重试...\n", retryWaitSeconds)
+								select {
+								case <-time.After(time.Duration(retryWaitSeconds) * time.Second):
+								case <-c.Request.Context().Done():
+									fmt.Printf("[CustomCLI][INFO] 等待重试期间客户端已断开，停止尝试\n")
+									return
+								}
 							}
 						}
-					}
 
-					if c.Request.Context().Err() != nil {
-						fmt.Printf("[CustomCLI][INFO] 客户端已断开，停止尝试后续 Provider\n")
-						return
+						if c.Request.Context().Err() != nil {
+							fmt.Printf("[CustomCLI][INFO] 客户端已断开，停止尝试后续 Provider\n")
+							return
+						}
 					}
 				}
+
+
+				// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
+				if busySkipped == 0 {
+					break
+				}
+				if busyWaitDeadline.IsZero() {
+					busyWaitDeadline = time.Now().Add(prs.concurrency.waitBudget)
+					if !prs.concurrency.enterWaitPhase() {
+						respondAllBusy(c, kind)
+						return
+					}
+					enteredBusyWait = true
+				}
+				// 唤醒以"忙候选真的有空位"为门控：本轮实际尝试供应商的正常释放
+				// 也会触发全局信号，不加门控直接重扫会形成自唤醒重试风暴
+				woke := false
+				for {
+					capSignal := prs.concurrency.releaseSignal()
+					if prs.concurrency.anyCapacity(kind, busyPending) {
+						woke = true
+						break
+					}
+					if !prs.concurrency.waitForRelease(c.Request.Context(), busyWaitDeadline, capSignal) {
+						break
+					}
+				}
+				if !woke {
+					respondAllBusy(c, kind)
+					return
+				}
+				// 容量门控可能被"释放后立刻又被占走"的候选反复触发，
+				// 重扫前硬校验总预算与客户端 context，防止空转越过 deadline
+				if c.Request.Context().Err() != nil || time.Now().After(busyWaitDeadline) {
+					respondAllBusy(c, kind)
+					return
+				}
+				fmt.Printf("[INFO] 并发配额有释放，重扫供应商\n")
 			}
 
 			// 所有 Provider 都失败或被拉黑
@@ -3028,123 +3461,194 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		var lastDuration time.Duration
 		totalAttempts := 0
 
-		for _, level := range levels {
-			providersInLevel := levelGroups[level]
-
-			// 如果启用轮询，对同 Level 的 providers 进行轮询排序
-			if roundRobinEnabled {
-				providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+		busyWaitDeadline := time.Time{}
+		enteredBusyWait := false
+		defer func() {
+			if enteredBusyWait {
+				prs.concurrency.leaveWaitPhase()
 			}
+		}()
+		busySkipped := 0
+		// 已实际尝试过的供应商：等待阶段重扫不再碰它（失败已计、重试预算不重置）
+		attemptedProviders := map[string]bool{}
+		// 因并发满被跳过、尚未真实尝试的候选
+		busyPending := map[string]concurrencyBusyRef{}
+		for {
+			busySkipped = 0
+			// 每 pass 重建：上一轮候选可能已被拉黑或删除，残留会让容量门控恒真
+			busyPending = map[string]concurrencyBusyRef{}
+			for _, level := range levels {
+				providersInLevel := levelGroups[level]
 
-			fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
+				// 如果启用轮询，对同 Level 的 providers 进行轮询排序
+				if roundRobinEnabled {
+					providersInLevel = prs.roundRobinOrder(kind, level, providersInLevel)
+				}
 
-			for i, provider := range providersInLevel {
-				totalAttempts++
+				fmt.Printf("[CustomCLI][INFO] === 尝试 Level %d（%d 个 provider）===\n", level, len(providersInLevel))
 
-				effectiveModel := provider.GetEffectiveModel(requestedModel)
-				currentBodyBytes := bodyBytes
-				if effectiveModel != requestedModel && requestedModel != "" {
-					fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
-					modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
-					if err != nil {
-						fmt.Printf("[CustomCLI][ERROR] 替换模型名失败: %v\n", err)
+				for i, provider := range providersInLevel {
+					if attemptedProviders[strconv.FormatInt(provider.ID, 10)] {
 						continue
 					}
-					currentBodyBytes = modifiedBody
-				}
+					totalAttempts++
 
-				fmt.Printf("[CustomCLI][INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
-				// 获取有效的端点（用户配置优先）
-				effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
-
-				startTime := time.Now()
-				ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel)
-				duration := time.Since(startTime)
-
-				if ok {
-					fmt.Printf("[CustomCLI][INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
-					if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
-						fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+					effectiveModel := provider.GetEffectiveModel(requestedModel)
+					currentBodyBytes := bodyBytes
+					if effectiveModel != requestedModel && requestedModel != "" {
+						fmt.Printf("[CustomCLI][INFO] Provider %s 映射模型: %s -> %s\n", provider.Name, requestedModel, effectiveModel)
+						modifiedBody, err := ReplaceModelInRequestBody(bodyBytes, effectiveModel)
+						if err != nil {
+							fmt.Printf("[CustomCLI][ERROR] 替换模型名失败: %v\n", err)
+							continue
+						}
+						currentBodyBytes = modifiedBody
 					}
-					prs.setLastUsedProvider(kind, provider.Name)
-					return
-				}
 
-				lastError = err
-				lastProvider = provider.Name
-				lastDuration = duration
+					fmt.Printf("[CustomCLI][INFO]   [%d/%d] Provider: %s | Model: %s\n", i+1, len(providersInLevel), provider.Name, effectiveModel)
+					// 获取有效的端点（用户配置优先）
+					effectiveEndpoint := provider.GetEffectiveEndpoint(endpoint)
 
-				errorMsg := "未知错误"
-				if err != nil {
-					errorMsg = err.Error()
-				}
-				fmt.Printf("[CustomCLI][WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
-					level, provider.Name, errorMsg, duration.Seconds())
+					startTime := time.Now()
+					ok, err := prs.forwardRequest(c, kind, provider, effectiveEndpoint, query, clientHeaders, currentBodyBytes, isStream, effectiveModel, configGen)
+					duration := time.Since(startTime)
 
-				// 客户端请求被拒绝（协议转换不支持的格式/功能）：直接返回 400，不重试不拉黑
-				if errors.Is(err, ErrClientRequestRejected) {
-					fmt.Printf("[CustomCLI][INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
-					c.JSON(http.StatusBadRequest, gin.H{
-						"type":    "error",
-						"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
-						"message": errorMsg,
-					})
-					return
-				}
-
-				if errors.Is(err, errClientAbort) {
-					fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
-					return
-				}
-
-				// 上游 2xx 后中途断流：响应已部分写出，不能再降级，但必须计入失败
-				if errors.Is(err, errUpstreamStreamAborted) {
-					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					if ok {
+						fmt.Printf("[CustomCLI][INFO]   ✓ Level %d 成功: %s | 耗时: %.2fs\n", level, provider.Name, duration.Seconds())
+						if err := prs.blacklistService.RecordSuccess(kind, provider.Name); err != nil {
+							fmt.Printf("[CustomCLI][WARN] 清零失败计数失败: %v\n", err)
+						}
+						prs.setLastUsedProvider(kind, provider.Name)
+						return
 					}
-					return
-				}
 
-				// 上游判定"请求内容本身有问题"：不计入供应商失败，继续尝试下一个
-				if errors.Is(err, errUpstreamClientError) {
-					fmt.Printf("[CustomCLI][INFO] 上游拒绝请求内容，不计供应商失败: %s\n", errorMsg)
-				} else {
-					sawNonClientError = true
-					if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
-						fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+					// 并发满载：不算尝试、不计失败，换下一个供应商
+					if errors.Is(err, errProviderBusy) {
+						totalAttempts--
+						busySkipped++
+						pk := strconv.FormatInt(provider.ID, 10)
+						busyPending[pk] = concurrencyBusyRef{Key: pk, Limit: provider.MaxConcurrency, Gen: configGen}
+						fmt.Printf("[CustomCLI][INFO] Provider %s 并发已满，跳过\n", provider.Name)
+						continue
 					}
-				}
+					// 实际尝试过：等待阶段重扫不再碰它
+					attemptedProviders[strconv.FormatInt(provider.ID, 10)] = true
+					delete(busyPending, strconv.FormatInt(provider.ID, 10))
 
-				if c.Request.Context().Err() != nil {
-					fmt.Printf("[CustomCLI][INFO] 客户端已断开，停止尝试后续 Provider\n")
-					return
-				}
+					lastError = err
+					lastProvider = provider.Name
+					lastDuration = duration
 
-				// 发送切换通知
-				if prs.notificationService != nil {
-					nextProvider := ""
-					if i+1 < len(providersInLevel) {
-						nextProvider = providersInLevel[i+1].Name
+					errorMsg := "未知错误"
+					if err != nil {
+						errorMsg = err.Error()
+					}
+					fmt.Printf("[CustomCLI][WARN]   ✗ Level %d 失败: %s | 错误: %s | 耗时: %.2fs\n",
+						level, provider.Name, errorMsg, duration.Seconds())
+
+					// 客户端请求被拒绝（协议转换不支持的格式/功能）：直接返回 400，不重试不拉黑
+					if errors.Is(err, ErrClientRequestRejected) {
+						fmt.Printf("[CustomCLI][INFO] 🚫 客户端请求被拒绝: %s\n", errorMsg)
+						c.JSON(http.StatusBadRequest, gin.H{
+							"type":    "error",
+							"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
+							"message": errorMsg,
+						})
+						return
+					}
+
+					if errors.Is(err, errClientAbort) {
+						fmt.Printf("[CustomCLI][INFO] 客户端中断，跳过失败计数: %s\n", provider.Name)
+						return
+					}
+
+					// 上游 2xx 后中途断流：响应已部分写出，不能再降级，但必须计入失败
+					if errors.Is(err, errUpstreamStreamAborted) {
+						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
+						}
+						return
+					}
+
+					// 上游判定"请求内容本身有问题"：不计入供应商失败，继续尝试下一个
+					if errors.Is(err, errUpstreamClientError) {
+						fmt.Printf("[CustomCLI][INFO] 上游拒绝请求内容，不计供应商失败: %s\n", errorMsg)
 					} else {
-						for _, nextLevel := range levels {
-							if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
-								nextProvider = levelGroups[nextLevel][0].Name
-								break
-							}
+						sawNonClientError = true
+						if err := prs.blacklistService.RecordFailure(kind, provider.Name); err != nil {
+							fmt.Printf("[CustomCLI][ERROR] 记录失败到黑名单失败: %v\n", err)
 						}
 					}
-					if nextProvider != "" {
-						prs.notificationService.NotifyProviderSwitch(SwitchNotification{
-							FromProvider: provider.Name,
-							ToProvider:   nextProvider,
-							Reason:       errorMsg,
-							Platform:     kind,
-						})
+
+					if c.Request.Context().Err() != nil {
+						fmt.Printf("[CustomCLI][INFO] 客户端已断开，停止尝试后续 Provider\n")
+						return
+					}
+
+					// 发送切换通知
+					if prs.notificationService != nil {
+						nextProvider := ""
+						if i+1 < len(providersInLevel) {
+							nextProvider = providersInLevel[i+1].Name
+						} else {
+							for _, nextLevel := range levels {
+								if nextLevel > level && len(levelGroups[nextLevel]) > 0 {
+									nextProvider = levelGroups[nextLevel][0].Name
+									break
+								}
+							}
+						}
+						if nextProvider != "" {
+							prs.notificationService.NotifyProviderSwitch(SwitchNotification{
+								FromProvider: provider.Name,
+								ToProvider:   nextProvider,
+								Reason:       errorMsg,
+								Platform:     kind,
+							})
+						}
 					}
 				}
+
+				fmt.Printf("[CustomCLI][WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
 			}
 
-			fmt.Printf("[CustomCLI][WARN] Level %d 的所有 %d 个 provider 均失败，尝试下一 Level\n", level, len(providersInLevel))
+
+			// 一整遍下来只要还有因并发满被跳过的供应商，就进入有界等待
+			if busySkipped == 0 {
+				break
+			}
+			if busyWaitDeadline.IsZero() {
+				busyWaitDeadline = time.Now().Add(prs.concurrency.waitBudget)
+				if !prs.concurrency.enterWaitPhase() {
+					respondAllBusy(c, kind)
+					return
+				}
+				enteredBusyWait = true
+			}
+			// 唤醒以"忙候选真的有空位"为门控：本轮实际尝试供应商的正常释放
+			// 也会触发全局信号，不加门控直接重扫会形成自唤醒重试风暴
+			woke := false
+			for {
+				capSignal := prs.concurrency.releaseSignal()
+				if prs.concurrency.anyCapacity(kind, busyPending) {
+					woke = true
+					break
+				}
+				if !prs.concurrency.waitForRelease(c.Request.Context(), busyWaitDeadline, capSignal) {
+					break
+				}
+			}
+			if !woke {
+				respondAllBusy(c, kind)
+				return
+			}
+			// 容量门控可能被"释放后立刻又被占走"的候选反复触发，
+			// 重扫前硬校验总预算与客户端 context，防止空转越过 deadline
+			if c.Request.Context().Err() != nil || time.Now().After(busyWaitDeadline) {
+				respondAllBusy(c, kind)
+				return
+			}
+			fmt.Printf("[INFO] 并发配额有释放，重扫供应商\n")
 		}
 
 		// 所有 provider 都失败
