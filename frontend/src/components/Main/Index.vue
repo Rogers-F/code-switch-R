@@ -675,6 +675,41 @@
                   <span class="field-hint">{{ t('components.main.form.hints.connectivityAuthType') }}</span>
                 </div>
 
+                <!-- 跳过 TLS 证书验证 -->
+                <div class="form-field switch-field">
+                  <span>{{ t('components.main.form.labels.insecureSkipVerify') }}</span>
+                  <div class="switch-inline">
+                    <label class="mac-switch">
+                      <input type="checkbox" v-model="modalState.form.insecureSkipVerify" />
+                      <span></span>
+                    </label>
+                    <span class="switch-text">
+                      {{ modalState.form.insecureSkipVerify ? t('components.main.form.switch.on') : t('components.main.form.switch.off') }}
+                    </span>
+                  </div>
+                  <span class="field-hint">{{ t('components.main.form.hints.insecureSkipVerify') }}</span>
+                </div>
+
+                <!-- 请求清理（Gemini 走协议适配，不支持该开关） -->
+                <div v-if="modalState.tabId !== 'gemini'" class="form-field switch-field">
+                  <span>{{ t('components.main.form.labels.requestSanitize') }}</span>
+                  <div class="switch-inline">
+                    <label class="mac-switch">
+                      <input type="checkbox" v-model="modalState.form.requestSanitizeEnabled" />
+                      <span></span>
+                    </label>
+                    <span class="switch-text">
+                      {{ modalState.form.requestSanitizeEnabled ? t('components.main.form.switch.on') : t('components.main.form.switch.off') }}
+                    </span>
+                  </div>
+                  <span class="field-hint">{{ t('components.main.form.hints.requestSanitize') }}</span>
+                </div>
+
+                <!-- 请求清理高级配置 -->
+                <div v-if="modalState.tabId !== 'gemini' && modalState.form.requestSanitizeEnabled" class="form-field">
+                  <SanitizeConfigEditor v-model="modalState.form.sanitizeConfig" />
+                </div>
+
                 <div class="form-field">
                   <span>{{ t('components.main.form.labels.icon') }}</span>
                   <Listbox v-model="modalState.form.icon" v-slot="{ open }" class="w-full">
@@ -1030,6 +1065,7 @@ import BaseInput from '../common/BaseInput.vue'
 import ModelWhitelistEditor from '../common/ModelWhitelistEditor.vue'
 import ModelMappingEditor from '../common/ModelMappingEditor.vue'
 import CLIConfigEditor from '../common/CLIConfigEditor.vue'
+import SanitizeConfigEditor from '../common/SanitizeConfigEditor.vue'
 import CustomCliConfigEditor from '../common/CustomCliConfigEditor.vue'
 import { LoadProviders, SaveProviders, DuplicateProvider, RenameProvider } from '../../../bindings/codeswitch/services/providerservice'
 import { GetProviders as GetGeminiProviders, UpdateProvider as UpdateGeminiProvider, AddProvider as AddGeminiProvider, DeleteProvider as DeleteGeminiProvider, ReorderProviders as ReorderGeminiProviders } from '../../../bindings/codeswitch/services/geminiservice'
@@ -1514,6 +1550,7 @@ const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard =
   accent: '#fb923c',
   enabled: provider.enabled,
   level: provider.level || 1,
+  insecureSkipVerify: provider.insecureSkipVerify ?? false,
   // 可用性监控配置（Gemini 暂不支持，使用默认值）
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
@@ -1529,12 +1566,19 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
   websiteUrl: card.officialSite,
   enabled: card.enabled,
   level: card.level || 1,
+  insecureSkipVerify: card.insecureSkipVerify || undefined,
   // 注意：Gemini 不支持可用性监控配置，这些字段不会保存
 })
 
 const serializeProviders = (providers: AutomationCard[]) =>
   providers.map((provider) => ({
     ...provider,
+    // 跳过 TLS 验证与请求清理
+    insecureSkipVerify: !!provider.insecureSkipVerify,
+    requestSanitizeEnabled: !!provider.requestSanitizeEnabled,
+    sanitizeConfig: provider.sanitizeConfig && Object.keys(provider.sanitizeConfig).length > 0
+      ? provider.sanitizeConfig
+      : undefined,
     // 确保可用性配置正确序列化
     availabilityMonitorEnabled: !!provider.availabilityMonitorEnabled,
     connectivityAutoBlacklist: !!provider.connectivityAutoBlacklist,
@@ -1602,6 +1646,7 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
             websiteUrl: card.officialSite,
             enabled: card.enabled,
             level: card.level || 1,
+            insecureSkipVerify: card.insecureSkipVerify || undefined,
           }
           await AddGeminiProvider(newProvider)
         }
@@ -2370,7 +2415,8 @@ const handleTestConnectivity = async () => {
       modalState.form.apiKey,
       testModel,
       testEndpoint,
-      resolveEffectiveAuthType()
+      resolveEffectiveAuthType(),
+      !!modalState.form.insecureSkipVerify
     )
 
     connectivityTestResult.value = {
@@ -2476,6 +2522,15 @@ type VendorForm = {
   connectivityAuthType?: string
   // 上游协议类型
   upstreamProtocol?: string
+  // 跳过 TLS 证书验证（仅该供应商）
+  insecureSkipVerify?: boolean
+  // 请求清理
+  requestSanitizeEnabled?: boolean
+  sanitizeConfig?: {
+    blockedBodyFields?: string[]
+    blockedHeaders?: string[]
+    blockedBetaValues?: string[]
+  }
 }
 
 const iconOptions = Object.keys(lobeIcons).sort((a, b) => a.localeCompare(b))
@@ -2502,6 +2557,9 @@ const defaultFormValues = (platform?: string): VendorForm => ({
   cliConfig: {},
   apiEndpoint: '', // API 端点（可选）
   upstreamProtocol: 'auto', // 上游协议类型（anthropic/openai_chat/auto）
+  insecureSkipVerify: false, // 默认严格验证上游 TLS 证书
+  requestSanitizeEnabled: false, // 请求清理默认关闭
+  sanitizeConfig: {},
   // 可用性监控配置（新）
   availabilityMonitorEnabled: false,
   connectivityAutoBlacklist: false,
@@ -2616,6 +2674,9 @@ const openEditModal = (card: AutomationCard) => {
     cliConfig: card.cliConfig || {},
     apiEndpoint: card.apiEndpoint || '',
     upstreamProtocol: card.upstreamProtocol || 'auto',
+    insecureSkipVerify: card.insecureSkipVerify ?? false,
+    requestSanitizeEnabled: card.requestSanitizeEnabled ?? false,
+    sanitizeConfig: card.sanitizeConfig || {},
     // 可用性监控配置（新）- 兼容从旧字段迁移
     availabilityMonitorEnabled:
       card.availabilityMonitorEnabled ?? card.connectivityCheck ?? false,
@@ -2725,6 +2786,9 @@ const submitModal = async (): Promise<boolean> => {
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
       upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
+      insecureSkipVerify: !!modalState.form.insecureSkipVerify,
+      requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
+      sanitizeConfig: modalState.form.sanitizeConfig || undefined,
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,
@@ -2766,6 +2830,9 @@ const submitModal = async (): Promise<boolean> => {
       cliConfig: modalState.form.cliConfig || {},
       apiEndpoint: modalState.form.apiEndpoint || '',
       upstreamProtocol: modalState.form.upstreamProtocol || 'auto',
+      insecureSkipVerify: !!modalState.form.insecureSkipVerify,
+      requestSanitizeEnabled: !!modalState.form.requestSanitizeEnabled,
+      sanitizeConfig: modalState.form.sanitizeConfig || undefined,
       // 可用性监控配置（新）
       availabilityMonitorEnabled: !!modalState.form.availabilityMonitorEnabled,
       connectivityAutoBlacklist: !!modalState.form.connectivityAutoBlacklist,

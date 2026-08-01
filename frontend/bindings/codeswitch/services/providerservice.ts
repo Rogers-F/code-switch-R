@@ -9,6 +9,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+/**
+ * DuplicateProvider 复制供应商配置，生成新的副本
+ * 返回新创建的 Provider 对象
+ */
 export function DuplicateProvider(kind: string, sourceID: number): $CancellablePromise<$models.Provider | null> {
     return $Call.ByID(1332089125, kind, sourceID).then(($result: any) => {
         return $$createType1($result);

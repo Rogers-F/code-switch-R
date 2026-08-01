@@ -31,6 +31,17 @@ export type AutomationCard = {
     timeout?: number        // 超时时间（毫秒）
   }
 
+  // 跳过上游 TLS 证书验证（仅该供应商，自签名/企业代理场景；存在中间人风险）
+  insecureSkipVerify?: boolean
+
+  // 请求清理：启用后转发前移除非标准字段和请求头（黑名单模式）
+  requestSanitizeEnabled?: boolean
+  sanitizeConfig?: {
+    blockedBodyFields?: string[]
+    blockedHeaders?: string[]
+    blockedBetaValues?: string[]
+  }
+
   // === 旧连通性字段（已废弃，仅用于兼容旧数据） ===
   /** @deprecated 已迁移到 availabilityMonitorEnabled */
   connectivityCheck?: boolean

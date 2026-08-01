@@ -227,6 +227,19 @@
           "wildcard": "Wildcard mapping, auto expands claude-sonnet-4 → anthropic/claude-sonnet-4",
           "prefix": "Prefix mapping"
         }
+      },
+      "sanitizeConfig": {
+        "label": "Request Sanitize Advanced Config",
+        "blockedBodyFields": "Blocked Body Fields",
+        "blockedHeaders": "Blocked Headers",
+        "blockedBetaValues": "Blocked anthropic-beta Values",
+        "placeholder": "Enter field name, e.g. prompt_caching",
+        "placeholderHeader": "Enter header (lowercase), e.g. x-custom-header",
+        "placeholderBeta": "Enter beta value, e.g. prompt-caching-scope-2026-01-05",
+        "add": "Add",
+        "remove": "Remove",
+        "defaultHint": "Not configured, using built-in defaults",
+        "emptyHint": "Explicitly emptied: nothing is removed for this dimension (set via config file)"
       }
     },
     "main": {
@@ -350,6 +363,8 @@
           "apiKey": "API key",
           "apiEndpoint": "API Endpoint Path (optional)",
           "upstreamProtocol": "Upstream Protocol",
+          "insecureSkipVerify": "Skip TLS Certificate Verification",
+          "requestSanitize": "Request Sanitize",
           "officialSite": "Official site",
           "icon": "Icon",
           "enabled": "Enabled",
@@ -384,6 +399,8 @@
           "level": "Lower numbers = higher priority. Level 1 providers are tried first, then Level 2, etc.",
           "apiEndpoint": "Override platform default endpoint. Leave blank for default (claude: /v1/messages, codex: /responses). For GLM models use /v1/chat/completions",
           "upstreamProtocol": "Specify the upstream API protocol type. Auto mode detects based on endpoint; openai_chat mode auto-converts request/response format",
+          "insecureSkipVerify": "When enabled, this provider's TLS certificate is no longer verified (self-signed certs / corporate proxies). Man-in-the-middle risk — enable only for trusted internal endpoints",
+          "requestSanitize": "When enabled, non-standard fields and unsupported headers are removed before forwarding, fixing compatibility issues with LiteLLM and similar proxies",
           "availabilityMonitor": "Enable background health checks for this provider. Checks are performed periodically to monitor availability.",
           "connectivityAutoBlacklist": "Automatically blacklist this provider if health checks fail repeatedly",
           "availabilityAdvancedConfig": "Advanced configuration (test model, endpoint, timeout) can be edited on the Availability page",
@@ -600,6 +617,8 @@
         "budgetForecastMethod24h": "Last 24 hours rate",
         "trayPanelClaude": "Claude Code",
         "trayPanelCodex": "Codex",
+        "enableTrayPopup": "Enable Tray Popup",
+        "enableTrayPopupHint": "When disabled, clicking the tray icon opens the main window directly (macOS only; re-enabling requires an app restart)",
         "autoStart": "Launch at login",
         "switchNotify": "Switch Notification",
         "switchNotifyHint": "Send system notification when provider switches or gets blacklisted",

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
-import { Call } from '@wailsio/runtime'
+import { Call, Window } from '@wailsio/runtime'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
@@ -344,6 +344,9 @@ const refreshAll = async () => {
   refreshBusy = true
   try {
     const settings = await fetchAppSettings()
+    if (settings) {
+      localStorage.setItem('app-settings-trayPopup', String(settings.enable_tray_popup))
+    }
     await Promise.all(cards.map((card) => card.refresh(settings)))
   } catch (error) {
     console.error('failed to refresh tray data', error)
@@ -355,14 +358,49 @@ const refreshAll = async () => {
   }
 }
 
-const handleFocus = () => {
+// 托盘弹窗被关闭时，把弹窗立刻换成主窗口。
+// systray 的 AttachWindow 只在启动期绑定，用户运行中关掉开关后弹窗仍会被拉起，
+// 这里作为前端兜底：先查 localStorage 缓存同步拦截以消除闪烁，再异步拉设置校准。
+const redirectToMainWindow = async () => {
+  try {
+    const mainWindow = Window.Get('main')
+    const trayWindow = Window.Get('tray')
+    await mainWindow.Show()
+    await mainWindow.Focus()
+    await trayWindow.Hide()
+  } catch (e) {
+    console.error('failed to redirect tray popup to main window', e)
+  }
+}
+
+const handleFocus = async () => {
+  if (localStorage.getItem('app-settings-trayPopup') === 'false') {
+    await redirectToMainWindow()
+    return
+  }
+  try {
+    const settings = await fetchAppSettings()
+    if (settings) {
+      localStorage.setItem('app-settings-trayPopup', String(settings.enable_tray_popup))
+      if (settings.enable_tray_popup === false) {
+        await redirectToMainWindow()
+        return
+      }
+    }
+  } catch (error) {
+    console.error('failed to fetch settings in handleFocus', error)
+  }
+  void refreshAll()
+}
+
+const handleSettingsUpdated = () => {
   void refreshAll()
 }
 
 onMounted(() => {
   void refreshAll()
   window.addEventListener('focus', handleFocus)
-  window.addEventListener('app-settings-updated', handleFocus)
+  window.addEventListener('app-settings-updated', handleSettingsUpdated)
 })
 
 onUnmounted(() => {
@@ -370,7 +408,7 @@ onUnmounted(() => {
     window.clearInterval(ticker)
   }
   window.removeEventListener('focus', handleFocus)
-  window.removeEventListener('app-settings-updated', handleFocus)
+  window.removeEventListener('app-settings-updated', handleSettingsUpdated)
 })
 </script>
 

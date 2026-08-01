@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,7 +66,9 @@ type ConnectivityTestService struct {
 	stopChan        chan struct{}
 	running         bool
 
-	client *http.Client
+	// insecure 变体供开启 insecureSkipVerify 的供应商使用，与转发路径保持同一验证策略
+	client         *http.Client
+	clientInsecure *http.Client
 }
 
 // NewConnectivityTestService 创建连通性测试服务
@@ -93,6 +96,16 @@ func NewConnectivityTestService(
 				IdleConnTimeout:     30 * time.Second,
 				DisableCompression:  true,
 				MaxIdleConnsPerHost: 5,
+			},
+		},
+		clientInsecure: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				IdleConnTimeout:     30 * time.Second,
+				DisableCompression:  true,
+				MaxIdleConnsPerHost: 5,
+				TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 			},
 		},
 	}
@@ -156,9 +169,14 @@ func (cts *ConnectivityTestService) TestProvider(ctx context.Context, provider P
 		}
 	}
 
-	// 发送请求并计时
+	// 发送请求并计时（跳验供应商与转发路径同策略，避免"转发通、探测挂"被误拉黑）
 	start := time.Now()
-	resp, err := cts.client.Do(req)
+	httpClient := cts.client
+	if provider.InsecureSkipVerify {
+		warnInsecureProviderOnce(provider.Name)
+		httpClient = cts.clientInsecure
+	}
+	resp, err := httpClient.Do(req)
 	latencyMs := int(time.Since(start).Milliseconds())
 	result.LatencyMs = latencyMs
 
@@ -680,6 +698,7 @@ func (cts *ConnectivityTestService) TestProviderManual(
 	model string,
 	endpoint string,
 	authType string,
+	insecureSkipVerify bool,
 ) ManualTestResult {
 	// 调试日志：打印前端传递的参数
 	fmt.Printf("[DEBUG] TestProviderManual 收到参数:\n")
@@ -702,6 +721,7 @@ func (cts *ConnectivityTestService) TestProviderManual(
 		ConnectivityTestModel:    model,
 		ConnectivityTestEndpoint: endpoint,
 		ConnectivityAuthType:     authType,
+		InsecureSkipVerify:       insecureSkipVerify, // 与保存后的探测/转发同策略，避免自签名供应商在弹窗里误报失败
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

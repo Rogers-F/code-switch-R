@@ -228,6 +228,19 @@
           "wildcard": "通配符映射，自动展开 claude-sonnet-4 → anthropic/claude-sonnet-4",
           "prefix": "前缀映射"
         }
+      },
+      "sanitizeConfig": {
+        "label": "请求清理高级配置",
+        "blockedBodyFields": "要移除的请求体字段",
+        "blockedHeaders": "要移除的请求头",
+        "blockedBetaValues": "anthropic-beta 要移除的值",
+        "placeholder": "输入字段名，如 prompt_caching",
+        "placeholderHeader": "输入请求头（小写），如 x-custom-header",
+        "placeholderBeta": "输入 beta 值，如 prompt-caching-scope-2026-01-05",
+        "add": "添加",
+        "remove": "移除",
+        "defaultHint": "未配置，使用内置默认值",
+        "emptyHint": "已显式置空：该维度不删除任何内容（由配置文件设置）"
       }
     },
     "main": {
@@ -351,6 +364,8 @@
           "apiKey": "API 密钥",
           "apiEndpoint": "API 端点（可选）",
           "upstreamProtocol": "上游协议",
+          "insecureSkipVerify": "跳过 TLS 证书验证",
+          "requestSanitize": "请求清理",
           "officialSite": "官网地址",
           "icon": "图标",
           "enabled": "启用状态",
@@ -385,6 +400,8 @@
           "level": "数字越小优先级越高，Level 1 会被优先尝试，失败后依次尝试 Level 2、Level 3 等",
           "apiEndpoint": "覆盖平台默认端点。留空使用默认（claude: /v1/messages, codex: /responses）。GLM 模型请使用 /v1/chat/completions",
           "upstreamProtocol": "指定上游 API 的协议类型。选择 auto 时根据端点自动检测；选择 openai_chat 时自动转换请求和响应格式",
+          "insecureSkipVerify": "开启后不再验证该供应商的 TLS 证书（自签名证书/企业代理场景）。存在中间人风险，请仅对信任的内网地址开启",
+          "requestSanitize": "启用后会自动移除转发请求中的非标准字段和不支持的请求头，解决 LiteLLM 等中转的兼容性问题",
           "availabilityMonitor": "启用后会定期进行健康检查，监控此供应商的可用性状态",
           "connectivityAutoBlacklist": "健康检查失败时自动拉黑该供应商",
           "availabilityAdvancedConfig": "高级配置（测试模型、端点、超时）可在可用性页面中编辑",
@@ -599,6 +616,8 @@
         "budgetForecastMethod24h": "近 24 小时速度",
         "trayPanelClaude": "Claude Code",
         "trayPanelCodex": "Codex",
+        "enableTrayPopup": "启用托盘弹窗",
+        "enableTrayPopupHint": "关闭后点击托盘图标直接打开主窗口（仅 macOS；重新开启需重启应用）",
         "autoStart": "开机自启动",
         "switchNotify": "切换通知",
         "switchNotifyHint": "供应商切换或拉黑时发送系统通知",

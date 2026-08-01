@@ -19,6 +19,24 @@ type AvailabilityConfig struct {
 	Timeout      int    `json:"timeout,omitempty"`      // 覆盖默认超时（毫秒）
 }
 
+// SanitizeConfig 请求清理高级配置（黑名单模式）。
+// 三个列表用指针区分三态：nil 指针（字段缺失/null）= 用内置默认黑名单；
+// 指向空数组 = 该维度什么都不删；非空 = 用自定义列表。
+type SanitizeConfig struct {
+	BlockedBodyFields *[]string `json:"blockedBodyFields,omitempty"` // 要移除的请求体顶层字段
+	BlockedHeaders    *[]string `json:"blockedHeaders,omitempty"`    // 要移除的请求头（小写）
+	BlockedBetaValues *[]string `json:"blockedBetaValues,omitempty"` // anthropic-beta 中要移除的值
+}
+
+// cloneStringListPtr 深拷贝三态列表指针：nil 保持 nil，非 nil 复制底层数组。
+func cloneStringListPtr(p *[]string) *[]string {
+	if p == nil {
+		return nil
+	}
+	v := append([]string{}, (*p)...)
+	return &v
+}
+
 type Provider struct {
 	ID      int64  `json:"id"` // 修复：使用 int64 支持大 ID 值
 	Name    string `json:"name"`
@@ -71,6 +89,15 @@ type Provider struct {
 	// openai_chat: 上游使用 OpenAI Chat Completions API，自动转换请求/响应格式
 	// auto: 根据 APIEndpoint 自动检测（包含 /chat/completions 则为 openai_chat）
 	UpstreamProtocol string `json:"upstreamProtocol,omitempty"`
+
+	// 跳过上游 TLS 证书验证 - 仅对该供应商生效（自签名证书/企业代理场景）
+	// 默认 false；开启后该供应商的转发与健康/连通性探测都不再校验证书，存在中间人风险
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+
+	// 请求清理开关 - 启用后转发前移除非标准字段和不支持的请求头
+	// 解决 LiteLLM 等中转服务的 "Extra inputs are not permitted" 兼容性问题
+	RequestSanitizeEnabled bool            `json:"requestSanitizeEnabled,omitempty"`
+	SanitizeConfig         *SanitizeConfig `json:"sanitizeConfig,omitempty"`
 
 	// ========== 旧字段（已废弃，仅用于读取迁移） ==========
 	// 这些字段在保存时不再写入，但读取时会自动迁移到新字段
@@ -485,9 +512,21 @@ func (ps *ProviderService) DuplicateProvider(kind string, sourceID int64) (*Prov
 		APIEndpoint:          source.APIEndpoint,          // 复制端点配置
 		UpstreamProtocol:     source.UpstreamProtocol,     // 复制上游协议配置
 		ConnectivityAuthType: source.ConnectivityAuthType, // 复制认证方式
+		InsecureSkipVerify:   source.InsecureSkipVerify,   // 复制 TLS 跳验开关
+		// 请求清理配置
+		RequestSanitizeEnabled: source.RequestSanitizeEnabled,
 		// 可用性监控配置
 		AvailabilityMonitorEnabled: source.AvailabilityMonitorEnabled,
 		ConnectivityAutoBlacklist:  false, // 副本默认关闭自动拉黑
+	}
+
+	// 深拷贝 SanitizeConfig（指针三态列表逐个复制，避免副本与源共享底层数组）
+	if source.SanitizeConfig != nil {
+		cloned.SanitizeConfig = &SanitizeConfig{
+			BlockedBodyFields: cloneStringListPtr(source.SanitizeConfig.BlockedBodyFields),
+			BlockedHeaders:    cloneStringListPtr(source.SanitizeConfig.BlockedHeaders),
+			BlockedBetaValues: cloneStringListPtr(source.SanitizeConfig.BlockedBetaValues),
+		}
 	}
 
 	// 6. 深拷贝 map（避免共享引用）

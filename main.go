@@ -345,6 +345,7 @@ func main() {
 	// 'BackgroundColour' is the background colour of the window.
 	// 'URL' is the URL that will be loaded into the webview.
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:      "main",
 		Title:     "Code Switch R",
 		Width:     1400,
 		Height:    1040,
@@ -454,6 +455,14 @@ func main() {
 	}
 
 	if runtime.GOOS == "darwin" && trayWindow != nil {
+		// 托盘弹窗开关：关闭时点击托盘图标直接打开主窗口。
+		// systray 只在启动期绑定弹窗（AttachWindow 无法运行时解绑），
+		// 因此关→开需要重启应用才生效；开→关由前端 Tray 页即时兜底。
+		enableTrayPopup := true
+		if settings, err := appSettings.GetAppSettings(); err == nil {
+			enableTrayPopup = settings.EnableTrayPopup
+		}
+
 		trayMenu := application.NewMenu()
 		trayMenu.Add("显示主窗口").OnClick(func(ctx *application.Context) {
 			showMainWindow(true)
@@ -462,7 +471,15 @@ func main() {
 			app.Quit()
 		})
 		systray.SetMenu(trayMenu)
-		systray.AttachWindow(trayWindow).WindowOffset(8)
+
+		if enableTrayPopup {
+			systray.AttachWindow(trayWindow).WindowOffset(8)
+		} else {
+			systray.OnClick(func() {
+				showMainWindow(true)
+			})
+		}
+
 		systray.OnRightClick(func() {
 			systray.OpenMenu()
 		})

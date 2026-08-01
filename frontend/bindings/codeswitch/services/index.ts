@@ -105,6 +105,7 @@ export {
     ProxyInjection,
     ReqeustLog,
     RetryConfig,
+    SanitizeConfig,
     Skill,
     TargetCli,
     UpdateInfo,

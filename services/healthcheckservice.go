@@ -7,6 +7,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -102,8 +103,10 @@ type HealthCheckService struct {
 	stopChan     chan struct{}
 	pollInterval time.Duration
 
-	// HTTP 客户端（带连接池）
-	client *http.Client
+	// HTTP 客户端（带连接池）；insecure 变体供开启 insecureSkipVerify 的供应商使用，
+	// 与转发路径保持同一验证策略，避免"转发通、探测挂"导致误拉黑
+	client         *http.Client
+	clientInsecure *http.Client
 }
 
 // NewHealthCheckService 创建健康检查服务
@@ -133,6 +136,16 @@ func NewHealthCheckService(
 				IdleConnTimeout:     30 * time.Second,
 				DisableCompression:  true,
 				MaxIdleConnsPerHost: 5,
+			},
+		},
+		clientInsecure: &http.Client{
+			Timeout: 0,
+			Transport: &http.Transport{
+				MaxIdleConns:        20,
+				IdleConnTimeout:     30 * time.Second,
+				DisableCompression:  true,
+				MaxIdleConnsPerHost: 5,
+				TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 			},
 		},
 	}
@@ -623,7 +636,14 @@ func (hcs *HealthCheckService) checkProvider(ctx context.Context, provider Provi
 	defer cancelReq()
 	req = req.WithContext(reqCtx)
 
-	resp, err := hcs.client.Do(req)
+	// 与转发路径同策略选择客户端：开启跳验的供应商用 insecure 变体，
+	// 否则自签名上游会出现"转发通、探测挂"，被自动拉黑逐出
+	httpClient := hcs.client
+	if provider.InsecureSkipVerify {
+		warnInsecureProviderOnce(provider.Name)
+		httpClient = hcs.clientInsecure
+	}
+	resp, err := httpClient.Do(req)
 	latencyMs := int(time.Since(start).Milliseconds())
 	result.LatencyMs = latencyMs
 

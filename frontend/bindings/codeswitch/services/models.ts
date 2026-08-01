@@ -52,6 +52,11 @@ export class AppSettings {
      */
     "enable_round_robin": boolean;
 
+    /**
+     * 托盘弹窗开关（仅 macOS 托盘生效；关→开需重启）
+     */
+    "enable_tray_popup": boolean;
+
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
         if (!("show_heatmap" in $$source)) {
@@ -131,6 +136,9 @@ export class AppSettings {
         }
         if (!("enable_round_robin" in $$source)) {
             this["enable_round_robin"] = false;
+        }
+        if (!("enable_tray_popup" in $$source)) {
+            this["enable_tray_popup"] = false;
         }
 
         Object.assign(this, $$source);
@@ -1341,6 +1349,11 @@ export class GeminiProvider {
     "level"?: number;
 
     /**
+     * 跳过上游 TLS 证书验证（仅该供应商，存在中间人风险）
+     */
+    "insecureSkipVerify"?: boolean;
+
+    /**
      * .env 配置
      */
     "envConfig"?: { [_ in string]?: string };
@@ -1369,14 +1382,14 @@ export class GeminiProvider {
      * Creates a new GeminiProvider instance from a string or object.
      */
     static createFrom($$source: any = {}): GeminiProvider {
-        const $$createField12_0 = $$createType4;
-        const $$createField13_0 = $$createType5;
+        const $$createField13_0 = $$createType4;
+        const $$createField14_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("envConfig" in $$parsedSource) {
-            $$parsedSource["envConfig"] = $$createField12_0($$parsedSource["envConfig"]);
+            $$parsedSource["envConfig"] = $$createField13_0($$parsedSource["envConfig"]);
         }
         if ("settingsConfig" in $$parsedSource) {
-            $$parsedSource["settingsConfig"] = $$createField13_0($$parsedSource["settingsConfig"]);
+            $$parsedSource["settingsConfig"] = $$createField14_0($$parsedSource["settingsConfig"]);
         }
         return new GeminiProvider($$parsedSource as Partial<GeminiProvider>);
     }
@@ -2250,6 +2263,19 @@ export class Provider {
     "upstreamProtocol"?: string;
 
     /**
+     * 跳过上游 TLS 证书验证 - 仅对该供应商生效（自签名证书/企业代理场景）
+     * 默认 false；开启后该供应商的转发与健康/连通性探测都不再校验证书，存在中间人风险
+     */
+    "insecureSkipVerify"?: boolean;
+
+    /**
+     * 请求清理开关 - 启用后转发前移除非标准字段和不支持的请求头
+     * 解决 LiteLLM 等中转服务的 "Extra inputs are not permitted" 兼容性问题
+     */
+    "requestSanitizeEnabled"?: boolean;
+    "sanitizeConfig"?: SanitizeConfig | null;
+
+    /**
      * [已废弃] 连通性检测开关 - 迁移到 AvailabilityMonitorEnabled
      */
     "connectivityCheck"?: boolean;
@@ -2304,6 +2330,7 @@ export class Provider {
         const $$createField10_0 = $$createType24;
         const $$createField11_0 = $$createType4;
         const $$createField15_0 = $$createType26;
+        const $$createField20_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("supportedModels" in $$parsedSource) {
             $$parsedSource["supportedModels"] = $$createField10_0($$parsedSource["supportedModels"]);
@@ -2313,6 +2340,9 @@ export class Provider {
         }
         if ("availabilityConfig" in $$parsedSource) {
             $$parsedSource["availabilityConfig"] = $$createField15_0($$parsedSource["availabilityConfig"]);
+        }
+        if ("sanitizeConfig" in $$parsedSource) {
+            $$parsedSource["sanitizeConfig"] = $$createField20_0($$parsedSource["sanitizeConfig"]);
         }
         return new Provider($$parsedSource as Partial<Provider>);
     }
@@ -2671,6 +2701,54 @@ export class RetryConfig {
     static createFrom($$source: any = {}): RetryConfig {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new RetryConfig($$parsedSource as Partial<RetryConfig>);
+    }
+}
+
+/**
+ * SanitizeConfig 请求清理高级配置（黑名单模式）。
+ * 三个列表用指针区分三态：nil 指针（字段缺失/null）= 用内置默认黑名单；
+ * 指向空数组 = 该维度什么都不删；非空 = 用自定义列表。
+ */
+export class SanitizeConfig {
+    /**
+     * 要移除的请求体顶层字段
+     */
+    "blockedBodyFields"?: string[] | null;
+
+    /**
+     * 要移除的请求头（小写）
+     */
+    "blockedHeaders"?: string[] | null;
+
+    /**
+     * anthropic-beta 中要移除的值
+     */
+    "blockedBetaValues"?: string[] | null;
+
+    /** Creates a new SanitizeConfig instance. */
+    constructor($$source: Partial<SanitizeConfig> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SanitizeConfig instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SanitizeConfig {
+        const $$createField0_0 = $$createType29;
+        const $$createField1_0 = $$createType29;
+        const $$createField2_0 = $$createType29;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("blockedBodyFields" in $$parsedSource) {
+            $$parsedSource["blockedBodyFields"] = $$createField0_0($$parsedSource["blockedBodyFields"]);
+        }
+        if ("blockedHeaders" in $$parsedSource) {
+            $$parsedSource["blockedHeaders"] = $$createField1_0($$parsedSource["blockedHeaders"]);
+        }
+        if ("blockedBetaValues" in $$parsedSource) {
+            $$parsedSource["blockedBetaValues"] = $$createField2_0($$parsedSource["blockedBetaValues"]);
+        }
+        return new SanitizeConfig($$parsedSource as Partial<SanitizeConfig>);
     }
 }
 
@@ -3066,3 +3144,6 @@ const $$createType23 = TargetCli.createFrom;
 const $$createType24 = $Create.Map($Create.Any, $Create.Any);
 const $$createType25 = AvailabilityConfig.createFrom;
 const $$createType26 = $Create.Nullable($$createType25);
+const $$createType27 = SanitizeConfig.createFrom;
+const $$createType28 = $Create.Nullable($$createType27);
+const $$createType29 = $Create.Nullable($$createType18);

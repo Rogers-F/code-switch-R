@@ -87,8 +87,8 @@ export function TestProvider(provider: $models.Provider, platform: string): $Can
 /**
  * TestProviderManual 手动测试供应商连通性（供前端测试按钮调用）
  */
-export function TestProviderManual(platform: string, apiURL: string, apiKey: string, model: string, endpoint: string, authType: string): $CancellablePromise<$models.ManualTestResult> {
-    return $Call.ByID(2146278070, platform, apiURL, apiKey, model, endpoint, authType).then(($result: any) => {
+export function TestProviderManual(platform: string, apiURL: string, apiKey: string, model: string, endpoint: string, authType: string, insecureSkipVerify: boolean): $CancellablePromise<$models.ManualTestResult> {
+    return $Call.ByID(2146278070, platform, apiURL, apiKey, model, endpoint, authType, insecureSkipVerify).then(($result: any) => {
         return $$createType4($result);
     });
 }

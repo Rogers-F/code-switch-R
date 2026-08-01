@@ -38,6 +38,7 @@ const autoStartEnabled = ref(getCachedValue('autoStart', false))
 const autoConnectivityTestEnabled = ref(getCachedValue('autoConnectivityTest', true))
 const switchNotifyEnabled = ref(getCachedValue('switchNotify', true)) // 切换通知开关
 const roundRobinEnabled = ref(getCachedValue('roundRobin', false))    // 同 Level 轮询开关
+const trayPopupEnabled = ref(getCachedValue('trayPopup', true))       // 托盘弹窗开关（macOS）
 const autoUpdateEnabled = ref(getCachedValue('autoUpdate', true))     // 自动更新开关
 const autoSyncModelsEnabled = ref(getCachedValue('autoSyncModels', true)) // 模型价格自动同步开关
 const modelSyncStatus = ref<ModelSyncStatus | null>(null)
@@ -118,6 +119,7 @@ const loadAppSettings = async () => {
     autoConnectivityTestEnabled.value = data?.auto_connectivity_test ?? false
     switchNotifyEnabled.value = data?.enable_switch_notify ?? true
     roundRobinEnabled.value = data?.enable_round_robin ?? false
+    trayPopupEnabled.value = data?.enable_tray_popup ?? true
     autoUpdateEnabled.value = data?.auto_update ?? true
     autoSyncModelsEnabled.value = data?.auto_sync_models ?? true
 
@@ -146,6 +148,7 @@ const loadAppSettings = async () => {
     localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
     localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
     localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+    localStorage.setItem('app-settings-trayPopup', String(trayPopupEnabled.value))
     localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
     localStorage.setItem('app-settings-autoSyncModels', String(autoSyncModelsEnabled.value))
     settingsLoadFailed.value = false
@@ -298,6 +301,7 @@ const persistAppSettings = async () => {
       auto_connectivity_test: autoConnectivityTestEnabled.value,
       enable_switch_notify: switchNotifyEnabled.value,
       enable_round_robin: roundRobinEnabled.value,
+      enable_tray_popup: trayPopupEnabled.value,
       auto_update: autoUpdateEnabled.value,
       auto_sync_models: autoSyncModelsEnabled.value,
     }
@@ -334,6 +338,7 @@ const persistAppSettings = async () => {
     localStorage.setItem('app-settings-autoConnectivityTest', String(autoConnectivityTestEnabled.value))
     localStorage.setItem('app-settings-switchNotify', String(switchNotifyEnabled.value))
     localStorage.setItem('app-settings-roundRobin', String(roundRobinEnabled.value))
+    localStorage.setItem('app-settings-trayPopup', String(trayPopupEnabled.value))
     localStorage.setItem('app-settings-autoUpdate', String(autoUpdateEnabled.value))
     localStorage.setItem('app-settings-autoSyncModels', String(autoSyncModelsEnabled.value))
 
@@ -573,6 +578,20 @@ onMounted(async () => {
       <section>
         <h2 class="mac-section-title">{{ $t('components.general.title.trayPanel') }}</h2>
         <div class="mac-panel">
+          <ListItem :label="$t('components.general.label.enableTrayPopup')">
+            <div class="toggle-with-hint">
+              <label class="mac-switch">
+                <input
+                  type="checkbox"
+                  :disabled="settingsLoading || saveBusy"
+                  v-model="trayPopupEnabled"
+                  @change="persistAppSettings"
+                />
+                <span></span>
+              </label>
+              <span class="hint-text">{{ $t('components.general.label.enableTrayPopupHint') }}</span>
+            </div>
+          </ListItem>
           <p class="panel-title">{{ $t('components.general.label.trayPanelClaude') }}</p>
           <ListItem :label="$t('components.general.label.budgetTotal')">
             <div class="toggle-with-hint">

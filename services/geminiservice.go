@@ -34,6 +34,7 @@ type GeminiProvider struct {
 	PartnerPromotionKey string            `json:"partnerPromotionKey,omitempty"` // 用于识别供应商类型
 	Enabled             bool              `json:"enabled"`
 	Level               int               `json:"level,omitempty"`               // 优先级分组 (1-10, 默认 1)
+	InsecureSkipVerify  bool              `json:"insecureSkipVerify,omitempty"`  // 跳过上游 TLS 证书验证（仅该供应商，存在中间人风险）
 	EnvConfig           map[string]string `json:"envConfig,omitempty"`           // .env 配置
 	SettingsConfig      map[string]any    `json:"settingsConfig,omitempty"`      // settings.json 配置
 }
@@ -1024,6 +1025,7 @@ func (s *GeminiService) DuplicateProvider(sourceID string) (*GeminiProvider, err
 		PartnerPromotionKey: source.PartnerPromotionKey,
 		Enabled:             false, // 默认禁用，避免与源供应商冲突
 		Level:               source.Level,
+		InsecureSkipVerify:  source.InsecureSkipVerify, // 复制 TLS 跳验开关
 	}
 
 	// 4. 深拷贝 map（避免共享引用）

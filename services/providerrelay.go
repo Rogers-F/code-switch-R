@@ -3,7 +3,9 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -100,6 +102,49 @@ var relayHTTPClient = &http.Client{
 		ExpectContinueTimeout: 1 * time.Second,
 		ForceAttemptHTTP2:     true,
 	},
+}
+
+// relayHTTPClientInsecure 与 relayHTTPClient 参数完全一致，仅跳过上游 TLS 证书验证，
+// 供显式开启 insecureSkipVerify 的供应商使用（自签名证书/企业代理场景）。
+// 独立实例：两种验证策略不能共用同一个 Transport 的连接池。
+var relayHTTPClientInsecure = &http.Client{
+	Timeout: 32 * time.Hour,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   16,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+	},
+}
+
+// warnedInsecureProviders 去重容器：开启跳验的供应商进程内首次使用时告警一次。
+var warnedInsecureProviders sync.Map
+
+// warnInsecureProviderOnce 首次对该供应商使用不验证 TLS 的客户端时打印警告，
+// 作为跳验生效的审计痕迹。
+func warnInsecureProviderOnce(name string) {
+	if _, loaded := warnedInsecureProviders.LoadOrStore(name, struct{}{}); loaded {
+		return
+	}
+	fmt.Printf("⚠️  Provider %s 已开启跳过 TLS 证书验证（insecureSkipVerify），存在中间人风险\n", name)
+}
+
+// relayClientFor 按供应商的 insecureSkipVerify 选择共享转发客户端。
+// 返回的是共享实例，严禁在其上调 xrequest 的 SetTimeout（会写回 client，产生数据竞争）。
+func relayClientFor(insecure bool, providerName string) *http.Client {
+	if !insecure {
+		return relayHTTPClient
+	}
+	warnInsecureProviderOnce(providerName)
+	return relayHTTPClientInsecure
 }
 
 // deleteHeaderFold 按 HTTP 头大小写不敏感的语义删除。
@@ -1144,6 +1189,11 @@ func (prs *ProviderRelayService) forwardRequest(
 	// 先清掉客户端自带的凭据与压缩协商，再注入本代理的供应商凭据
 	sanitizeUpstreamHeaders(headers)
 
+	// 请求清理（头部）：在注入供应商凭据之前执行，用户配置的黑名单删不到中继写入的认证头
+	if provider.RequestSanitizeEnabled {
+		headers = sanitizeHeaders(headers, provider.SanitizeConfig)
+	}
+
 	// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
 	authType := strings.ToLower(strings.TrimSpace(provider.ConnectivityAuthType))
 	switch authType {
@@ -1178,6 +1228,15 @@ func (prs *ProviderRelayService) forwardRequest(
 
 	if getHeaderFold(headers, "accept") == "" {
 		setHeaderCanonical(headers, "accept", "application/json")
+	}
+
+	// 请求清理（请求体）：在协议转换之后、发送之前执行，作用于实际出站 body
+	// （openai_chat 路径的转换器本身按白名单重建 body，这里只是兜底）
+	if provider.RequestSanitizeEnabled {
+		if cleaned, removed := sanitizeRequestBody(bodyBytes, provider.SanitizeConfig); len(removed) > 0 {
+			fmt.Printf("[Sanitize] Provider %s: 移除请求体字段 %v\n", provider.Name, removed)
+			bodyBytes = cleaned
+		}
 	}
 
 	requestLog := &ReqeustLog{
@@ -1233,9 +1292,9 @@ func (prs *ProviderRelayService) forwardRequest(
 
 	// 绑定客户端 context：客户端取消（用户 Ctrl-C / CLI 超时断开）时立即释放上游连接，
 	// 否则处理协程与上游请求会一直挂到 32 小时超时，上游还在持续产出并计费。
-	// 超时与连接池由 relayHTTPClient 统一提供，不再每请求新建 Transport。
+	// 超时与连接池由共享客户端统一提供，不再每请求新建 Transport。
 	req := xrequest.New().
-		SetClient(relayHTTPClient).
+		SetClient(relayClientFor(provider.InsecureSkipVerify, provider.Name)).
 		WithContext(c.Request.Context()).
 		SetHeaders(headers).
 		SetQueryParams(query).
@@ -2358,7 +2417,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	// 发送请求（与 Claude/Codex 转发共用连接池，避免每请求新建 Transport；
 	// 超时同为 32 小时以适配长推理/长输出任务，提前中止依靠请求 context）
-	resp, err := relayHTTPClient.Do(req)
+	resp, err := relayClientFor(provider.InsecureSkipVerify, provider.Name).Do(req)
 	providerDuration := time.Since(providerStart).Seconds()
 
 	if err != nil {
@@ -2965,10 +3024,18 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 		ordered = append(ordered, levelGroups[level]...)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	// 复用共享连接池；client 级 Timeout 32h 不适合模型列表这类短请求，
+	// 这里用 30s 的轻量包装挂到同一个 Transport 上，按供应商选择验证策略
+	modelsClient := &http.Client{Timeout: 30 * time.Second, Transport: relayHTTPClient.Transport}
+	modelsClientInsecure := &http.Client{Timeout: 30 * time.Second, Transport: relayHTTPClientInsecure.Transport}
 	var lastErr error
 	for i := range ordered {
 		selectedProvider := &ordered[i]
+		client := modelsClient
+		if selectedProvider.InsecureSkipVerify {
+			warnInsecureProviderOnce(selectedProvider.Name)
+			client = modelsClientInsecure
+		}
 		fmt.Printf("[%s] 使用 Provider: %s | URL: %s\n", logPrefix, selectedProvider.Name, selectedProvider.APIURL)
 
 		// 构建目标 URL（拼接 provider 的 APIURL 和 /v1/models）
@@ -2992,6 +3059,11 @@ func (prs *ProviderRelayService) forwardModelsRequest(
 			"Accept-Encoding", "Connection", "Keep-Alive", "Te", "Upgrade",
 		} {
 			req.Header.Del(name)
+		}
+
+		// 请求清理（头部）：与聊天转发同规则，在注入供应商凭据之前作用于透传的客户端头
+		if selectedProvider.RequestSanitizeEnabled {
+			sanitizeHTTPHeaders(req.Header, selectedProvider.SanitizeConfig)
 		}
 
 		// 根据认证方式设置请求头（默认 Bearer，与 v2.2.x 保持一致）
@@ -3080,4 +3152,195 @@ func (prs *ProviderRelayService) customModelsHandler() gin.HandlerFunc {
 
 		_ = prs.forwardModelsRequest(c, kind, "CustomModels")
 	}
+}
+
+// ========== 请求清理（Request Sanitizer，黑名单模式，按供应商开启） ==========
+
+// 内置默认黑名单：供应商对应维度未配置（nil）时使用；
+// 显式配置为空数组表示该维度什么都不删。
+var (
+	defaultBlockedBodyFields = []string{"prompt_caching"}
+	defaultBlockedHeaders    []string
+	defaultBlockedBetaValues = []string{
+		"prompt-caching-scope-2026-01-05",
+		"redact-thinking-2026-02-12",
+	}
+)
+
+// resolveBlocklist 把自定义列表（nil 时退回默认列表）转成查找集合。
+// fold 为 true 时按小写归一（用于大小写不敏感的请求头名）。
+func resolveBlocklist(custom, def []string, fold bool) map[string]bool {
+	src := custom
+	if src == nil {
+		src = def
+	}
+	m := make(map[string]bool, len(src))
+	for _, v := range src {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if fold {
+			v = strings.ToLower(v)
+		}
+		m[v] = true
+	}
+	return m
+}
+
+// cfg 三个访问器把指针三态展开成切片语义：
+// nil 指针 → 返回 nil（调用方回退内置默认）；指向空数组 → 返回非 nil 空切片（什么都不删）。
+func cfgBodyFields(cfg *SanitizeConfig) []string {
+	if cfg == nil || cfg.BlockedBodyFields == nil {
+		return nil
+	}
+	return derefList(cfg.BlockedBodyFields)
+}
+
+func cfgHeaders(cfg *SanitizeConfig) []string {
+	if cfg == nil || cfg.BlockedHeaders == nil {
+		return nil
+	}
+	return derefList(cfg.BlockedHeaders)
+}
+
+func cfgBetaValues(cfg *SanitizeConfig) []string {
+	if cfg == nil || cfg.BlockedBetaValues == nil {
+		return nil
+	}
+	return derefList(cfg.BlockedBetaValues)
+}
+
+// derefList 解引用并保证返回非 nil 切片，避免"指向 nil 切片的指针"退化回默认列表。
+func derefList(p *[]string) []string {
+	if *p == nil {
+		return []string{}
+	}
+	return *p
+}
+
+// sanitizeRequestBody 移除请求体顶层黑名单字段，返回清理后的 body 与被移除的键。
+// 单趟重建：一次解析、一次序列化；顶层键序可能变化，JSON 语义不受影响。
+// 顶层存在重复键的畸形 body 原样放行——map 解析会静默吞并重复键，
+// 宁可不清理也不能改写非目标数据。
+func sanitizeRequestBody(bodyBytes []byte, cfg *SanitizeConfig) ([]byte, []string) {
+	blocked := resolveBlocklist(cfgBodyFields(cfg), defaultBlockedBodyFields, false)
+	if len(blocked) == 0 {
+		return bodyBytes, nil
+	}
+
+	root := gjson.ParseBytes(bodyBytes)
+	if !root.IsObject() {
+		return bodyBytes, nil
+	}
+	// 快速路径：统计顶层键出现次数，没有命中黑名单就不动 body
+	hasBlocked := false
+	keyCount := 0
+	root.ForEach(func(key, _ gjson.Result) bool {
+		keyCount++
+		if blocked[key.String()] {
+			hasBlocked = true
+		}
+		return true
+	})
+	if !hasBlocked {
+		return bodyBytes, nil
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &fields); err != nil {
+		return bodyBytes, nil
+	}
+	if len(fields) != keyCount {
+		fmt.Printf("[Sanitize] 请求体顶层存在重复键，跳过清理以免改写非目标数据\n")
+		return bodyBytes, nil
+	}
+
+	var removed []string
+	for k := range fields {
+		if blocked[k] {
+			removed = append(removed, k)
+			delete(fields, k)
+		}
+	}
+	cleaned, err := json.Marshal(fields)
+	if err != nil {
+		return bodyBytes, nil
+	}
+	sort.Strings(removed)
+	return cleaned, removed
+}
+
+// sanitizeHeaders 移除黑名单请求头并清理 anthropic-beta 中不支持的值。
+// 必须在注入供应商凭据之前调用，用户配置的黑名单才碰不到中继写入的认证头。
+func sanitizeHeaders(headers map[string]string, cfg *SanitizeConfig) map[string]string {
+	blockedHeader := resolveBlocklist(cfgHeaders(cfg), defaultBlockedHeaders, true)
+	blockedBeta := resolveBlocklist(cfgBetaValues(cfg), defaultBlockedBetaValues, false)
+
+	cleaned := make(map[string]string, len(headers))
+	for k, v := range headers {
+		lower := strings.ToLower(k)
+		if blockedHeader[lower] {
+			continue
+		}
+		if lower == "anthropic-beta" {
+			v = cleanAnthropicBeta(v, blockedBeta)
+			if v == "" {
+				continue
+			}
+		}
+		cleaned[k] = v
+	}
+	return cleaned
+}
+
+// sanitizeHTTPHeaders 是 sanitizeHeaders 的 http.Header 版本，供 models 转发路径使用。
+func sanitizeHTTPHeaders(h http.Header, cfg *SanitizeConfig) {
+	blockedHeader := resolveBlocklist(cfgHeaders(cfg), defaultBlockedHeaders, true)
+	blockedBeta := resolveBlocklist(cfgBetaValues(cfg), defaultBlockedBetaValues, false)
+
+	for _, k := range headerKeys(h) {
+		lower := strings.ToLower(k)
+		if blockedHeader[lower] {
+			h.Del(k)
+			continue
+		}
+		if lower == "anthropic-beta" {
+			// 逐个清理同名头的每个值，不能用 Get/Set（只取第一个值、覆盖其余合法值）
+			kept := make([]string, 0, len(h.Values(k)))
+			for _, v := range h.Values(k) {
+				if cleaned := cleanAnthropicBeta(v, blockedBeta); cleaned != "" {
+					kept = append(kept, cleaned)
+				}
+			}
+			if len(kept) == 0 {
+				h.Del(k)
+			} else {
+				h[k] = kept
+			}
+		}
+	}
+}
+
+// headerKeys 先收集键再遍历，避免边遍历边删除。
+func headerKeys(h http.Header) []string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// cleanAnthropicBeta 从 anthropic-beta 头的逗号分隔值中剔除黑名单项。
+func cleanAnthropicBeta(value string, blocked map[string]bool) string {
+	parts := strings.Split(value, ",")
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" || blocked[trimmed] {
+			continue
+		}
+		filtered = append(filtered, trimmed)
+	}
+	return strings.Join(filtered, ", ")
 }
