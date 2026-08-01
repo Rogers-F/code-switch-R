@@ -9,10 +9,18 @@ export interface ConfigFile {
   isPrimary?: boolean
 }
 
+export interface SeedField {
+  path: string
+  value: unknown
+  mode: 'exact' | 'fillMap'
+}
+
 export interface ProxyInjection {
   targetFileId: string
   baseUrlField: string
   authTokenField?: string
+  // 预设携带的声明式补齐字段：前端只透传保存，不提供编辑
+  seedFields?: SeedField[]
 }
 
 export interface CustomCliTool {
@@ -57,8 +65,18 @@ const normalizeTool = (raw: any): CustomCliTool => {
       targetFileId: p.TargetFileID ?? p.targetFileId ?? '',
       baseUrlField: p.BaseUrlField ?? p.baseUrlField ?? '',
       authTokenField: p.AuthTokenField ?? p.authTokenField ?? '',
+      seedFields: normalizeSeedFields(p.SeedFields ?? p.seedFields),
     })),
   }
+}
+
+const normalizeSeedFields = (raw: any): SeedField[] | undefined => {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  return raw.map((sf: any) => ({
+    path: sf.Path ?? sf.path ?? '',
+    value: sf.Value ?? sf.value,
+    mode: sf.Mode ?? sf.mode ?? 'exact',
+  }))
 }
 
 // ========== 工具 CRUD ==========
@@ -119,4 +137,33 @@ export const saveCustomCliConfigContent = async (toolId: string, fileId: string,
 export const getCustomCliLockedFields = async (toolId: string): Promise<string[]> => {
   const raw = await Call.ByName(`${serviceName}.GetLockedFields`, toolId)
   return Array.isArray(raw) ? raw : []
+}
+
+// ========== 内置预设 ==========
+
+export interface CustomCliToolPreset {
+  presetId: string
+  name: string
+  configFiles: ConfigFile[]
+  proxyInjection: ProxyInjection[]
+  configState: 'none' | 'json' | 'jsonc' | 'both'
+  resolvedPath: string
+  candidates?: string[]
+}
+
+export const listCustomCliToolPresets = async (): Promise<CustomCliToolPreset[]> => {
+  const raw = await Call.ByName(`${serviceName}.ListToolPresets`)
+  if (!Array.isArray(raw)) return []
+  return raw.map((p: any) => {
+    const tool = normalizeTool(p)
+    return {
+      presetId: p.PresetID ?? p.presetId ?? '',
+      name: tool.name,
+      configFiles: tool.configFiles,
+      proxyInjection: tool.proxyInjection ?? [],
+      configState: p.ConfigState ?? p.configState ?? 'none',
+      resolvedPath: p.ResolvedPath ?? p.resolvedPath ?? '',
+      candidates: p.Candidates ?? p.candidates ?? undefined,
+    }
+  })
 }

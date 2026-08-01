@@ -70,11 +70,20 @@ export function GetTool(id: string): $CancellablePromise<$models.CustomCliTool |
 }
 
 /**
+ * ListToolPresets 列出内置预设（当前仅 opencode）
+ */
+export function ListToolPresets(): $CancellablePromise<$models.CustomCliToolPreset[]> {
+    return $Call.ByID(2434526295).then(($result: any) => {
+        return $$createType4($result);
+    });
+}
+
+/**
  * ListTools 获取所有自定义 CLI 工具
  */
 export function ListTools(): $CancellablePromise<$models.CustomCliTool[]> {
     return $Call.ByID(679310818).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType5($result);
     });
 }
 
@@ -83,7 +92,7 @@ export function ListTools(): $CancellablePromise<$models.CustomCliTool[]> {
  */
 export function ProxyStatus(toolId: string): $CancellablePromise<$models.CustomCliProxyStatus | null> {
     return $Call.ByID(3969379143, toolId).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType7($result);
     });
 }
 
@@ -105,6 +114,8 @@ export function UpdateTool(id: string, tool: $models.CustomCliTool): $Cancellabl
 const $$createType0 = $models.CustomCliTool.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
 const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = $Create.Array($$createType0);
-const $$createType4 = $models.CustomCliProxyStatus.createFrom;
-const $$createType5 = $Create.Nullable($$createType4);
+const $$createType3 = $models.CustomCliToolPreset.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $Create.Array($$createType0);
+const $$createType6 = $models.CustomCliProxyStatus.createFrom;
+const $$createType7 = $Create.Nullable($$createType6);

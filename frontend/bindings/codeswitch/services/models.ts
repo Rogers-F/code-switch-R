@@ -1029,6 +1029,76 @@ export class CustomCliTool {
 }
 
 /**
+ * CustomCliToolPreset 内置预设：前端"从预设开始"入口的预填内容 +
+ * 目标配置文件的探测状态
+ */
+export class CustomCliToolPreset {
+    "presetId": string;
+    "name": string;
+    "configFiles": ConfigFile[];
+    "proxyInjection": ProxyInjection[];
+
+    /**
+     * ConfigState 目标配置探测结果: none | json | jsonc | both
+     */
+    "configState": string;
+
+    /**
+     * ResolvedPath 预填的配置路径（含 ~ 形式，便于跨机展示）
+     */
+    "resolvedPath": string;
+
+    /**
+     * Candidates configState=both 时的可选路径
+     */
+    "candidates"?: string[];
+
+    /** Creates a new CustomCliToolPreset instance. */
+    constructor($$source: Partial<CustomCliToolPreset> = {}) {
+        if (!("presetId" in $$source)) {
+            this["presetId"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("configFiles" in $$source)) {
+            this["configFiles"] = [];
+        }
+        if (!("proxyInjection" in $$source)) {
+            this["proxyInjection"] = [];
+        }
+        if (!("configState" in $$source)) {
+            this["configState"] = "";
+        }
+        if (!("resolvedPath" in $$source)) {
+            this["resolvedPath"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CustomCliToolPreset instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CustomCliToolPreset {
+        const $$createField2_0 = $$createType9;
+        const $$createField3_0 = $$createType11;
+        const $$createField6_0 = $$createType7;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("configFiles" in $$parsedSource) {
+            $$parsedSource["configFiles"] = $$createField2_0($$parsedSource["configFiles"]);
+        }
+        if ("proxyInjection" in $$parsedSource) {
+            $$parsedSource["proxyInjection"] = $$createField3_0($$parsedSource["proxyInjection"]);
+        }
+        if ("candidates" in $$parsedSource) {
+            $$parsedSource["candidates"] = $$createField6_0($$parsedSource["candidates"]);
+        }
+        return new CustomCliToolPreset($$parsedSource as Partial<CustomCliToolPreset>);
+    }
+}
+
+/**
  * DeepLinkImportRequest 深度链接导入请求模型
  */
 export class DeepLinkImportRequest {
@@ -2626,6 +2696,12 @@ export class ProxyInjection {
     "baseUrlField": string;
     "authTokenField"?: string;
 
+    /**
+     * SeedFields 启用代理时按声明式模式补齐的字段（预设用，如 opencode 的
+     * provider npm/models）。只在缺失/可安全填充时写入，详见 applySeedField
+     */
+    "seedFields"?: SeedField[];
+
     /** Creates a new ProxyInjection instance. */
     constructor($$source: Partial<ProxyInjection> = {}) {
         if (!("targetFileId" in $$source)) {
@@ -2642,7 +2718,11 @@ export class ProxyInjection {
      * Creates a new ProxyInjection instance from a string or object.
      */
     static createFrom($$source: any = {}): ProxyInjection {
+        const $$createField3_0 = $$createType30;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("seedFields" in $$parsedSource) {
+            $$parsedSource["seedFields"] = $$createField3_0($$parsedSource["seedFields"]);
+        }
         return new ProxyInjection($$parsedSource as Partial<ProxyInjection>);
     }
 }
@@ -2919,9 +2999,9 @@ export class SanitizeConfig {
      * Creates a new SanitizeConfig instance from a string or object.
      */
     static createFrom($$source: any = {}): SanitizeConfig {
-        const $$createField0_0 = $$createType29;
-        const $$createField1_0 = $$createType29;
-        const $$createField2_0 = $$createType29;
+        const $$createField0_0 = $$createType31;
+        const $$createField1_0 = $$createType31;
+        const $$createField2_0 = $$createType31;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("blockedBodyFields" in $$parsedSource) {
             $$parsedSource["blockedBodyFields"] = $$createField0_0($$parsedSource["blockedBodyFields"]);
@@ -2933,6 +3013,44 @@ export class SanitizeConfig {
             $$parsedSource["blockedBetaValues"] = $$createField2_0($$parsedSource["blockedBetaValues"]);
         }
         return new SanitizeConfig($$parsedSource as Partial<SanitizeConfig>);
+    }
+}
+
+/**
+ * SeedField 声明式 seed 规则
+ */
+export class SeedField {
+    "path": string;
+    "value": any;
+
+    /**
+     * Mode 冲突语义：
+     *   exact   缺失→写入；等值→保留；异值→报错（如 npm 包名）
+     *   fillMap 缺失或空对象→写入；非空对象→保留；非对象→报错（如 models 表）
+     */
+    "mode": string;
+
+    /** Creates a new SeedField instance. */
+    constructor($$source: Partial<SeedField> = {}) {
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("value" in $$source)) {
+            this["value"] = null;
+        }
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SeedField instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SeedField {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SeedField($$parsedSource as Partial<SeedField>);
     }
 }
 
@@ -3330,4 +3448,6 @@ const $$createType25 = AvailabilityConfig.createFrom;
 const $$createType26 = $Create.Nullable($$createType25);
 const $$createType27 = SanitizeConfig.createFrom;
 const $$createType28 = $Create.Nullable($$createType27);
-const $$createType29 = $Create.Nullable($$createType7);
+const $$createType29 = SeedField.createFrom;
+const $$createType30 = $Create.Array($$createType29);
+const $$createType31 = $Create.Nullable($$createType7);

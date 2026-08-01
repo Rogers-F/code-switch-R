@@ -907,6 +907,32 @@
         @close="closeCliToolModal"
       >
         <form class="vendor-form cli-tool-form" @submit.prevent="submitCliToolModal">
+          <!-- 内置预设入口（仅新建时展示） -->
+          <div
+            v-if="!cliToolModalState.editingId && cliToolPresets.length > 0"
+            class="form-field"
+          >
+            <span>{{ t('components.main.customCli.presetSection') }}</span>
+            <div class="preset-chip-list">
+              <div v-for="preset in cliToolPresets" :key="preset.presetId" class="preset-chip-block">
+                <button
+                  type="button"
+                  class="preset-chip"
+                  @click="applyCliToolPreset(preset)"
+                >{{ preset.name }}</button>
+                <select
+                  v-if="preset.candidates && preset.candidates.length > 1"
+                  v-model="presetChosenPath[preset.presetId]"
+                  class="preset-candidate-select"
+                  @change="applyCliToolPreset(preset)"
+                >
+                  <option v-for="c in preset.candidates" :key="c" :value="c">{{ c }}</option>
+                </select>
+                <p class="field-hint preset-hint">{{ presetStateHint(preset) }}</p>
+              </div>
+            </div>
+          </div>
+
           <label class="form-field">
             <span>{{ t('components.main.customCli.toolName') }}</span>
             <BaseInput
@@ -1018,6 +1044,9 @@
                     :placeholder="t('components.main.customCli.authTokenFieldPlaceholder')"
                   />
                 </div>
+                <p v-if="pi.seedFields && pi.seedFields.length" class="field-hint seed-badge">
+                  {{ t('components.main.customCli.seedFieldsBadge', { count: pi.seedFields.length }) }}
+                </p>
               </div>
             </div>
             <p class="field-hint">{{ t('components.main.customCli.proxyHint') }}</p>
@@ -1097,9 +1126,12 @@ import {
   getCustomCliProxyStatus,
   enableCustomCliProxy,
   disableCustomCliProxy,
+  listCustomCliToolPresets,
   type CustomCliTool,
   type ConfigFile,
   type ProxyInjection,
+  type SeedField,
+  type CustomCliToolPreset,
 } from '../../services/customCliService'
 import {
   getConnectivityResults,
@@ -3173,9 +3205,17 @@ const cliToolModalState = reactive({
       targetFileId: string
       baseUrlField: string
       authTokenField: string
+      // 预设携带的声明式补齐字段：不可见不可编辑，编辑/保存链路原样透传，
+      // 防止用户编辑工具后预设 seed 被静默丢弃
+      seedFields?: SeedField[]
     }>,
   },
 })
+
+// 内置预设（打开新建模态时拉取）
+const cliToolPresets = ref<CustomCliToolPreset[]>([])
+// both 态下用户选择的配置路径（presetId → path）
+const presetChosenPath = reactive<Record<string, string>>({})
 
 // CLI 工具删除确认状态
 const cliToolConfirmState = reactive({
@@ -3222,6 +3262,50 @@ const openCliToolModal = () => {
     authTokenField: '',
   }]
   cliToolModalState.open = true
+  // 预设列表异步加载，不阻塞模态打开（含目标配置文件探测）
+  cliToolPresets.value = []
+  listCustomCliToolPresets()
+    .then(presets => {
+      cliToolPresets.value = presets
+      for (const p of presets) {
+        presetChosenPath[p.presetId] = p.resolvedPath
+      }
+    })
+    .catch(err => console.error('加载内置预设失败:', err))
+}
+
+// 应用内置预设：预填名称/配置文件/注入规则（seedFields 深拷贝透传）。
+// both 态使用用户在候选下拉里选中的路径
+const applyCliToolPreset = (preset: CustomCliToolPreset) => {
+  const chosenPath = presetChosenPath[preset.presetId] || preset.resolvedPath
+  cliToolModalState.form.name = preset.name
+  cliToolModalState.form.configFiles = preset.configFiles.map(cf => ({
+    id: cf.id || `cfg-${Date.now()}`,
+    label: cf.label,
+    path: cf.path === preset.resolvedPath ? chosenPath : cf.path,
+    format: cf.format,
+    isPrimary: cf.isPrimary ?? true,
+  }))
+  cliToolModalState.form.proxyInjection = preset.proxyInjection.map(pi => ({
+    targetFileId: pi.targetFileId,
+    baseUrlField: pi.baseUrlField,
+    authTokenField: pi.authTokenField ?? '',
+    seedFields: pi.seedFields ? (JSON.parse(JSON.stringify(pi.seedFields)) as SeedField[]) : undefined,
+  }))
+}
+
+// 预设的配置探测提示文案
+const presetStateHint = (preset: CustomCliToolPreset): string => {
+  switch (preset.configState) {
+    case 'none':
+      return t('components.main.customCli.presetStateNone')
+    case 'jsonc':
+      return t('components.main.customCli.presetStateJsonc')
+    case 'both':
+      return t('components.main.customCli.presetStateBoth')
+    default:
+      return t('components.main.customCli.presetStateExisting')
+  }
 }
 
 // 编辑当前选中的 CLI 工具
@@ -3254,6 +3338,7 @@ const editCurrentCliTool = async () => {
         targetFileId: pi.targetFileId ?? '',
         baseUrlField: pi.baseUrlField ?? '',
         authTokenField: pi.authTokenField ?? '',
+        seedFields: pi.seedFields ? (JSON.parse(JSON.stringify(pi.seedFields)) as SeedField[]) : undefined,
       }))
     : [{
         targetFileId: '',
@@ -3347,7 +3432,7 @@ const submitCliToolModal = async () => {
       const authTokenField = pi.authTokenField.trim()
       // 如果用户填写了字段但忘记选择目标文件，且只有一个配置文件，自动补充
       const targetFileId = pi.targetFileId.trim() || ((baseUrlField || authTokenField) ? autoTargetFileId : '')
-      return { targetFileId, baseUrlField, authTokenField }
+      return { targetFileId, baseUrlField, authTokenField, seedFields: pi.seedFields }
     })
     .filter(pi => pi.targetFileId || pi.baseUrlField || pi.authTokenField)
 
@@ -4407,6 +4492,51 @@ const confirmDeleteCliTool = async () => {
   background: var(--mac-surface-strong);
   border: 1px solid var(--mac-border);
   border-radius: 8px;
+}
+
+.preset-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.preset-chip-block {
+  max-width: 100%;
+}
+
+.preset-chip {
+  padding: 4px 14px;
+  border: 1px solid var(--mac-accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--mac-accent);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.preset-chip:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.preset-hint {
+  margin-top: 4px;
+}
+
+.preset-candidate-select {
+  display: block;
+  margin-top: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--mac-border);
+  border-radius: 6px;
+  background: var(--mac-surface);
+  font-size: 0.8rem;
+}
+
+.seed-badge {
+  margin-top: 6px;
+  color: var(--mac-accent);
 }
 
 .proxy-injection-row {

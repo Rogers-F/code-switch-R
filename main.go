@@ -152,7 +152,7 @@ func main() {
 	// 否则该开关只影响 VersionService 的展示，更新流程仍走运行时检测
 	updateService := services.NewUpdateService(AppVersion, UpdatePolicy)
 	consoleService := services.NewConsoleService()
-	customCliService := services.NewCustomCliService(relayConnectAddr)
+	customCliService := services.NewCustomCliService(relayConnectAddr, defaultModelPolicy)
 	// 网络设置页与 WSL 配置都要按"实际绑定了哪些地址"判断，而不是磁盘上的设置：
 	// 监听地址在启动时冻结，改完设置不重启并不会重绑
 	networkService := services.NewNetworkService(relayConnectAddr, claudeSettings, codexSettings, geminiService, providerRelay.BoundAddresses)

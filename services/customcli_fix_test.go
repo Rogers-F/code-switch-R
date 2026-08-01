@@ -14,7 +14,7 @@ func TestCustomCliEnableProxyKeepsOriginalBackup(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
-	svc := NewCustomCliService(":18100")
+	svc := NewCustomCliService(":18100", nil)
 
 	cfgDir := filepath.Join(tmp, "tool")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {

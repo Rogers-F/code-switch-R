@@ -20,7 +20,10 @@ import (
 
 // 静态兜底常量。探测值刻意保守(稳定窗内),默认值取数据源当前最新。
 const (
-	FallbackClaudeProbeModel   = "claude-haiku-4-5-20251001"
+	FallbackClaudeProbeModel = "claude-haiku-4-5-20251001"
+	// FallbackClaudeDefaultModel 产品默认(Sonnet 家族),供 opencode 预设等
+	// "写进外部工具配置"的场景;探测仍走 Haiku
+	FallbackClaudeDefaultModel = "claude-sonnet-4-5"
 	FallbackCodexDefaultModel  = "gpt-5.6"
 	FallbackCodexProbeModel    = "gpt-5.5"
 	FallbackGeminiDefaultModel = "gemini-3.1-pro-preview"
@@ -116,6 +119,16 @@ func (p *DefaultModelPolicy) GeminiDefaultModel() string {
 	return FallbackGeminiDefaultModel
 }
 
+// ClaudeDefaultModel 产品默认 Claude 模型(稳定 Sonnet 家族,要求 tool_call)。
+// 与 ProbeModel("claude") 的语义区别:探测选低成本 Haiku,这里选面向实际
+// 编码/对话体验的默认型号,供 opencode 预设等写入外部工具配置的场景使用。
+func (p *DefaultModelPolicy) ClaudeDefaultModel() string {
+	if c, ok := p.selectModel("anthropic", claudeSonnetPattern, selectOpts{requireToolCall: true}); ok {
+		return c.id
+	}
+	return FallbackClaudeDefaultModel
+}
+
 // ProbeModel 各平台健康/连通性探测的默认模型(30 天稳定窗)。
 func (p *DefaultModelPolicy) ProbeModel(platform string) string {
 	switch strings.ToLower(platform) {
@@ -177,12 +190,14 @@ func (p *DefaultModelPolicy) DefaultModels() DefaultModels {
 type familyPattern func(id string) (version []int, dated string, preview bool, ok bool)
 
 var (
-	codexMainlineRe = regexp.MustCompile(`^gpt-(\d+(?:\.\d+)*)$`)
-	codexLineRe     = regexp.MustCompile(`^gpt-(\d+(?:\.\d+)*)-codex$`)
-	geminiProRe     = regexp.MustCompile(`^gemini-(\d+(?:\.\d+)*)-pro(-preview)?$`)
-	geminiFlashRe   = regexp.MustCompile(`^gemini-(\d+(?:\.\d+)*)-flash(-preview)?$`)
-	claudeHaikuNewRe    = regexp.MustCompile(`^claude-haiku-(\d+(?:-\d+)*?)(?:-(\d{8}))?$`)
-	claudeHaikuLegacyRe = regexp.MustCompile(`^claude-(\d+(?:-\d+)*?)-haiku(?:-(\d{8}))?$`)
+	codexMainlineRe      = regexp.MustCompile(`^gpt-(\d+(?:\.\d+)*)$`)
+	codexLineRe          = regexp.MustCompile(`^gpt-(\d+(?:\.\d+)*)-codex$`)
+	geminiProRe          = regexp.MustCompile(`^gemini-(\d+(?:\.\d+)*)-pro(-preview)?$`)
+	geminiFlashRe        = regexp.MustCompile(`^gemini-(\d+(?:\.\d+)*)-flash(-preview)?$`)
+	claudeHaikuNewRe     = regexp.MustCompile(`^claude-haiku-(\d+(?:-\d+)*?)(?:-(\d{8}))?$`)
+	claudeHaikuLegacyRe  = regexp.MustCompile(`^claude-(\d+(?:-\d+)*?)-haiku(?:-(\d{8}))?$`)
+	claudeSonnetNewRe    = regexp.MustCompile(`^claude-sonnet-(\d+(?:-\d+)*?)(?:-(\d{8}))?$`)
+	claudeSonnetLegacyRe = regexp.MustCompile(`^claude-(\d+(?:-\d+)*?)-sonnet(?:-(\d{8}))?$`)
 )
 
 func codexMainlinePattern(id string) ([]int, string, bool, bool) {
@@ -224,6 +239,20 @@ func claudeHaikuPattern(id string) ([]int, string, bool, bool) {
 		}
 	}
 	if m := claudeHaikuLegacyRe.FindStringSubmatch(id); m != nil {
+		if version := saneClaudeVersion(parseVersionSegments(m[1])); version != nil {
+			return version, m[2], false, true
+		}
+	}
+	return nil, "", false, false
+}
+
+func claudeSonnetPattern(id string) ([]int, string, bool, bool) {
+	if m := claudeSonnetNewRe.FindStringSubmatch(id); m != nil {
+		if version := saneClaudeVersion(parseVersionSegments(m[1])); version != nil {
+			return version, m[2], false, true
+		}
+	}
+	if m := claudeSonnetLegacyRe.FindStringSubmatch(id); m != nil {
 		if version := saneClaudeVersion(parseVersionSegments(m[1])); version != nil {
 			return version, m[2], false, true
 		}

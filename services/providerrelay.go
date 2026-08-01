@@ -838,6 +838,10 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 	// 自定义 CLI 工具端点（路由格式: /custom/:toolId/v1/messages）
 	// toolId 用于区分不同的 CLI 工具，对应 provider kind 为 "custom:{toolId}"
 	router.POST("/custom/:toolId/v1/messages", prs.customCliProxyHandler())
+	// 兼容别名：ai-sdk 系 Anthropic 客户端（如 opencode 的 @ai-sdk/anthropic）
+	// 按 `${baseURL}/messages` 拼 URL，而注入的 baseURL 不带 /v1。
+	// handler 不读实际请求路径（上游端点固定 /v1/messages），别名零逻辑分叉
+	router.POST("/custom/:toolId/messages", prs.customCliProxyHandler())
 
 	// 自定义 CLI 工具的 /v1/models 端点
 	router.GET("/custom/:toolId/v1/models", prs.customModelsHandler())
