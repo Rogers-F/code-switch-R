@@ -180,8 +180,8 @@ func TestGeminiHandlerWhitelistFiltersAll(t *testing.T) {
 		t.Fatalf("响应不是 JSON: %v", err)
 	}
 	msg, _ := body["error"].(string)
-	if !strings.Contains(msg, "gemini-2.5-pro") || !strings.Contains(msg, "不兼容") {
-		t.Errorf("404 文案应包含模型名与跳过说明，实际: %s", msg)
+	if !strings.Contains(msg, "gemini-2.5-pro") || !strings.Contains(msg, "白名单") {
+		t.Errorf("404 文案应包含模型名与白名单不匹配的原因说明，实际: %s", msg)
 	}
 }
 

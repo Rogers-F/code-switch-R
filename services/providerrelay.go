@@ -286,6 +286,38 @@ func checkNonStreamTruncated(resp *xrequest.Response, written int64) error {
 	return nil
 }
 
+// respondNoEligibleProviders 初筛后无可用供应商的 404 终态。
+// 把"为什么被跳过"按原因拆开讲清并给排查指引：白名单不匹配、临时拉黑与
+// 未启用是三种完全不同的处置方式，混在一个计数里用户无从下手（issue #29）。
+// 多种原因并存时全部列出，不做"选一个当代表"的省略
+func respondNoEligibleProviders(c *gin.Context, requestedModel string, skippedModel, skippedBlacklist, skippedInvalid int) {
+	var reasons, hints []string
+	if skippedModel > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d 个供应商的模型白名单/映射不包含该模型", skippedModel))
+		hints = append(hints, "在主页打开对应供应商，确认\"支持的模型\"包含该模型或留空（留空=支持所有模型），\"模型映射\"的目标模型名必须在白名单内")
+	}
+	if skippedBlacklist > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d 个正被临时拉黑", skippedBlacklist))
+		hints = append(hints, "被拉黑的供应商可等待自动恢复，或到黑名单页手动解除")
+	}
+	if skippedInvalid > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d 个配置校验失败（详见控制台日志）", skippedInvalid))
+		hints = append(hints, "配置校验失败的常见原因是模型映射的目标不在白名单内")
+	}
+
+	var msg string
+	if len(reasons) == 0 {
+		msg = "当前平台没有已启用的供应商。请在主页添加供应商并确认其已启用、API 地址与密钥已填写"
+	} else {
+		head := "没有可用的供应商"
+		if requestedModel != "" {
+			head = fmt.Sprintf("没有可用的供应商支持模型 '%s'", requestedModel)
+		}
+		msg = fmt.Sprintf("%s：%s。排查：%s", head, strings.Join(reasons, "；"), strings.Join(hints, "；"))
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": msg})
+}
+
 // respondAllProvidersFailed 统一输出"所有供应商都失败"的终态响应。
 //
 // 只有当**每一次**失败都是上游判定请求内容有问题（400/413/422 等）时才回 4xx：
@@ -889,6 +921,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 
 		active := make([]Provider, 0, len(providers))
 		skippedCount := 0
+		skippedModel, skippedBlacklist, skippedInvalid := 0, 0, 0
 		for _, provider := range providers {
 			// 基础过滤：enabled、URL、APIKey
 			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
@@ -899,6 +932,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
 				fmt.Printf("[WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
 				skippedCount++
+				skippedInvalid++
 				continue
 			}
 
@@ -906,6 +940,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
 				fmt.Printf("[INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
 				skippedCount++
+				skippedModel++
 				continue
 			}
 
@@ -913,6 +948,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
 				fmt.Printf("⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
 				skippedCount++
+				skippedBlacklist++
 				continue
 			}
 
@@ -920,13 +956,7 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 		}
 
 		if len(active) == 0 {
-			if requestedModel != "" {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedCount),
-				})
-			} else {
-				c.JSON(http.StatusNotFound, gin.H{"error": "no providers available"})
-			}
+			respondNoEligibleProviders(c, requestedModel, skippedModel, skippedBlacklist, skippedInvalid)
 			return
 		}
 
@@ -2448,13 +2478,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		// 加载 Gemini providers（与配置代数配对）
 		providers, geminiGen := prs.geminiService.providersWithGen()
 		if len(providers) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no gemini providers configured"})
+			respondNoEligibleProviders(c, requestedModel, 0, 0, 0)
 			return
 		}
 
 		// 1. 过滤可用的 providers（启用 + BaseURL 配置 + 配置合法 + 支持请求模型 + 未被拉黑）
 		var activeProviders []GeminiProvider
-		skippedIncompatible := 0
+		skippedModel, skippedBlacklist, skippedInvalid := 0, 0, 0
 		for _, p := range providers {
 			if !p.Enabled || p.BaseURL == "" {
 				continue
@@ -2462,14 +2492,14 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			// 配置验证：失败自动跳过（与 Claude/Codex 行为一致）
 			if errs := p.ValidateConfiguration(); len(errs) > 0 {
 				fmt.Printf("[Gemini] ⚠️ Provider %s 配置验证失败，已自动跳过: %v\n", p.Name, errs)
-				skippedIncompatible++
+				skippedInvalid++
 				continue
 			}
 			if requestedModel != "" {
 				// 模型白名单过滤：不支持请求模型的 provider 直接跳过
 				if !p.IsModelSupported(requestedModel) {
 					fmt.Printf("[Gemini] ℹ️ Provider %s 不支持模型 %s，已跳过\n", p.Name, requestedModel)
-					skippedIncompatible++
+					skippedModel++
 					continue
 				}
 				// 白名单非空时，最终转发的 effective model 必须仍在白名单内。
@@ -2478,7 +2508,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 				if len(p.SupportedModels) > 0 {
 					if effective := p.GetEffectiveModel(requestedModel); !modelInWhitelist(p.SupportedModels, effective) {
 						fmt.Printf("[Gemini] ⚠️ Provider %s 映射结果 %s 不在白名单中，已跳过\n", p.Name, effective)
-						skippedIncompatible++
+						skippedModel++
 						continue
 					}
 				}
@@ -2486,6 +2516,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 			// 检查黑名单
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted("gemini", p.Name); isBlacklisted {
 				fmt.Printf("[Gemini] ⛔ Provider %s 已拉黑，过期时间: %v\n", p.Name, until.Format("15:04:05"))
+				skippedBlacklist++
 				continue
 			}
 			// Level 默认值处理
@@ -2496,13 +2527,7 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 		}
 
 		if len(activeProviders) == 0 {
-			if requestedModel != "" && skippedIncompatible > 0 {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedIncompatible),
-				})
-			} else {
-				c.JSON(http.StatusNotFound, gin.H{"error": "no active gemini provider (all disabled or blacklisted)"})
-			}
+			respondNoEligibleProviders(c, requestedModel, skippedModel, skippedBlacklist, skippedInvalid)
 			return
 		}
 
@@ -3236,6 +3261,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		// 过滤可用的 providers
 		active := make([]Provider, 0, len(providers))
 		skippedCount := 0
+		skippedModel, skippedBlacklist, skippedInvalid := 0, 0, 0
 		for _, provider := range providers {
 			if !provider.Enabled || provider.APIURL == "" || provider.APIKey == "" {
 				continue
@@ -3244,12 +3270,14 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			if errs := provider.ValidateConfiguration(); len(errs) > 0 {
 				fmt.Printf("[CustomCLI][WARN] Provider %s 配置验证失败，已自动跳过: %v\n", provider.Name, errs)
 				skippedCount++
+				skippedInvalid++
 				continue
 			}
 
 			if requestedModel != "" && !provider.IsModelSupported(requestedModel) {
 				fmt.Printf("[CustomCLI][INFO] Provider %s 不支持模型 %s，已跳过\n", provider.Name, requestedModel)
 				skippedCount++
+				skippedModel++
 				continue
 			}
 
@@ -3257,6 +3285,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 			if isBlacklisted, until := prs.blacklistService.IsBlacklisted(kind, provider.Name); isBlacklisted {
 				fmt.Printf("[CustomCLI] ⛔ Provider %s 已拉黑，过期时间: %v\n", provider.Name, until.Format("15:04:05"))
 				skippedCount++
+				skippedBlacklist++
 				continue
 			}
 
@@ -3264,13 +3293,7 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 		}
 
 		if len(active) == 0 {
-			if requestedModel != "" {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("没有可用的 provider 支持模型 '%s'（已跳过 %d 个不兼容的 provider）", requestedModel, skippedCount),
-				})
-			} else {
-				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("no providers available for %s", kind)})
-			}
+			respondNoEligibleProviders(c, requestedModel, skippedModel, skippedBlacklist, skippedInvalid)
 			return
 		}
 

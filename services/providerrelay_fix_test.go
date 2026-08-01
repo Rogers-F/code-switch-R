@@ -970,3 +970,37 @@ func TestResolveWSLReachableAddress(t *testing.T) {
 		})
 	}
 }
+
+// respondNoEligibleProviders 按跳过原因分支输出可操作的排查文案（issue #29）
+func TestRespondNoEligibleProvidersBranches(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	run := func(model string, m, b, i int) string {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		respondNoEligibleProviders(c, model, m, b, i)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("应为 404, 实际 %d", w.Code)
+		}
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		msg, _ := body["error"].(string)
+		return msg
+	}
+	if msg := run("claude-x", 2, 1, 0); !strings.Contains(msg, "claude-x") ||
+		!strings.Contains(msg, "白名单") || !strings.Contains(msg, "拉黑") {
+		t.Errorf("白名单分支文案缺要素: %s", msg)
+	}
+	if msg := run("", 0, 3, 0); !strings.Contains(msg, "拉黑") || !strings.Contains(msg, "黑名单页") {
+		t.Errorf("拉黑分支文案缺要素: %s", msg)
+	}
+	// 混合原因必须全部列出，不得只挑一个当代表（否则"都被拉黑"会掩盖校验失败）
+	if msg := run("", 0, 2, 1); !strings.Contains(msg, "拉黑") || !strings.Contains(msg, "配置校验") {
+		t.Errorf("拉黑+校验失败组合应同时列出两种原因: %s", msg)
+	}
+	if msg := run("", 0, 0, 2); !strings.Contains(msg, "配置校验") {
+		t.Errorf("校验失败分支文案缺要素: %s", msg)
+	}
+	if msg := run("", 0, 0, 0); !strings.Contains(msg, "没有已启用的供应商") {
+		t.Errorf("空供应商分支文案缺要素: %s", msg)
+	}
+}
