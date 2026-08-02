@@ -137,8 +137,8 @@ func (ns *NotificationService) NotifyProviderSwitch(info SwitchNotification) {
 	ns.lastNotifyTime = time.Now()
 	ns.mu.Unlock()
 
-	// 异步发送通知
-	go ns.sendSwitchNotification(info)
+	// 异步发送通知（beeep 走系统通知栈，panic 不兜底会杀进程）
+	SafeGo("notify-switch", func() { ns.sendSwitchNotification(info) })
 }
 
 // sendSwitchNotification 实际发送切换通知的内部方法
@@ -180,7 +180,7 @@ func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerName 
 		return
 	}
 
-	go func() {
+	SafeGo("notify-blacklist", func() {
 		// 简化通知内容
 		title := "Code Switch"
 		body := fmt.Sprintf("%s 已拉黑 %d 分钟", providerName, durationMinutes)
@@ -194,7 +194,7 @@ func (ns *NotificationService) NotifyProviderBlacklisted(platform, providerName 
 		} else {
 			log.Printf("[Notification] 已发送拉黑通知: %s (L%d, %d分钟)", providerName, level, durationMinutes)
 		}
-	}()
+	})
 }
 
 // emitBlacklistEvent 发送拉黑事件到前端

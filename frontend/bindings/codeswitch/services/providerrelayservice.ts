@@ -25,11 +25,35 @@ export function BoundAddresses(): $CancellablePromise<string[]> {
 }
 
 /**
- * ClearCapturedRequests 清空已捕获的请求详情（保留统计行本身）。
- * 同步直写（不走批量队列）：RPC 返回成功即代表已提交。返回清理行数
+ * ClearCapturedRequests 清空全部抓包数据：所有会话 + 0 号旧数据的捕获内容
+ * 一并清除（保留统计行本身），会话元数据整表删除；录制中则轮换出新会话。
+ * 全局清除以代次推进兜在途行（任何旧代次行落库时自我置空），返回清理行数
  */
 export function ClearCapturedRequests(): $CancellablePromise<number> {
     return $Call.ByID(3424084195);
+}
+
+/**
+ * DeleteCaptureSession 删除单个会话：清除其捕获内容（保留统计行本身）并移除
+ * 会话元数据。删除的是活动会话时原地轮换出新会话（录制不中断、白纸重来）。
+ * 事务提交在前、内存状态（墓碑/活动会话 id）变更在后；回滚时内存不动。
+ * 墓碑兜住在途长流请求：采集发生在请求开始，落库时校验会话已删则自我置空
+ */
+export function DeleteCaptureSession(sessionID: number): $CancellablePromise<number> {
+    return $Call.ByID(82781707, sessionID);
+}
+
+/**
+ * ExportCaptureSessionWithDialog 弹系统保存对话框并导出指定会话的全部捕获内容。
+ * 录制中的会话同样可导出（导出已提交的部分）。
+ * 内容在采集时已做认证脱敏，但正文仍可能包含敏感的提示词内容（前端文案有提示）。
+ * 单会话可达数百 MB（64KB/条 × 数千条），因此不整载进内存：
+ * 对话框确认后开只读事务逐行流式写入目标目录内的临时文件，成功后原子替换
+ */
+export function ExportCaptureSessionWithDialog(sessionID: number): $CancellablePromise<$models.CaptureExportResult> {
+    return $Call.ByID(587151650, sessionID).then(($result: any) => {
+        return $$createType1($result);
+    });
 }
 
 /**
@@ -38,7 +62,19 @@ export function ClearCapturedRequests(): $CancellablePromise<number> {
  */
 export function GetAllLastUsedProviders(): $CancellablePromise<{ [_ in string]?: $models.LastUsedProvider | null }> {
     return $Call.ByID(1820257126).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
+    });
+}
+
+/**
+ * GetCaptureSessionLogs 读取会话内的轻量请求行。
+ * sinceID>0：增量模式，返回 id > sinceID 的新行（升序），供录制中的会话轮询追加；
+ * 否则：初始/翻页模式，返回 id < beforeID（beforeID<=0 视为不设上界）的最新行（降序）。
+ * limit 兜底 200、上限 500
+ */
+export function GetCaptureSessionLogs(sessionID: number, sinceID: number, beforeID: number, limit: number): $CancellablePromise<$models.CaptureSessionLogRow[]> {
+    return $Call.ByID(3711165611, sessionID, sinceID, beforeID, limit).then(($result: any) => {
+        return $$createType6($result);
     });
 }
 
@@ -48,7 +84,7 @@ export function GetAllLastUsedProviders(): $CancellablePromise<{ [_ in string]?:
  */
 export function GetLastUsedProvider(platform: string): $CancellablePromise<$models.LastUsedProvider | null> {
     return $Call.ByID(4045318450, platform).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -60,8 +96,20 @@ export function GetRequestCapture(): $CancellablePromise<boolean> {
 }
 
 /**
- * SetRequestCapture 设置抓包模式开关。进程内状态、重启即关：
- * 这是调试态功能，不持久化可避免用户遗忘后长期落盘敏感请求内容
+ * ListCaptureSessions 列出全部会话（新会话在前），含 0 号伪会话（仅当存在旧数据）
+ */
+export function ListCaptureSessions(): $CancellablePromise<$models.CaptureSessionInfo[]> {
+    return $Call.ByID(2488871473).then(($result: any) => {
+        return $$createType8($result);
+    });
+}
+
+/**
+ * SetRequestCapture 设置抓包模式开关。录制开关为进程内状态、重启即关
+ * （调试态功能，不持久化可避免用户遗忘后长期落盘敏感请求内容）；
+ * 会话数据落库保留。开启即建会话，关闭即封会话。
+ * 顺序约束：开启时先提交会话行再置位开关，否则竞态下捕获行会落到 0 号
+ * 伪会话里；关闭时先摘开关再封会话
  */
 export function SetRequestCapture(enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(2074094391, enabled);
@@ -77,6 +125,11 @@ export function Stop(): $CancellablePromise<void> {
 
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = $models.LastUsedProvider.createFrom;
-const $$createType2 = $Create.Nullable($$createType1);
-const $$createType3 = $Create.Map($Create.Any, $$createType2);
+const $$createType1 = $models.CaptureExportResult.createFrom;
+const $$createType2 = $models.LastUsedProvider.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);
+const $$createType4 = $Create.Map($Create.Any, $$createType3);
+const $$createType5 = $models.CaptureSessionLogRow.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $models.CaptureSessionInfo.createFrom;
+const $$createType8 = $Create.Array($$createType7);

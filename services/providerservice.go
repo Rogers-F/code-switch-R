@@ -267,6 +267,15 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 
 	// 解析 platform(alias 校验需要)。失败时跳过 alias 校验(比如 gemini/unknown kind)
 	aliasPlatform, aliasErr := resolvePlatform(kind)
+	// 规则:名字不得占用其他 provider 的 48h 活动 alias
+	// 防止 "A→B 后新建同名 A" 被 alias resolver 静默归并到 B 的历史里。
+	// 一次性批量查询：旧实现在持锁期间对每个 provider 单发一条 SELECT，
+	// 拖拽排序保存 N 个供应商就是 N 次串行 DB 往返，全程压着 ps.mu
+	if aliasErr == nil {
+		if err := checkNamesNotOccupiedByAlias(aliasPlatform, providers); err != nil {
+			return err
+		}
+	}
 
 	// 验证每个 provider 的配置，并清除旧字段
 	validationErrors := make([]string, 0)
@@ -276,14 +285,6 @@ func (ps *ProviderService) saveProvidersLocked(kind string, providers []Provider
 		// 规则：name 不可修改（走独立 RenameProvider 路径,SaveProviders 只允许既有 name）
 		if oldName, ok := nameByID[p.ID]; ok && oldName != p.Name {
 			return fmt.Errorf("provider id %d 的 name 不可修改(请使用 RenameProvider)", p.ID)
-		}
-
-		// 规则:名字不得占用其他 provider 的 48h 活动 alias
-		// 防止 "A→B 后新建同名 A" 被 alias resolver 静默归并到 B 的历史里
-		if aliasErr == nil {
-			if err := checkNameNotOccupiedByAlias(aliasPlatform, p.ID, p.Name); err != nil {
-				return err
-			}
 		}
 
 		// 验证模型配置

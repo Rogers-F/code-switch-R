@@ -9,6 +9,7 @@ import (
 	"math"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -30,6 +31,17 @@ var trayIcons embed.FS
 type AppService struct {
 	App        *application.App
 	TrayWindow application.Window
+	// showMain 由 main() 注入带守卫的"显示并聚焦主窗口"闭包。
+	// 前端（托盘弹窗）必须经这里聚焦主窗口，不能直接调 runtime 的
+	// Window.Focus——alpha.38 的 Focus 没有 impl 判空，绕过守卫就绕回了闪退
+	showMain func(withFocus bool)
+}
+
+// FocusMainWindow 聚焦主窗口（统一守卫入口，供前端 RPC 调用）
+func (a *AppService) FocusMainWindow() {
+	if a.showMain != nil {
+		a.showMain(true)
+	}
 }
 
 // setApp 故意不导出：AppService 注册为 Wails 服务后，导出方法一律可被前端 RPC 调用，
@@ -80,6 +92,12 @@ func (a *AppService) OpenSecondWindow() {
 // logs any error that might occur.
 func main() {
 	appservice := &AppService{}
+	// shuttingDown：退出流程一旦开始，托盘点击等原生回调不该再触碰窗口——
+	// Wails alpha.38 的 WebviewWindow.Focus() 没有 impl 判空，窗口销毁后调用
+	// 会在 Win32 消息循环线程上 nil 解引用直接杀进程。
+	// appStarted：Run() 之前窗口 impl 尚未创建，同一批方法在启动早期同样会炸
+	var shuttingDown atomic.Bool
+	var appStarted atomic.Bool
 
 	// 【修复】第一步：初始化数据库（必须最先执行）
 	// 解决问题：InitGlobalDBQueue 依赖 xdb.DB("default")，但 xdb.Inits() 在 NewProviderRelayService 中
@@ -162,28 +180,32 @@ func main() {
 
 	// 启动黑名单自动恢复定时器（每分钟检查一次）
 	blacklistStopChan := make(chan struct{})
-	go func() {
+	services.SafeGo("blacklist-recover-timer", func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
-				if err := blacklistService.AutoRecoverExpired(); err != nil {
-					log.Printf("自动恢复黑名单失败: %v", err)
-				}
+				// 逐次兜底：单次恢复 panic 只丢这一轮，定时器继续存活
+				func() {
+					defer services.RecoverAndLog("blacklist-auto-recover")
+					if err := blacklistService.AutoRecoverExpired(); err != nil {
+						log.Printf("自动恢复黑名单失败: %v", err)
+					}
+				}()
 			case <-blacklistStopChan:
 				log.Println("✅ 黑名单定时器已停止")
 				return
 			}
 		}
-	}()
+	})
 
 	// 根据应用设置决定是否启动可用性监控（复用旧的 auto_connectivity_test 字段）。
 	// 延迟期间应用可能已经退出，必须能被 OnShutdown 取消，
 	// 否则巡检会在 StopBackgroundPolling 之后被重新拉起。
 	availabilityStopChan := make(chan struct{})
-	go func() {
+	services.SafeGo("availability-bootstrap", func() {
 		select {
 		case <-time.After(3 * time.Second): // 延迟3秒，等待应用初始化
 		case <-availabilityStopChan:
@@ -215,7 +237,7 @@ func main() {
 		} else {
 			log.Println("ℹ️  自动可用性监控已禁用（可在设置中开启）")
 		}
-	}()
+	})
 
 	//fmt.Println(clipboardService)
 	// Create a new Wails application by providing the necessary options.
@@ -273,6 +295,10 @@ func main() {
 
 	// 设置 NotificationService 的 App 引用，用于发送事件到前端
 	notificationService.SetApp(app)
+	// 窗口 impl 在 app.Run() 内部才创建；启动完成前禁止聚焦类调用
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		appStarted.Store(true)
+	})
 	// 设置 UpdateService 的 App 引用，用于发送更新事件
 	updateService.SetApp(app)
 	// 设置 ModelSyncService 的 App 引用，用于广播同步完成事件
@@ -300,14 +326,23 @@ func main() {
 	}
 
 	app.OnShutdown(func() {
+		// OnShutdown 由 Wails 经 InvokeSync 派发：内部 panic 会被 handlePanic
+		// 吞掉但跳过 wg.Done()，退出流程从此永久挂起（"点退出没反应"）。
+		// 必须在这里自兜底，保证 wg.Done 总能执行
+		defer services.RecoverAndLog("app-shutdown")
+		shuttingDown.Store(true)
 		log.Println("🛑 应用正在关闭，停止后台服务...")
 
 		// 1. 停止黑名单定时器，并取消尚在延迟等待的可用性监控启动
 		close(blacklistStopChan)
 		close(availabilityStopChan)
 
-		// 2. 停止健康检查轮询
+		// 2. 停止健康检查轮询与连通性测试定时器。
+		// 连通性定时器此前被遗漏：它会活过写入队列关闭继续触发 DB 写入
 		healthCheckService.StopBackgroundPolling()
+		if err := connectivityTestService.Stop(); err != nil {
+			log.Printf("connectivity test stop error: %v", err)
+		}
 		log.Println("✅ 健康检查服务已停止")
 
 		// 2.5 停止模型元数据同步（取消在途请求并等待退出）
@@ -363,18 +398,32 @@ func main() {
 	})
 	var mainWindowCentered bool
 	focusMainWindow := func() {
+		// Focus() 是 alpha.38 里唯一没有 impl 判空的窗口方法，启动前/退出期
+		// 调用必炸；全应用的 Focus 都必须收敛到这个带守卫的入口。
+		// recover 兜底覆盖竞态残余窗口
+		defer services.RecoverAndLog("focus-main-window")
+		if !appStarted.Load() || shuttingDown.Load() {
+			return
+		}
 		if runtime.GOOS == "windows" {
 			mainWindow.SetAlwaysOnTop(true)
 			mainWindow.Focus()
-			go func() {
+			services.SafeGo("focus-always-on-top-reset", func() {
 				time.Sleep(150 * time.Millisecond)
+				if shuttingDown.Load() {
+					return
+				}
 				mainWindow.SetAlwaysOnTop(false)
-			}()
+			})
 			return
 		}
 		mainWindow.Focus()
 	}
 	showMainWindow := func(withFocus bool) {
+		defer services.RecoverAndLog("show-main-window")
+		if shuttingDown.Load() {
+			return
+		}
 		if !mainWindowCentered {
 			mainWindow.Center()
 			mainWindowCentered = true
@@ -390,6 +439,7 @@ func main() {
 	}
 
 	showMainWindow(false)
+	appservice.showMain = showMainWindow
 
 	mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		mainWindow.Hide()
@@ -409,7 +459,7 @@ func main() {
 			return
 		}
 		if mainWindow.IsVisible() {
-			mainWindow.Focus()
+			focusMainWindow()
 			return
 		}
 		showMainWindow(true)
@@ -478,11 +528,13 @@ func main() {
 			systray.AttachWindow(trayWindow).WindowOffset(8)
 		} else {
 			systray.OnClick(func() {
+				defer services.RecoverAndLog("tray-click")
 				showMainWindow(true)
 			})
 		}
 
 		systray.OnRightClick(func() {
+			defer services.RecoverAndLog("tray-right-click")
 			systray.OpenMenu()
 		})
 	} else {
@@ -496,11 +548,19 @@ func main() {
 			systray.SetMenu(trayMenu)
 		}
 		refreshTrayMenu()
+		// 托盘回调运行在 Win32 消息循环线程上且 Wails 对左键路径没有兜底
+		// （右键/菜单路径有 handlePanic，左键 clickHandler 是裸调用），
+		// 任何 panic 都会直接杀进程，必须自兜底
 		systray.OnRightClick(func() {
+			defer services.RecoverAndLog("tray-right-click")
 			refreshTrayMenu()
 			systray.OpenMenu()
 		})
 		systray.OnClick(func() {
+			defer services.RecoverAndLog("tray-click")
+			if shuttingDown.Load() {
+				return
+			}
 			if !mainWindow.IsVisible() {
 				showMainWindow(true)
 				return
@@ -512,16 +572,6 @@ func main() {
 	}
 
 	appservice.setApp(app)
-
-	// Create a goroutine that emits an event containing the current time every second.
-	// The frontend can listen to this event and update the UI accordingly.
-	go func() {
-		// for {
-		// 	now := time.Now().Format(time.RFC1123)
-		// 	app.EmitEvent("time", now)
-		// 	time.Sleep(time.Second)
-		// }
-	}()
 
 	// Run the application. This blocks until the application has been exited.
 	err := app.Run()

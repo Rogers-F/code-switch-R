@@ -1158,6 +1158,20 @@ html.dark .mac-sidebar-item:hover {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
 }
 
+/* 拖拽落点指示线：明确"放在这张卡的前/后" */
+.automation-card.drop-before {
+  box-shadow: 0 -3px 0 0 var(--mac-accent), 0 15px 40px rgba(0, 0, 0, 0.08);
+}
+
+.automation-card.drop-after {
+  box-shadow: 0 3px 0 0 var(--mac-accent), 0 15px 40px rgba(0, 0, 0, 0.08);
+}
+
+/* 列表重排的 FLIP 位移动画（TransitionGroup move） */
+.card-flip-move {
+  transition: transform 0.18s ease;
+}
+
 .card-leading {
   display: flex;
   align-items: center;

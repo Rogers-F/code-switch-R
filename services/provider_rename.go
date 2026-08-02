@@ -235,6 +235,79 @@ func checkNameNotOccupiedByAlias(platform string, providerID int64, name string)
 	return nil
 }
 
+// checkNamesNotOccupiedByAlias 是 checkNameNotOccupiedByAlias 的批量版：
+// 单条 IN 查询取回全部活动 alias 后在内存比对，供 SaveProviders 持锁路径使用
+// （逐个查询在保存 N 个供应商时是 N 次串行 DB 往返）。
+// alias_name 列为 COLLATE NOCASE（SQLite 内建 NOCASE 仅折叠 ASCII A-Z），
+// 内存比对必须用同口径的 ASCII 折叠，不能用 Unicode 语义的 EqualFold/ToLower
+func checkNamesNotOccupiedByAlias(platform string, providers []Provider) error {
+	if len(providers) == 0 {
+		return nil
+	}
+	db, err := xdb.DB("default")
+	if err != nil {
+		return fmt.Errorf("获取数据库连接失败: %w", err)
+	}
+	placeholders := make([]string, 0, len(providers))
+	args := make([]interface{}, 0, len(providers)+1)
+	args = append(args, platform)
+	idByFoldedName := make(map[string]int64, len(providers))
+	for _, p := range providers {
+		if p.Name == "" {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, p.Name)
+		idByFoldedName[asciiFold(p.Name)] = p.ID
+	}
+	if len(placeholders) == 0 {
+		return nil
+	}
+	rows, err := db.Query(
+		`SELECT alias_name, provider_id FROM provider_alias
+		 WHERE platform = ? AND expires_at > CURRENT_TIMESTAMP
+		   AND alias_name IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return fmt.Errorf("查询 alias 占用失败: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var aliasName string
+		var owner int64
+		if err := rows.Scan(&aliasName, &owner); err != nil {
+			return fmt.Errorf("查询 alias 占用失败: %w", err)
+		}
+		id, ok := idByFoldedName[asciiFold(aliasName)]
+		if !ok {
+			continue
+		}
+		// alias 的 provider_id 等于该 provider 自身时不算冲突（自己的老别名）
+		if owner != id {
+			log.Printf("[Provider] 名字 %q 被其他 provider(id=%d)的 48h 活动别名占用,拒绝保存", aliasName, owner)
+			return fmt.Errorf("名字 %q 被其他供应商的历史别名暂时占用(48h 内),请换个名字或等待过期", aliasName)
+		}
+	}
+	return rows.Err()
+}
+
+// asciiFold 仅折叠 ASCII A-Z 到小写，逐字节，与 SQLite 内建 NOCASE 完全同口径
+func asciiFold(s string) string {
+	b := []byte(s)
+	changed := false
+	for i := 0; i < len(b); i++ {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+			changed = true
+		}
+	}
+	if !changed {
+		return s
+	}
+	return string(b)
+}
+
 // cleanupExpiredAliases 删除已过期的 alias 记录。
 func cleanupExpiredAliases() error {
 	db, err := xdb.DB("default")

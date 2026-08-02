@@ -363,10 +363,10 @@ const refreshAll = async () => {
 // 这里作为前端兜底：先查 localStorage 缓存同步拦截以消除闪烁，再异步拉设置校准。
 const redirectToMainWindow = async () => {
   try {
-    const mainWindow = Window.Get('main')
+    // 经后端带守卫的统一入口显示并聚焦主窗口：runtime 的 Window.Focus
+    // 在窗口生命周期边界上没有判空保护，直接调用可能击穿到进程崩溃
+    await Call.ByName('main.AppService.FocusMainWindow')
     const trayWindow = Window.Get('tray')
-    await mainWindow.Show()
-    await mainWindow.Focus()
     await trayWindow.Hide()
   } catch (e) {
     console.error('failed to redirect tray popup to main window', e)

@@ -679,6 +679,146 @@ export class CLITemplate {
     }
 }
 
+/**
+ * CaptureExportResult 导出结果
+ */
+export class CaptureExportResult {
+    "path": string;
+    "count": number;
+    "canceled": boolean;
+
+    /** Creates a new CaptureExportResult instance. */
+    constructor($$source: Partial<CaptureExportResult> = {}) {
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("count" in $$source)) {
+            this["count"] = 0;
+        }
+        if (!("canceled" in $$source)) {
+            this["canceled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CaptureExportResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CaptureExportResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CaptureExportResult($$parsedSource as Partial<CaptureExportResult>);
+    }
+}
+
+/**
+ * CaptureSessionInfo 会话列表项。Legacy=true 表示 0 号伪会话（迁移前旧数据）
+ */
+export class CaptureSessionInfo {
+    "id": number;
+    "started_at": string;
+    "ended_at": string;
+    "interrupted": boolean;
+    "legacy": boolean;
+    "active": boolean;
+    "request_count": number;
+
+    /** Creates a new CaptureSessionInfo instance. */
+    constructor($$source: Partial<CaptureSessionInfo> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("started_at" in $$source)) {
+            this["started_at"] = "";
+        }
+        if (!("ended_at" in $$source)) {
+            this["ended_at"] = "";
+        }
+        if (!("interrupted" in $$source)) {
+            this["interrupted"] = false;
+        }
+        if (!("legacy" in $$source)) {
+            this["legacy"] = false;
+        }
+        if (!("active" in $$source)) {
+            this["active"] = false;
+        }
+        if (!("request_count" in $$source)) {
+            this["request_count"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CaptureSessionInfo instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CaptureSessionInfo {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CaptureSessionInfo($$parsedSource as Partial<CaptureSessionInfo>);
+    }
+}
+
+/**
+ * CaptureSessionLogRow 会话内请求的轻量行（不携带 headers/body 大字段）
+ */
+export class CaptureSessionLogRow {
+    "id": number;
+    "created_at": string;
+    "platform": string;
+    "provider": string;
+    "model": string;
+    "http_code": number;
+    "is_stream": boolean;
+    "duration_sec": number;
+    "body_bytes": number;
+    "body_truncated": boolean;
+
+    /** Creates a new CaptureSessionLogRow instance. */
+    constructor($$source: Partial<CaptureSessionLogRow> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("provider" in $$source)) {
+            this["provider"] = "";
+        }
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("http_code" in $$source)) {
+            this["http_code"] = 0;
+        }
+        if (!("is_stream" in $$source)) {
+            this["is_stream"] = false;
+        }
+        if (!("duration_sec" in $$source)) {
+            this["duration_sec"] = 0;
+        }
+        if (!("body_bytes" in $$source)) {
+            this["body_bytes"] = 0;
+        }
+        if (!("body_truncated" in $$source)) {
+            this["body_truncated"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CaptureSessionLogRow instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CaptureSessionLogRow {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CaptureSessionLogRow($$parsedSource as Partial<CaptureSessionLogRow>);
+    }
+}
+
 export class ClaudeProxyStatus {
     "enabled": boolean;
     "base_url": string;

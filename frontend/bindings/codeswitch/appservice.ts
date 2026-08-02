@@ -5,6 +5,13 @@
 // @ts-ignore: Unused imports
 import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
+/**
+ * FocusMainWindow 聚焦主窗口（统一守卫入口，供前端 RPC 调用）
+ */
+export function FocusMainWindow(): $CancellablePromise<void> {
+    return $Call.ByID(3917281415);
+}
+
 export function OpenSecondWindow(): $CancellablePromise<void> {
     return $Call.ByID(1306260514);
 }

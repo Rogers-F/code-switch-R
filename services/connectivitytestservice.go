@@ -462,6 +462,8 @@ func (cts *ConnectivityTestService) TestAll(platform string) []ConnectivityResul
 		wg.Add(1)
 		go func(p Provider) {
 			defer wg.Done()
+			// 后台协程 panic 不恢复会直接杀进程；恢复后仅缺席本 provider 的结果
+			defer RecoverAndLog("connectivity-provider")
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -626,6 +628,7 @@ func (cts *ConnectivityTestService) startAutoTest() {
 	// 协程内若直接读 cts.stopChan，关-开快速切换时旧协程会读到新 channel 而永不退出，
 	// 造成双协程测试；且无锁读字段与持锁写构成数据竞争
 	go func(stop chan struct{}) {
+		defer RecoverAndLog("connectivity-scheduler")
 		// 启动时立即执行一次
 		cts.runAllPlatformTests()
 
@@ -635,7 +638,11 @@ func (cts *ConnectivityTestService) startAutoTest() {
 		for {
 			select {
 			case <-ticker.C:
-				cts.runAllPlatformTests()
+				// 逐轮兜底：单轮测试 panic 只丢当轮，定时器继续存活
+				func() {
+					defer RecoverAndLog("connectivity-round")
+					cts.runAllPlatformTests()
+				}()
 			case <-stop:
 				log.Println("[ConnectivityTest] 自动测试定时器已停止")
 				return

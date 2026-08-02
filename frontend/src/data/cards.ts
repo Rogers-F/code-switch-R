@@ -57,6 +57,8 @@ export type AutomationCard = {
   connectivityAuthType?: string
   // 上游协议类型（anthropic / openai）
   upstreamProtocol?: string
+  // Gemini 后端稳定 ID（仅 gemini 卡片携带；重排/更新按 ID 定位，名称仅作兜底）
+  geminiId?: string
 }
 
 export const automationCardGroups: Record<'claude' | 'codex', AutomationCard[]> = {

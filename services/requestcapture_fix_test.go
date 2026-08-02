@@ -537,7 +537,9 @@ func TestGeminiForwardCaptureFinalAttempt(t *testing.T) {
 // 开关关闭时不残留上一家的抓包内容；构造请求失败的提前返回也不会留下错配数据
 func TestGeminiForwardResetsCaptureBetweenAttempts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	setupGeminiTestHome(t)
+	// SetRequestCapture 现在会在开启时创建会话行，需要可用的隔离库
+	// （setupCaptureDBEnv 内部已隔离 HOME，无需再单独隔离 gemini 配置目录）
+	setupCaptureDBEnv(t)
 
 	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

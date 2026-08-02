@@ -80,10 +80,18 @@ type ProviderRelayService struct {
 	// 不一致即置空：清除动作之后才结束的在途长流请求，不得把已被用户删除的
 	// 那批抓包内容重新写回
 	captureClearGen atomic.Int64
-	// captureWriteMu 让"清除"与"落库提交"线性化：写侧以读锁包住
+	// captureWriteMu 让"清除/删除会话"与"落库提交"线性化：写侧以读锁包住
 	// 代次校验 + INSERT 提交，清除以写锁包住代次推进 + UPDATE。
 	// 消除"校验通过后、提交完成前恰好发生清除"的写回窗口
 	captureWriteMu sync.RWMutex
+	// captureSessionID 当前录制会话 id（0=无）。会话生命周期见 capturesession.go
+	captureSessionID atomic.Int64
+	// captureDeletedSessions 已删除会话的墓碑（captureWriteMu 保护）：
+	// 在途长流请求落库时若其会话已被单独删除，捕获内容自我置空。
+	// 会话只会由当前进程产生新行，进程生命期的墓碑即完备
+	captureDeletedSessions map[int64]struct{}
+	// captureRecoverOnce 每进程一次的遗留会话恢复（Start 可被前端重复触发）
+	captureRecoverOnce sync.Once
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -424,9 +432,10 @@ func NewProviderRelayService(providerService *ProviderService, geminiService *Ge
 			"codex":  nil,
 			"gemini": nil,
 		},
-		rrLastStart:       make(map[string]string),
-		endpointCooldowns: newEndpointCooldownStore(),
-		concurrency:       newConcurrencyLimiter(),
+		rrLastStart:            make(map[string]string),
+		endpointCooldowns:      newEndpointCooldownStore(),
+		concurrency:            newConcurrencyLimiter(),
+		captureDeletedSessions: make(map[int64]struct{}),
 	}
 }
 
@@ -663,63 +672,38 @@ func (prs *ProviderRelayService) BoundAddresses() []string {
 	return append([]string(nil), prs.boundAddrs...)
 }
 
-// SetRequestCapture 设置抓包模式开关。进程内状态、重启即关：
-// 这是调试态功能，不持久化可避免用户遗忘后长期落盘敏感请求内容
-func (prs *ProviderRelayService) SetRequestCapture(enabled bool) {
-	prs.captureRequests.Store(enabled)
-	if enabled {
-		fmt.Printf("[Capture] 抓包模式已开启：后续转发的出站请求头/正文（脱敏后）将写入请求日志\n")
-	} else {
-		fmt.Printf("[Capture] 抓包模式已关闭（历史抓包数据保留，可用清除功能删除）\n")
-	}
-}
-
 // GetRequestCapture 读取抓包模式开关
 func (prs *ProviderRelayService) GetRequestCapture() bool {
 	return prs.captureRequests.Load()
 }
 
-// ClearCapturedRequests 清空已捕获的请求详情（保留统计行本身）。
-// 同步直写（不走批量队列）：RPC 返回成功即代表已提交。返回清理行数
-func (prs *ProviderRelayService) ClearCapturedRequests() (int64, error) {
-	db, err := xdb.DB("default")
-	if err != nil {
-		return 0, err
-	}
-	// 先推进代次再清库（均在写锁内）：写侧的"校验代次 + 提交"持有读锁，
-	// 因此任何在途行要么在本次 UPDATE 之前已完整提交（被 UPDATE 清掉），
-	// 要么在写锁释放后才开始校验（读到新代次而自我置空）
-	prs.captureWriteMu.Lock()
-	defer prs.captureWriteMu.Unlock()
-	prs.captureClearGen.Add(1)
-	res, err := db.Exec(`UPDATE request_log SET request_headers = '', request_body = '', body_truncated = 0, body_bytes = 0 WHERE request_headers != '' OR request_body != '' OR body_truncated != 0 OR body_bytes != 0`)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := res.RowsAffected()
-	return affected, nil
-}
-
-// stripStaleCapture 落库前的代次校验：采集发生在请求开始，长流请求可能在
-// "清除抓包数据"之后才结束，代次不一致说明这批内容已被用户要求删除
+// stripStaleCapture 落库前的校验：采集发生在请求开始，长流请求可能在
+// "清空全部"（代次不一致）或"删除所属会话"（墓碑命中）之后才结束，
+// 两种情况都说明这批内容已被用户要求删除，置空且摘除会话关联。
+// 采集快照化后合法捕获行必有非零会话 id，携带内容却无会话的行只能是
+// 竞态残迹，一并置空（否则会混进 0 号旧数据桶）。
+// 调用方需持有 captureWriteMu 读锁（墓碑 map 由该锁保护）
 func (prs *ProviderRelayService) stripStaleCapture(requestLog *ReqeustLog) {
-	if requestLog.captureGen != prs.captureClearGen.Load() {
+	_, deleted := prs.captureDeletedSessions[requestLog.CaptureSessionID]
+	orphan := requestLog.CaptureSessionID == 0 && requestLogHasCapture(requestLog)
+	if requestLog.captureGen != prs.captureClearGen.Load() || deleted || orphan {
 		requestLog.RequestHeaders = ""
 		requestLog.RequestBody = ""
 		requestLog.BodyTruncated = false
 		requestLog.BodyBytes = 0
+		requestLog.CaptureSessionID = 0
 	}
 }
 
-// requestLogInsertSQL 两条写入路径共用的 18 列 INSERT，避免列清单分叉
+// requestLogInsertSQL 两条写入路径共用的 19 列 INSERT，避免列清单分叉
 const requestLogInsertSQL = `
 	INSERT INTO request_log (
 		platform, model, provider, http_code,
 		input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
 		reasoning_tokens, is_stream, duration_sec,
 		ephemeral_5m_tokens, ephemeral_1h_tokens, service_tier,
-		request_headers, request_body, body_truncated, body_bytes
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		request_headers, request_body, body_truncated, body_bytes, capture_session_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 func requestLogInsertArgs(requestLog *ReqeustLog) []interface{} {
@@ -730,7 +714,7 @@ func requestLogInsertArgs(requestLog *ReqeustLog) []interface{} {
 		boolToInt(requestLog.IsStream), requestLog.DurationSec,
 		requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens, requestLog.ServiceTier,
 		requestLog.RequestHeaders, requestLog.RequestBody,
-		boolToInt(requestLog.BodyTruncated), requestLog.BodyBytes,
+		boolToInt(requestLog.BodyTruncated), requestLog.BodyBytes, requestLog.CaptureSessionID,
 	}
 }
 
@@ -835,6 +819,8 @@ func (prs *ProviderRelayService) Stop() error {
 	prs.serverMu.Unlock()
 
 	if server == nil {
+		// 代理本就未运行；若录制开关还开着（异常路径），同样封存会话
+		prs.closeActiveCaptureSession()
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -848,6 +834,8 @@ func (prs *ProviderRelayService) Stop() error {
 			fmt.Printf("[WARN] 强制关闭代理失败: %v\n", closeErr)
 		}
 	}
+	// 代理停了就不再有新流量，正常封存录制中的会话（区别于崩溃后的"已中断"）
+	prs.closeActiveCaptureSession()
 	return err
 }
 
@@ -1616,9 +1604,11 @@ func (prs *ProviderRelayService) forwardRequest(
 	// 抓包模式：录制终态出站 headers/body（映射/清理/认证注入均已完成，
 	// 即实际进 transport 前的应用层形态）。地址池内各地址仅 URL 不同，采集一次。
 	// 代次先于开关与内容读取：清除/关停若与采集竞态，只会让本行被误清（安全方向）
-	captureGen := prs.captureClearGen.Load()
-	if prs.captureRequests.Load() {
-		requestLog.captureGen = captureGen
+	// 抓包状态一次性快照（读锁内）：开关/会话/代次分开裸读会在与关闭、
+	// 清除的竞态下拼出错位组合
+	if enabled, sessionID, gen := prs.captureSnapshot(); enabled {
+		requestLog.captureGen = gen
+		requestLog.CaptureSessionID = sessionID
 		requestLog.RequestHeaders = maskCaptureHeaders(headers, provider.ConnectivityAuthType, provider.APIKey)
 		requestLog.RequestBody, requestLog.BodyTruncated, requestLog.BodyBytes = redactCaptureBody(bodyBytes, provider.APIKey)
 	}
@@ -2053,6 +2043,7 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		{"request_body", "TEXT DEFAULT ''"},
 		{"body_truncated", "INTEGER DEFAULT 0"},
 		{"body_bytes", "INTEGER DEFAULT 0"},
+		{"capture_session_id", "INTEGER DEFAULT 0"},
 	}
 	for _, m := range migrations {
 		if err := ensureRequestLogColumn(db, m.column, m.definition); err != nil {
@@ -2060,7 +2051,8 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		}
 	}
 
-	return nil
+	// 抓包会话表与索引（依赖 capture_session_id 列已就位）
+	return ensureCaptureSessionTable(db)
 }
 
 // protocolConvertHook 协议转换 Hook：将 OpenAI SSE 转换为 Anthropic SSE，并提取 usage
@@ -2157,6 +2149,8 @@ type ReqeustLog struct {
 	RequestBody    string `json:"-"`
 	BodyTruncated  bool   `json:"-"`
 	BodyBytes      int    `json:"-"`
+	// CaptureSessionID 所属抓包会话（0=非会话行/旧数据），见 capturesession.go
+	CaptureSessionID int64 `json:"-"`
 	// captureGen 采集时的清除代次（stripStaleCapture 用，不落库不序列化）
 	captureGen int64
 }
@@ -3055,6 +3049,7 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	requestLog.RequestBody = ""
 	requestLog.BodyTruncated = false
 	requestLog.BodyBytes = 0
+	requestLog.CaptureSessionID = 0
 	// 优先从 endpoint 提取模型名（如 gemini-2.5-pro），否则回退到 provider.Model
 	if extractedModel := extractGeminiModelFromEndpoint(endpoint); extractedModel != "" {
 		requestLog.Model = extractedModel
@@ -3091,10 +3086,10 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	// 抓包模式：字段已在本次尝试开头统一重置，这里按开关采集终态出站请求
 	// （x-goog-api-key 注入完成、进入 transport 之前的应用层形态）。
-	// 代次先于开关与内容读取：与清除/关停竞态时只会让本行被误清（安全方向）
-	captureGen := prs.captureClearGen.Load()
-	if prs.captureRequests.Load() {
-		requestLog.captureGen = captureGen
+	// 状态一次性快照（读锁内），避免与关闭/清除竞态拼出错位组合
+	if enabled, sessionID, gen := prs.captureSnapshot(); enabled {
+		requestLog.captureGen = gen
+		requestLog.CaptureSessionID = sessionID
 		flat := make(map[string]string, len(req.Header))
 		for k, vs := range req.Header {
 			// 多值头合并保留（transport 会全部发送，丢值会让详情失真）

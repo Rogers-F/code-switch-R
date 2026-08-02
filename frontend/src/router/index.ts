@@ -8,6 +8,7 @@ import PromptsPage from '../components/Prompts/Index.vue'
 import SpeedTestPage from '../components/SpeedTest/Index.vue'
 import EnvCheckPage from '../components/EnvCheck/Index.vue'
 import ConsolePage from '../components/Console/Index.vue'
+import CapturePage from '../components/Capture/Index.vue'
 import AvailabilityPage from '../components/Availability/Index.vue'
 import TrayPage from '../components/Tray/Index.vue'
 
@@ -20,6 +21,7 @@ const routes = [
   { path: '/speedtest', component: SpeedTestPage },
   { path: '/env', component: EnvCheckPage },
   { path: '/logs', component: LogsPage },
+  { path: '/capture', component: CapturePage },
   { path: '/console', component: ConsolePage },
   { path: '/settings', component: GeneralPage },
   { path: '/tray', component: TrayPage },

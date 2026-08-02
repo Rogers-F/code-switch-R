@@ -528,10 +528,19 @@ func (hcs *HealthCheckService) checkAllProviders(platform string) []HealthCheckR
 		wg.Add(1)
 		go func(p Provider) {
 			defer wg.Done()
+			// panic 必须兜在 wg.Done 之后注册：这里 panic 若不恢复会直接杀进程；
+			// 恢复后本 provider 的结果缺席，但整批检查照常完成
+			defer RecoverAndLog("healthcheck-provider")
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			result := hcs.checkProvider(ctx, p, platform)
+			if result == nil {
+				// 现有实现靠"探测地址池至少一个元素"保证非 nil，属约定而非代码保证；
+				// 判空兜底避免该约定被破坏时在后台协程里空指针
+				log.Printf("[HealthCheck] %s/%s: 探测未返回结果", platform, p.Name)
+				return
+			}
 
 			// 保存结果
 			if err := hcs.saveResult(result); err != nil {
@@ -1055,9 +1064,16 @@ func (hcs *HealthCheckService) StartBackgroundPolling() {
 	// 协程内若直接读 hcs.stopChan，Stop→Start 快速切换时旧协程会读到新 channel 而永不退出，
 	// 造成双协程巡检（失败计数翻倍、历史重复写入）；且无锁读字段与 Start 持锁写构成数据竞争
 	go func(stop chan struct{}, interval time.Duration) {
-		// 启动时延迟随机时间（0-10s），避免整点风暴
+		defer RecoverAndLog("healthcheck-scheduler")
+		// 启动时延迟随机时间（0-10s），避免整点风暴。
+		// 抖动等待必须响应 stop：退出流程若落在这个窗口内，
+		// 旧写法会在 StopBackgroundPolling 之后照样拉起一轮全量巡检
 		jitter := time.Duration(rand.Intn(10000)) * time.Millisecond
-		time.Sleep(jitter)
+		select {
+		case <-time.After(jitter):
+		case <-stop:
+			return
+		}
 
 		// 立即执行一次
 		hcs.runAllPlatformChecks()
@@ -1069,7 +1085,11 @@ func (hcs *HealthCheckService) StartBackgroundPolling() {
 		for {
 			select {
 			case <-ticker.C:
-				hcs.runAllPlatformChecks()
+				// 逐轮兜底：单轮巡检 panic 只丢当轮，调度循环继续存活
+				func() {
+					defer RecoverAndLog("healthcheck-round")
+					hcs.runAllPlatformChecks()
+				}()
 			case <-stop:
 				log.Println("[HealthCheck] 后台巡检已停止")
 				return

@@ -184,54 +184,14 @@
       </div>
     </BaseModal>
 
-    <!-- 抓包详情弹窗 -->
-    <BaseModal
+    <!-- 抓包详情弹窗（与抓包页共用组件） -->
+    <CaptureDetailModal
       :open="captureDetailModal.open"
-      :title="t('components.logs.captureDetail.title')"
+      :loading="captureDetailModal.loading"
+      :error="captureDetailModal.error"
+      :data="captureDetailModal.data"
       @close="closeCaptureDetail"
-    >
-      <div class="capture-detail-modal">
-        <p v-if="captureDetailModal.loading" class="capture-detail-hint">
-          {{ t('components.logs.loading') }}
-        </p>
-        <p v-else-if="captureDetailModal.error" class="capture-detail-hint capture-detail-error">
-          {{ t('components.logs.captureDetail.loadFailed') }}{{ captureDetailModal.error }}
-        </p>
-        <template v-else-if="captureDetailModal.data">
-          <div
-            v-if="!captureDetailModal.data.request_headers && !captureDetailModal.data.request_body"
-            class="capture-detail-hint"
-          >
-            {{ t('components.logs.captureDetail.empty') }}
-          </div>
-          <template v-else>
-            <section v-if="captureDetailModal.data.request_headers" class="capture-section">
-              <div class="capture-section__header">
-                <h4>{{ t('components.logs.captureDetail.headers') }}</h4>
-                <button
-                  class="capture-copy-btn"
-                  @click="copyCaptureText(prettyJSON(captureDetailModal.data.request_headers))"
-                >{{ t('components.logs.captureDetail.copy') }}</button>
-              </div>
-              <pre class="capture-pre">{{ prettyJSON(captureDetailModal.data.request_headers) }}</pre>
-            </section>
-            <section v-if="captureDetailModal.data.request_body" class="capture-section">
-              <div class="capture-section__header">
-                <h4>{{ t('components.logs.captureDetail.body') }}</h4>
-                <button
-                  class="capture-copy-btn"
-                  @click="copyCaptureText(captureDetailModal.data.request_body)"
-                >{{ t('components.logs.captureDetail.copy') }}</button>
-              </div>
-              <p v-if="captureDetailModal.data.body_truncated" class="capture-detail-hint">
-                {{ t('components.logs.captureDetail.truncated', { bytes: captureDetailModal.data.body_bytes }) }}
-              </p>
-              <pre class="capture-pre">{{ captureDetailModal.data.request_body }}</pre>
-            </section>
-          </template>
-        </template>
-      </div>
-    </BaseModal>
+    />
     </div>
   </div>
 </template>
@@ -241,6 +201,7 @@ import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
+import CaptureDetailModal from '../common/CaptureDetailModal.vue'
 import {
   fetchRequestLogs,
   fetchLogProviders,
@@ -310,29 +271,24 @@ const captureDetailModal = reactive<{
   data: null,
 })
 
-// 尝试把 JSON 文本格式化为缩进形式，非 JSON 原样返回。
-// 仅用于请求头（值全是字符串，无精度问题）；正文必须原样展示，
-// JSON.parse/stringify 会把超过 2^53 的整数改值
-const prettyJSON = (text: string): string => {
-  if (!text) return ''
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
-}
+// 详情请求序号：快速连开两个详情时，先发慢返的旧响应不得覆盖新弹窗
+let captureDetailSeq = 0
 
 const openCaptureDetail = async (item: RequestLog) => {
+  const seq = ++captureDetailSeq
   captureDetailModal.open = true
   captureDetailModal.loading = true
   captureDetailModal.error = ''
   captureDetailModal.data = null
   try {
-    captureDetailModal.data = await fetchRequestLogDetail(item.id)
+    const data = await fetchRequestLogDetail(item.id)
+    if (seq !== captureDetailSeq) return
+    captureDetailModal.data = data
   } catch (error) {
+    if (seq !== captureDetailSeq) return
     captureDetailModal.error = String((error as Error)?.message ?? error)
   } finally {
-    captureDetailModal.loading = false
+    if (seq === captureDetailSeq) captureDetailModal.loading = false
   }
 }
 
@@ -340,14 +296,6 @@ const closeCaptureDetail = () => {
   captureDetailModal.open = false
   captureDetailModal.data = null
   captureDetailModal.error = ''
-}
-
-const copyCaptureText = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-  } catch (error) {
-    console.error('复制失败:', error)
-  }
 }
 
 // 打开金额明细弹窗

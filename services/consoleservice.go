@@ -64,9 +64,21 @@ func (cs *ConsoleService) captureStdout() {
 	cs.oldStdout = os.Stdout
 	cs.oldStderr = os.Stderr
 
-	// 创建管道
-	stdoutReader, stdoutWriter, _ := os.Pipe()
-	stderrReader, stderrWriter, _ := os.Pipe()
+	// 创建管道。任一失败都放弃接管：半接管（只替换 stdout 不替换 stderr
+	// 或反之）会让日志流向不一致，且失败时返回的 nil *os.File 会在
+	// 后续 Read/Write 上空指针
+	stdoutReader, stdoutWriter, errOut := os.Pipe()
+	if errOut != nil {
+		fmt.Fprintf(cs.oldStderr, "控制台日志捕获初始化失败(stdout pipe): %v\n", errOut)
+		return
+	}
+	stderrReader, stderrWriter, errErr := os.Pipe()
+	if errErr != nil {
+		stdoutReader.Close()
+		stdoutWriter.Close()
+		fmt.Fprintf(cs.oldStderr, "控制台日志捕获初始化失败(stderr pipe): %v\n", errErr)
+		return
+	}
 
 	// 替换标准输出
 	os.Stdout = stdoutWriter

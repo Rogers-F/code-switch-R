@@ -95,6 +95,9 @@ type DBWriteQueue struct {
 	queue        chan *WriteTask
 	batchQueue   chan *WriteTask // 批量提交队列
 	shutdownChan chan struct{}
+	// shutdownOnce 保证 close(shutdownChan) 只执行一次：Shutdown 是导出方法，
+	// 重复调用不该变成 close of closed channel 的进程级 panic
+	shutdownOnce sync.Once
 	wg           sync.WaitGroup
 
 	// 关闭状态标志（防止 Shutdown 后仍可入队）
@@ -168,63 +171,24 @@ func NewDBWriteQueue(db *sql.DB, queueSize int, enableBatch bool) *DBWriteQueue 
 	return q
 }
 
-// worker 单线程顺序处理所有写入
+// worker 单线程顺序处理所有写入。
+// panic 恢复放在 processTask（逐任务），worker 循环本身没有可 panic 的操作，
+// 因此 worker 永不因 panic 退出——旧版"recover 后 wg.Add(1) 重启"的写法
+// 会与 Shutdown 的 wg.Wait 并发触发 WaitGroup misuse（不可恢复的 fatal）。
 func (q *DBWriteQueue) worker() {
 	defer q.wg.Done()
-
-	var currentTask *WriteTask // 命名变量，用于在 panic 时返回错误
-
-	// panic 保护：确保 worker 不会因未捕获的 panic 而崩溃
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("🚨 数据库写入队列 worker panic: %v\n", r)
-
-			// 关键修复：如果 panic 时正在处理任务，必须返回错误，否则调用方永久阻塞
-			if currentTask != nil {
-				currentTask.Result <- fmt.Errorf("数据库写入 panic: %v", r)
-				close(currentTask.Result)
-			}
-
-			// 等待1秒后重启，避免快速循环（如果是系统性问题）
-			time.Sleep(1 * time.Second)
-
-			// 自动重启 worker
-			q.wg.Add(1)
-			go q.worker()
-		}
-	}()
 
 	for {
 		select {
 		case task := <-q.queue:
-			currentTask = task // 记录当前任务，用于 panic 时返回错误
-
-			start := time.Now()
-			_, err := q.db.Exec(task.SQL, task.Args...)
-
-			// 更新统计（单次写入，count=1）
-			q.updateStats(1, time.Since(start), err)
-
-			// 返回结果
-			task.Result <- err
-			close(task.Result)
-
-			currentTask = nil // 清空当前任务（防止下一次 panic 误用）
+			q.processTask(task)
 
 		case <-q.shutdownChan:
 			// 排空 queue 中的所有剩余任务
 			for {
 				select {
 				case task := <-q.queue:
-					currentTask = task // shutdown 排空时也需要跟踪，防止 panic
-
-					start := time.Now()
-					_, err := q.db.Exec(task.SQL, task.Args...)
-					q.updateStats(1, time.Since(start), err)
-					task.Result <- err
-					close(task.Result)
-
-					currentTask = nil
+					q.processTask(task)
 				default:
 					// queue 已空，安全退出
 					return
@@ -234,34 +198,35 @@ func (q *DBWriteQueue) worker() {
 	}
 }
 
-// batchWorker 批量提交 worker（可选）
-func (q *DBWriteQueue) batchWorker() {
-	defer q.wg.Done()
-
-	var currentBatch []*WriteTask // 命名变量，用于在 panic 时返回错误
-
-	// panic 保护：确保 batchWorker 不会因未捕获的 panic 而崩溃
+// processTask 执行单个写入任务并投递结果，自带 panic 恢复。
+// 结果通道缓冲为 1、每个消费者至多读一次，因此只发送不 close：
+// close 不带来任何收益，反而是"向已 close 通道二次投递"这类致命 panic 的唯一来源
+func (q *DBWriteQueue) processTask(task *WriteTask) {
+	start := time.Now()
+	delivered := false
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("🚨 数据库批量写入队列 worker panic: %v\n", r)
-
-			// 关键修复：如果 panic 时正在处理批次，必须给所有任务返回错误
-			if len(currentBatch) > 0 {
-				panicErr := fmt.Errorf("批量写入 panic: %v", r)
-				for _, task := range currentBatch {
-					task.Result <- panicErr
-					close(task.Result)
-				}
+			fmt.Printf("🚨 数据库写入队列 worker panic: %v\n", r)
+			if !delivered {
+				task.Result <- fmt.Errorf("数据库写入 panic: %v", r)
 			}
-
-			// 等待1秒后重启，避免快速循环（如果是系统性问题）
-			time.Sleep(1 * time.Second)
-
-			// 自动重启 batchWorker
-			q.wg.Add(1)
-			go q.batchWorker()
 		}
 	}()
+
+	_, err := q.db.Exec(task.SQL, task.Args...)
+
+	// 更新统计（单次写入，count=1）。统计 panic 时结果尚未投递，recover 会补投
+	q.updateStats(1, time.Since(start), err)
+
+	task.Result <- err
+	delivered = true
+}
+
+// batchWorker 批量提交 worker（可选）。
+// panic 恢复放在 commitBatch（逐批次），循环本身没有可 panic 的操作，
+// 因此 batchWorker 永不因 panic 退出（原因同 worker：重启会撞 WaitGroup misuse）
+func (q *DBWriteQueue) batchWorker() {
+	defer q.wg.Done()
 
 	ticker := time.NewTicker(100 * time.Millisecond) // 每100ms批量提交一次
 	defer ticker.Stop()
@@ -275,27 +240,21 @@ func (q *DBWriteQueue) batchWorker() {
 
 			// 批次达到上限（50条）或超时，立即提交
 			if len(batch) >= 50 {
-				currentBatch = batch // 记录当前批次，用于 panic 时返回错误
 				q.commitBatch(batch)
 				batch = nil
-				currentBatch = nil
 			}
 
 		case <-ticker.C:
 			if len(batch) > 0 {
-				currentBatch = batch
 				q.commitBatch(batch)
 				batch = nil
-				currentBatch = nil
 			}
 
 		case <-q.shutdownChan:
 			// 1. 先提交当前批次
 			if len(batch) > 0 {
-				currentBatch = batch
 				q.commitBatch(batch)
 				batch = nil
-				currentBatch = nil
 			}
 
 			// 2. 排空 batchQueue 中的所有剩余任务
@@ -305,17 +264,13 @@ func (q *DBWriteQueue) batchWorker() {
 					batch = append(batch, task)
 					// 每收集50个或队列空了就提交一次
 					if len(batch) >= 50 {
-						currentBatch = batch
 						q.commitBatch(batch)
 						batch = nil
-						currentBatch = nil
 					}
 				default:
 					// batchQueue 已空，提交最后一批
 					if len(batch) > 0 {
-						currentBatch = batch
 						q.commitBatch(batch)
-						currentBatch = nil
 					}
 					return
 				}
@@ -324,56 +279,66 @@ func (q *DBWriteQueue) batchWorker() {
 	}
 }
 
-// commitBatch 批量提交（使用事务）
+// commitBatch 批量提交（使用事务），自带 panic 恢复。
+// 顺序刻意为"统计在前、投递在后"：统计（statsMu/除法/环形缓冲）panic 时
+// 结果尚未投递，recover 按 delivered 游标补投剩余任务。
+// 结果通道只发送不 close（缓冲 1、单次消费），彻底移除二次投递的 panic 面
 func (q *DBWriteQueue) commitBatch(tasks []*WriteTask) {
 	start := time.Now()
+	delivered := 0
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("🚨 数据库批量写入队列 worker panic: %v\n", r)
+			panicErr := fmt.Errorf("批量写入 panic: %v", r)
+			for _, task := range tasks[delivered:] {
+				task.Result <- panicErr
+			}
+		}
+	}()
 
-	// 辅助函数：给所有任务返回结果（成功或失败）
-	sendResultToAll := func(err error) {
-		for _, task := range tasks {
-			task.Result <- err
-			close(task.Result)
-		}
-		// 更新统计（批量提交，count=任务数）
-		q.updateStats(len(tasks), time.Since(start), err)
-		if err == nil {
-			q.statsMu.Lock()
-			q.stats.BatchCommits++
-			q.statsMu.Unlock()
-		}
+	firstErr := q.execBatchTx(tasks)
+
+	// 更新统计（批量提交，count=任务数）
+	q.updateStats(len(tasks), time.Since(start), firstErr)
+	if firstErr == nil {
+		q.statsMu.Lock()
+		q.stats.BatchCommits++
+		q.statsMu.Unlock()
 	}
 
+	for _, task := range tasks {
+		task.Result <- firstErr
+		delivered++
+	}
+}
+
+// execBatchTx 在单个事务内执行整批任务，返回批次的统一结果错误
+func (q *DBWriteQueue) execBatchTx(tasks []*WriteTask) error {
 	tx, err := q.db.Begin()
 	if err != nil {
 		// 事务开启失败，所有任务都失败
-		sendResultToAll(err)
-		return
+		return err
 	}
 	defer tx.Rollback()
 
 	// 执行所有任务，记录第一个错误
 	var firstErr error
 	for _, task := range tasks {
-		_, err := tx.Exec(task.SQL, task.Args...)
-		if err != nil && firstErr == nil {
+		if _, err := tx.Exec(task.SQL, task.Args...); err != nil && firstErr == nil {
 			firstErr = err // 记录第一个错误，但继续执行以清理资源
 		}
 	}
 
 	// 如果有任何错误，回滚并通知所有任务
 	if firstErr != nil {
-		sendResultToAll(fmt.Errorf("批量提交失败: %w", firstErr))
-		return
+		return fmt.Errorf("批量提交失败: %w", firstErr)
 	}
 
 	// 提交事务
 	if err := tx.Commit(); err != nil {
-		sendResultToAll(fmt.Errorf("事务提交失败: %w", err))
-		return
+		return fmt.Errorf("事务提交失败: %w", err)
 	}
-
-	// 全部成功
-	sendResultToAll(nil)
+	return nil
 }
 
 // enqueue 在 closeMu 读锁内完成 closed 检查与入队，与 Shutdown 的写锁互斥。
@@ -566,16 +531,19 @@ func (q *DBWriteQueue) ExecBatchCtx(ctx context.Context, sql string, args ...int
 	}
 }
 
-// Shutdown 优雅关闭
+// Shutdown 优雅关闭。可安全重复调用：关闭动作由 shutdownOnce 保证只执行一次，
+// 后续调用直接进入等待/超时逻辑
 func (q *DBWriteQueue) Shutdown(timeout time.Duration) error {
-	// 关键修复：写锁内置位关闭标志，与 enqueue 的读锁互斥，
-	// 保证 close(shutdownChan) 时不再有在途入队，worker 排空后队列必为空
-	q.closeMu.Lock()
-	q.closed.Store(true)
-	q.closeMu.Unlock()
+	q.shutdownOnce.Do(func() {
+		// 关键修复：写锁内置位关闭标志，与 enqueue 的读锁互斥，
+		// 保证 close(shutdownChan) 时不再有在途入队，worker 排空后队列必为空
+		q.closeMu.Lock()
+		q.closed.Store(true)
+		q.closeMu.Unlock()
 
-	// 然后关闭 shutdownChan，通知 worker 排空队列
-	close(q.shutdownChan)
+		// 然后关闭 shutdownChan，通知 worker 排空队列
+		close(q.shutdownChan)
+	})
 
 	done := make(chan struct{})
 	go func() {

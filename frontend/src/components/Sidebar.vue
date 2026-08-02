@@ -88,6 +88,7 @@ const navItems: NavItem[] = [
   { path: '/speedtest', icon: 'zap', labelKey: 'sidebar.speedtest', isNew: true },
   { path: '/env', icon: 'search', labelKey: 'sidebar.env', isNew: true },
   { path: '/logs', icon: 'bar-chart', labelKey: 'sidebar.logs' },
+  { path: '/capture', icon: 'search', labelKey: 'sidebar.capture', isNew: true },
   { path: '/console', icon: 'terminal', labelKey: 'sidebar.console' },
   { path: '/settings', icon: 'settings', labelKey: 'sidebar.settings' },
 ]

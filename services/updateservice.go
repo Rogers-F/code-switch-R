@@ -335,8 +335,22 @@ func (us *UpdateService) DownloadUpdate() error {
 	targetInfo := us.targetInfo
 	us.mu.Unlock()
 
-	// 异步下载
-	go us.doDownload(ctx, targetInfo)
+	// 异步下载。panic 兜底并把状态收敛到 failed：
+	// 若只恢复不清状态，state 会永远卡在 downloading，更新功能从此不可用
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				RecoverFromPanicValue("update-download", r)
+				us.mu.Lock()
+				us.state = StateError
+				us.lastError = fmt.Sprintf("下载过程异常: %v", r)
+				us.errorOp = "download"
+				us.mu.Unlock()
+				us.emitState()
+			}
+		}()
+		us.doDownload(ctx, targetInfo)
+	}()
 
 	return nil
 }

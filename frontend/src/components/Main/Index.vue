@@ -291,7 +291,7 @@
         </p>
       </div>
 
-      <div class="automation-list" @dragover.prevent>
+      <TransitionGroup tag="div" name="card-flip" class="automation-list">
         <article
           v-for="card in activeCards"
           :key="card.id"
@@ -299,13 +299,16 @@
           :class="[
             'automation-card',
             { dragging: draggingId === card.id },
+            { 'drop-before': dropIndicator.id === card.id && dropIndicator.before },
+            { 'drop-after': dropIndicator.id === card.id && !dropIndicator.before },
             { 'is-last-used': isLastUsedProvider(card.name) },
             { 'is-highlighted': highlightedProvider === card.name }
           ]"
           draggable="true"
           @dragstart="onDragStart(card.id)"
           @dragend="onDragEnd"
-          @drop="onDrop(card.id)"
+          @dragover="onCardDragOver(card, $event)"
+          @drop="onDrop(card.id, $event)"
         >
           <!-- 正在使用标签 -->
           <span v-if="isLastUsedProvider(card.name)" class="last-used-badge">
@@ -511,7 +514,7 @@
             </button>
           </div>
         </article>
-      </div>
+      </TransitionGroup>
 
       <!-- 自定义 CLI 工具配置文件编辑器 -->
       <CustomCliConfigEditor
@@ -1579,6 +1582,7 @@ const emptyRecordToUndefined = <T extends Record<string, any>>(obj?: T | null): 
 // Gemini Provider 到 AutomationCard 的转换
 const geminiToCard = (provider: GeminiProvider, index: number): AutomationCard => ({
   id: 300 + index, // Gemini 使用 300+ 的 ID 范围
+  geminiId: provider.id, // 后端稳定 ID：重排/更新按它定位，不再靠名称猜
   name: provider.name,
   apiUrl: provider.baseUrl || '',
   apiKey: provider.apiKey || '',
@@ -1618,6 +1622,8 @@ const cardToGemini = (card: AutomationCard, original: GeminiProvider): GeminiPro
 const serializeProviders = (providers: AutomationCard[]) =>
   providers.map((provider) => ({
     ...provider,
+    // gemini 专用字段不落入 claude/codex 配置文件
+    geminiId: undefined,
     // 备用地址：空数组不落盘
     fallbackApiUrls: provider.fallbackApiUrls && provider.fallbackApiUrls.length > 0
       ? provider.fallbackApiUrls
@@ -1661,7 +1667,7 @@ const geminiProvidersCache = ref<GeminiProvider[]>([])
 const findGeminiProviderByName = (name: string) =>
   geminiProvidersCache.value.find(p => p.name === name)
 
-const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; error?: string }> => {
+const persistProvidersNow = async (tabId: ProviderTab): Promise<{ ok: boolean; error?: string }> => {
   try {
     if (tabId === 'others') {
       // 'others' Tab 需要使用 "custom:{toolId}" 格式
@@ -1671,20 +1677,23 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
       }
       await SaveProviders(getCustomProviderKind(selectedToolId.value), serializeProviders(cards.others))
     } else if (tabId === 'gemini') {
-      // Gemini 使用独立的保存逻辑
-      // 1. 收集当前卡片的 name 集合
-      const currentNames = new Set(cards.gemini.map(c => c.name))
+      // Gemini 使用独立的保存逻辑。定位一律优先后端稳定 ID（geminiId），
+      // 名称仅作旧数据兜底：Gemini 后端只校验 ID 唯一性，重名时按名匹配会张冠李戴
+      const cardIds = new Set(cards.gemini.map(c => c.geminiId).filter(Boolean))
+      const cardNamesWithoutId = new Set(cards.gemini.filter(c => !c.geminiId).map(c => c.name))
 
-      // 2. 删除不在当前卡片中的 provider
+      // 1. 删除不再被任何卡片引用的 provider
       for (const cached of geminiProvidersCache.value) {
-        if (!currentNames.has(cached.name)) {
+        if (!cardIds.has(cached.id) && !cardNamesWithoutId.has(cached.name)) {
           await DeleteGeminiProvider(cached.id)
         }
       }
 
-      // 3. 添加或更新 provider
+      // 2. 添加或更新 provider
       for (const card of cards.gemini) {
-        const original = geminiProvidersCache.value.find(p => p.name === card.name)
+        const original = card.geminiId
+          ? geminiProvidersCache.value.find(p => p.id === card.geminiId)
+          : geminiProvidersCache.value.find(p => p.name === card.name)
 
         if (original) {
           // 已存在的 provider，更新
@@ -1708,15 +1717,18 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
         }
       }
 
-      // 4. 刷新缓存以获取最新的 ID
+      // 3. 刷新缓存以获取最新的 ID，并把新 ID 回写到卡片
       const updatedProviders = await GetGeminiProviders()
       geminiProvidersCache.value = updatedProviders
 
-      // 5. 保存排序：按 cards.gemini 的顺序构建 ID 列表
+      // 4. 保存排序：优先按卡片携带的稳定 ID，新增卡片按名称兑换新 ID
       const orderedIds: string[] = []
       for (const card of cards.gemini) {
-        const provider = updatedProviders.find(p => p.name === card.name)
+        const provider = card.geminiId
+          ? updatedProviders.find(p => p.id === card.geminiId)
+          : updatedProviders.find(p => p.name === card.name)
         if (provider) {
+          card.geminiId = provider.id
           orderedIds.push(provider.id)
         }
       }
@@ -1737,11 +1749,35 @@ const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; erro
   }
 }
 
+// persistProviders：所有直接保存（开关、编辑、删除等）先排到在途拖拽保存之后，
+// 避免"新的直接保存先落盘、排队中的旧拖拽快照随后覆盖"的丢改动竞态
+const persistProviders = async (tabId: ProviderTab): Promise<{ ok: boolean; error?: string }> => {
+  await dragPersistChain.catch(() => {})
+  return persistProvidersNow(tabId)
+}
+
 const replaceProviders = (tabId: ProviderTab, data: AutomationCard[]) => {
   cards[tabId].splice(0, cards[tabId].length, ...createAutomationCards(data))
 }
 
 const loadProvidersFromDisk = async () => {
+  // 与拖拽保存互斥到"链静止"：重载若跑在拖拽保存前面，会用旧磁盘状态替换
+  // 乐观排序；等待期间新入队的拖拽也要继续等。读盘过程中又有新拖拽入队时
+  // 整体重来（有界重试），避免 replaceProviders 吃掉刚拖出来的顺序
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let settled = dragPersistChain
+    for (;;) {
+      await settled.catch(() => {})
+      if (settled === dragPersistChain) break
+      settled = dragPersistChain
+    }
+    const token = dragPersistEnqueues
+    await loadProvidersFromDiskOnce()
+    if (token === dragPersistEnqueues) return
+  }
+}
+
+const loadProvidersFromDiskOnce = async () => {
   for (const tab of providerTabIds) {
     try {
       if (tab === 'others') {
@@ -3098,23 +3134,158 @@ const onDragStart = (id: number) => {
   draggingId.value = id
 }
 
-const onDrop = async (targetId: number) => {
-  if (draggingId.value === null || draggingId.value === targetId) return
+// 拖拽指示器状态：目标卡片 + 落点在其前/后
+const dropIndicator = reactive<{ id: number | null; before: boolean }>({ id: null, before: false })
+
+// 只允许在同一调度组（启用状态 + Level 相同）内重排：跨组落点在
+// 重载后的稳定排序（启用优先、Level 升序）下必然回弹，指示器不能撒谎
+const sameDragGroup = (a: AutomationCard, b: AutomationCard) =>
+  a.enabled === b.enabled && normalizeLevel(a.level) === normalizeLevel(b.level)
+
+const onCardDragOver = (card: AutomationCard, event: DragEvent) => {
+  if (draggingId.value === null) return
+  const list = cards[activeTab.value]
+  const dragging = list?.find(c => c.id === draggingId.value)
+  if (!dragging || !list) return
+  if (card.id === dragging.id || !sameDragGroup(dragging, card)) {
+    // 无条件清掉指示器：从合法目标滑到非法目标时，残留的旧指示线会撒谎
+    dropIndicator.id = null
+    return
+  }
+  // 只有合法落点才 preventDefault（标记可放置）；非法落点浏览器显示禁止光标
+  event.preventDefault()
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  dropIndicator.id = card.id
+  dropIndicator.before = event.clientY < rect.top + rect.height / 2
+}
+
+const clearDragState = () => {
+  draggingId.value = null
+  dropIndicator.id = null
+}
+
+// 拖拽保存串行链：载荷一律在入队时刻同步定格（即拖拽刚落下的乐观状态，
+// 不受后续编辑/重载影响）；修订号按保存目标（tab / 自定义工具）分别计数，
+// 失败回滚只在"该目标没有更新的拖拽"且目标未被切换时执行。
+// 直接保存（persistProviders）与磁盘重载（loadProvidersFromDisk）都会等链静止
+let dragPersistChain: Promise<void> = Promise.resolve()
+const dragPersistRevisions = new Map<string, number>()
+// dragPersistEnqueues 全局入队计数：loadProvidersFromDisk 用它检测
+// "读盘期间又有新拖拽"并整体重来
+let dragPersistEnqueues = 0
+
+const queueDragPersist = (tabId: ProviderTab) => {
+  // 保存目标在入队时刻定格：自定义 CLI 执行时用户可能已切到别的工具，
+  // 运行时再读 cards.others 会把新工具的列表写进旧工具的配置文件
+  const targetKey = tabId === 'others'
+    ? (selectedToolId.value ? getCustomProviderKind(selectedToolId.value) : null)
+    : tabId
+  if (!targetKey) return
+  const revision = (dragPersistRevisions.get(targetKey) ?? 0) + 1
+  dragPersistRevisions.set(targetKey, revision)
+  dragPersistEnqueues++
+
+  // 载荷入队时定格
+  let payload: ReturnType<typeof serializeProviders> | null = null
+  let orderedIds: string[] | null = null
+  if (tabId === 'gemini') {
+    const ids = cards.gemini.map(c => c.geminiId)
+    orderedIds = ids.length > 0 && ids.every(Boolean) ? (ids as string[]) : null
+  } else {
+    payload = JSON.parse(JSON.stringify(serializeProviders(cards[tabId])))
+  }
+
+  const job = async () => {
+    if (tabId === 'gemini') {
+      if (orderedIds) {
+        // 纯重排快路径：一次 RPC，不再走"逐个删/改/加 + 排序"的 N+3 串行链
+        await ReorderGeminiProviders(orderedIds)
+      } else {
+        // 兜底（卡片缺稳定 ID 的旧状态）：走完整保存
+        const result = await persistProvidersNow('gemini')
+        if (!result.ok) throw new Error(result.error || 'save failed')
+      }
+    } else {
+      await SaveProviders(targetKey, payload!)
+    }
+  }
+
+  dragPersistChain = dragPersistChain.then(job).catch(async (error) => {
+    console.error('Failed to persist drag order', error)
+    showToast(t('components.main.form.saveFailed') + ': ' + extractErrorMessage(error), 'error')
+    // 仅当该目标没有更新的拖拽时恢复，避免旧失败覆盖新的乐观顺序；
+    // 自定义 CLI 还要求当前工具未切换——cards.others 已换成别的工具时，
+    // 把旧工具的顺序塞回去等于张冠李戴
+    if (dragPersistRevisions.get(targetKey) !== revision) return
+    if (tabId === 'others' &&
+        (!selectedToolId.value || getCustomProviderKind(selectedToolId.value) !== targetKey)) {
+      return
+    }
+    // 从磁盘恢复而不是回放 prevOrder：连续两次拖拽都失败时，第二次的
+    // prevOrder 是第一次的乐观结果，从未落盘，回放它会让界面与磁盘分叉。
+    // 磁盘是唯一权威，恢复失败则保持现状等下一次重载校准。
+    // 守卫在读盘 await 之后还要复查一次：等待期间可能又有新拖拽或工具切换
+    const guardsStillValid = () => {
+      if (dragPersistRevisions.get(targetKey) !== revision) return false
+      if (tabId === 'others' &&
+          (!selectedToolId.value || getCustomProviderKind(selectedToolId.value) !== targetKey)) {
+        return false
+      }
+      return true
+    }
+    try {
+      if (tabId === 'gemini') {
+        const geminiProviders = await GetGeminiProviders()
+        if (!guardsStillValid()) return
+        geminiProvidersCache.value = geminiProviders
+        cards.gemini.splice(0, cards.gemini.length, ...geminiProviders.map(geminiToCard))
+        sortProvidersByLevel(cards.gemini)
+      } else {
+        const saved = await LoadProviders(targetKey)
+        if (!guardsStillValid()) return
+        if (Array.isArray(saved)) {
+          const list = cards[tabId]
+          list.splice(0, list.length, ...createAutomationCards(saved as AutomationCard[]))
+          sortProvidersByLevel(list)
+        }
+      }
+    } catch (reloadError) {
+      console.error('Failed to restore order from disk', reloadError)
+    }
+  })
+}
+
+const onDrop = (targetId: number, event: DragEvent) => {
+  event.preventDefault()
+  if (draggingId.value === null || dropIndicator.id === null) {
+    clearDragState()
+    return
+  }
   const currentTab = activeTab.value
   const list = cards[currentTab]
-  if (!list) return
-  const fromIndex = list.findIndex((card) => card.id === draggingId.value)
-  const toIndex = list.findIndex((card) => card.id === targetId)
-  if (fromIndex === -1 || toIndex === -1) return
+  if (!list) {
+    clearDragState()
+    return
+  }
+  const fromIndex = list.findIndex(card => card.id === draggingId.value)
+  const targetIndex = list.findIndex(card => card.id === (dropIndicator.id ?? targetId))
+  if (fromIndex === -1 || targetIndex === -1 || fromIndex === targetIndex) {
+    clearDragState()
+    return
+  }
+  // 显式落点插入：目标前 = 目标下标，目标后 = 目标下标 + 1；
+  // 移除拖拽项后若目标在其后方，插入点整体左移一位。
+  // （旧实现固定 toIndex-1，把"拖到下一张卡"变成无操作）
+  let insertIndex = targetIndex + (dropIndicator.before ? 0 : 1)
   const [moved] = list.splice(fromIndex, 1)
-  const newIndex = fromIndex < toIndex ? toIndex - 1 : toIndex
-  list.splice(newIndex, 0, moved)
-  draggingId.value = null
-  await persistProviders(currentTab)
+  if (fromIndex < insertIndex) insertIndex--
+  list.splice(insertIndex, 0, moved)
+  clearDragState()
+  queueDragPersist(currentTab)
 }
 
 const onDragEnd = () => {
-  draggingId.value = null
+  clearDragState()
 }
 
 const iconSvg = (name: string) => {
