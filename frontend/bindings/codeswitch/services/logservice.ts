@@ -14,7 +14,8 @@ export function CostSince(start: string, platform: string): $CancellablePromise<
 }
 
 /**
- * GetRequestLogDetail 读取单条日志的出站请求详情（抓包模式录制的内容）
+ * GetRequestLogDetail 读取单条日志的抓包详情（全量不脱敏录制的内容）。
+ * 大字段返回有界预览
  */
 export function GetRequestLogDetail(id: number): $CancellablePromise<$models.RequestLogDetail | null> {
     return $Call.ByID(1201574134, id).then(($result: any) => {

@@ -27,6 +27,9 @@
     </header>
 
     <div class="app-page-container capture-page">
+      <div v-if="overThreshold" class="size-banner">
+        ⚠ {{ t('components.capture.sizeWarning', { size: formatBytes(totalBytes) }) }}
+      </div>
       <div class="capture-layout">
         <!-- 左侧：会话列表 -->
         <aside class="session-sidebar">
@@ -72,7 +75,7 @@
             <div class="session-detail__toolbar">
               <span class="session-detail__title">{{ sessionTitle(selected) }}</span>
               <div class="session-detail__actions">
-                <button class="secondary-btn" :disabled="exporting" @click="exportSelected">
+                <button class="secondary-btn" :disabled="exporting" @click="openExport">
                   {{ exporting ? t('components.capture.exporting') : t('components.capture.export') }}
                 </button>
               </div>
@@ -87,7 +90,8 @@
                     <th>{{ t('components.capture.table.provider') }}</th>
                     <th>{{ t('components.capture.table.model') }}</th>
                     <th>{{ t('components.capture.table.status') }}</th>
-                    <th>{{ t('components.capture.table.size') }}</th>
+                    <th>{{ t('components.capture.table.reqSize') }}</th>
+                    <th>{{ t('components.capture.table.respSize') }}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -100,13 +104,17 @@
                     <td :class="['code', httpCodeClass(row.http_code)]">{{ row.http_code || '—' }}</td>
                     <td>{{ formatBytes(row.body_bytes) }}</td>
                     <td>
+                      {{ formatBytes(row.resp_bytes) }}
+                      <span v-if="row.budget_skipped" class="skip-tag" :title="t('components.capture.budgetSkipped')">!</span>
+                    </td>
+                    <td>
                       <button class="capture-view-btn" @click="openDetail(row.id)">
                         {{ t('components.logs.captureDetail.view') }}
                       </button>
                     </td>
                   </tr>
                   <tr v-if="rows.length === 0 && !loadingRows">
-                    <td colspan="7" class="empty-row">{{ t('components.capture.noRequests') }}</td>
+                    <td colspan="8" class="empty-row">{{ t('components.capture.noRequests') }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -130,15 +138,34 @@
         :data="detailModal.data"
         @close="closeDetail"
       />
+
+      <!-- 导出：按数据类别勾选 -->
+      <BaseModal :open="exportModal.open" :title="t('components.capture.exportTitle')" @close="exportModal.open = false">
+        <div class="export-modal">
+          <p class="export-modal__warning">⚠ {{ t('components.capture.sensitiveHint') }}</p>
+          <label class="export-check"><input type="checkbox" v-model="exportModal.opts.url" /> {{ t('components.logs.captureDetail.url') }}</label>
+          <label class="export-check"><input type="checkbox" v-model="exportModal.opts.request_headers" /> {{ t('components.logs.captureDetail.reqHeaders') }}</label>
+          <label class="export-check"><input type="checkbox" v-model="exportModal.opts.request_body" /> {{ t('components.logs.captureDetail.reqBody') }}</label>
+          <label class="export-check"><input type="checkbox" v-model="exportModal.opts.response_headers" /> {{ t('components.logs.captureDetail.respHeaders') }}</label>
+          <label class="export-check"><input type="checkbox" v-model="exportModal.opts.response_body" /> {{ t('components.logs.captureDetail.respBody') }}</label>
+          <div class="export-modal__actions">
+            <button class="secondary-btn" @click="exportModal.open = false">{{ t('common.cancel') }}</button>
+            <button class="primary-btn" :disabled="!anyExportCategory || exporting" @click="confirmExport">
+              {{ exporting ? t('components.capture.exporting') : t('components.capture.export') }}
+            </button>
+          </div>
+        </div>
+      </BaseModal>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 import CaptureDetailModal from '../common/CaptureDetailModal.vue'
+import BaseModal from '../common/BaseModal.vue'
 import { fetchRequestLogDetail, type RequestLogDetail } from '../../services/logs'
 
 interface CaptureSession {
@@ -162,10 +189,15 @@ interface CaptureRow {
   duration_sec: number
   body_bytes: number
   body_truncated: boolean
+  resp_bytes: number
+  resp_truncated: boolean
+  budget_skipped: boolean
+  size_bytes: number
 }
 
 const { t } = useI18n()
 const svc = 'codeswitch/services.ProviderRelayService.'
+const SIZE_WARN_THRESHOLD = 200 * 1024 * 1024 // 200MB
 
 const recording = ref(false)
 const toggling = ref(false)
@@ -183,6 +215,7 @@ let rowsEpoch = 0
 
 let sessionTimer: number | null = null
 let liveTimer: number | null = null
+let sizeTimer: number | null = null
 
 const sessionKey = (s: CaptureSession) => (s.legacy ? 'legacy' : s.id)
 const isSelected = (s: CaptureSession) =>
@@ -354,6 +387,7 @@ const deleteSession = async (s: CaptureSession) => {
   try {
     await Call.ByName(svc + 'DeleteCaptureSession', s.id)
     await refreshSessions()
+    await refreshTotalBytes()
     if (isSelected(s)) resetRows()
   } catch (error) {
     console.error('删除会话失败:', error)
@@ -371,6 +405,7 @@ const clearAll = async () => {
     rows.value = []
     rowsEpoch++ // 作废在途的行请求，防止清空后被旧响应回填
     await refreshSessions()
+    await refreshTotalBytes()
   } catch (error) {
     console.error('清空失败:', error)
     alert(t('components.capture.clearFailed') + (error as Error).message)
@@ -379,15 +414,38 @@ const clearAll = async () => {
   }
 }
 
-const exportSelected = async () => {
+// 导出：先选数据类别再导
+const exportModal = reactive({
+  open: false,
+  opts: {
+    url: true,
+    request_headers: true,
+    request_body: true,
+    response_headers: true,
+    response_body: true,
+  },
+})
+
+const openExport = () => {
   if (!selected.value) return
+  exportModal.open = true
+}
+
+const anyExportCategory = computed(() =>
+  exportModal.opts.url || exportModal.opts.request_headers || exportModal.opts.request_body ||
+  exportModal.opts.response_headers || exportModal.opts.response_body,
+)
+
+const confirmExport = async () => {
+  if (!selected.value || !anyExportCategory.value) return
   exporting.value = true
   try {
-    const result = (await Call.ByName(svc + 'ExportCaptureSessionWithDialog', selected.value.id)) as {
+    const result = (await Call.ByName(svc + 'ExportCaptureSessionWithDialog', selected.value.id, exportModal.opts)) as {
       path: string
       count: number
       canceled: boolean
     }
+    exportModal.open = false
     if (!result.canceled) {
       alert(t('components.capture.exportDone', { count: result.count, path: result.path }))
     }
@@ -396,6 +454,18 @@ const exportSelected = async () => {
     alert(t('components.capture.exportFailed') + (error as Error).message)
   } finally {
     exporting.value = false
+  }
+}
+
+// 抓包总量与 200MB 提醒：单独低频拉取，不塞进 3 秒会话轮询的热路径
+const totalBytes = ref(0)
+const overThreshold = computed(() => totalBytes.value >= SIZE_WARN_THRESHOLD)
+
+const refreshTotalBytes = async () => {
+  try {
+    totalBytes.value = (await Call.ByName(svc + 'GetCaptureTotalBytes')) as number
+  } catch (error) {
+    console.error('读取抓包总量失败:', error)
   }
 }
 
@@ -436,12 +506,15 @@ const closeDetail = () => {
 onMounted(async () => {
   await loadRecordingState()
   await refreshSessions()
+  await refreshTotalBytes()
   sessionTimer = window.setInterval(refreshSessions, 3000)
+  sizeTimer = window.setInterval(refreshTotalBytes, 10000)
 })
 
 onUnmounted(() => {
   if (sessionTimer !== null) clearInterval(sessionTimer)
   if (liveTimer !== null) clearInterval(liveTimer)
+  if (sizeTimer !== null) clearInterval(sizeTimer)
 })
 </script>
 
@@ -721,5 +794,57 @@ onUnmounted(() => {
 .capture-view-btn:hover {
   color: var(--mac-text);
   border-color: var(--mac-accent);
+}
+
+.size-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  font-size: 0.85rem;
+}
+
+html.dark .size-banner {
+  color: #fbbf24;
+}
+
+.skip-tag {
+  display: inline-block;
+  margin-left: 4px;
+  color: #f59e0b;
+  font-weight: 700;
+  cursor: help;
+}
+
+.export-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 320px;
+}
+
+.export-modal__warning {
+  margin: 0 0 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  font-size: 0.8rem;
+}
+
+.export-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.export-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
 }
 </style>

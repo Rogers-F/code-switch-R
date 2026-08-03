@@ -569,11 +569,17 @@
         "detail": "Capture"
       },
       "captureDetail": {
-        "title": "Outbound request detail",
+        "title": "Capture detail",
         "view": "View",
-        "headers": "Request headers (redacted)",
-        "body": "Request body (known credentials redacted; may still contain sensitive content)",
-        "truncated": "Body exceeded the storage limit and was truncated; original size {bytes} bytes",
+        "url": "Request URL",
+        "reqHeaders": "Request headers",
+        "reqBody": "Request body",
+        "respHeaders": "Response headers",
+        "respBody": "Response body",
+        "sensitiveWarning": "Full capture, unredacted: contains plaintext API keys and full conversation/response — never share the exported file",
+        "previewHint": "Content is large; showing a preview only (first 256KB). Full original size {bytes} — use Export to view the complete content",
+        "captureTruncatedHint": "Content exceeded the limit and was truncated at capture time (original size {bytes}); the excess was not stored and is unavailable even via export",
+        "budgetSkippedHint": "Response too large and exceeded the memory budget; the body was not stored",
         "empty": "No content recorded for this request",
         "copy": "Copy",
         "loadFailed": "Failed to load detail: "
@@ -1130,9 +1136,12 @@
       "clearFailed": "Failed to clear: ",
       "export": "Export",
       "exporting": "Exporting...",
+      "exportTitle": "Choose what to export",
       "exportDone": "Exported {count} requests to {path}",
       "exportFailed": "Failed to export: ",
-      "sensitiveHint": "Known credentials are redacted, but request bodies may still contain sensitive prompt content — share with care",
+      "sensitiveHint": "Full capture, unredacted: exported and displayed content contains plaintext API keys and full conversation/response — never share",
+      "sizeWarning": "Capture data has reached {size}. Consider deleting sessions you no longer need or clearing all to reclaim disk.",
+      "budgetSkipped": "Response too large; the part beyond the memory budget was not stored",
       "noRequests": "No captured requests in this session",
       "loadMore": "Load more",
       "table": {
@@ -1141,7 +1150,8 @@
         "provider": "Provider",
         "model": "Model",
         "status": "Status",
-        "size": "Body size"
+        "reqSize": "Request size",
+        "respSize": "Response size"
       }
     }
   }

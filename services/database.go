@@ -45,10 +45,16 @@ func InitDatabase() error {
 		return fmt.Errorf("获取用户目录失败: %w", err)
 	}
 
-	// 1. 确保配置目录存在（SQLite 不会自动创建父目录）
+	// 1. 确保配置目录存在（SQLite 不会自动创建父目录）。
+	// 0700：抓包全量模式会把明文 API Key 与完整请求/响应写进 app.db，
+	// 目录与库文件都收敛为仅属主可读写（POSIX 位在 Windows 上为尽力而为）
 	configDir := filepath.Join(home, ".code-switch")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("创建配置目录失败: %w", err)
+	}
+	// 已存在的旧目录一并收紧
+	if err := os.Chmod(configDir, 0700); err != nil {
+		fmt.Printf("[DB] 收紧配置目录权限失败（不影响运行）: %v\n", err)
 	}
 
 	// 2. 初始化 xdb 连接池
@@ -71,7 +77,7 @@ func InitDatabase() error {
 		return fmt.Errorf("初始化数据库失败: %w", err)
 	}
 
-	// 3. 校验 PRAGMA 已生效
+	// 3. 校验 PRAGMA 已生效（这次查询会真正建立连接、创建库文件）
 	db, err := xdb.DB("default")
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %w", err)
@@ -81,6 +87,12 @@ func InitDatabase() error {
 		return fmt.Errorf("读取 journal_mode 失败: %w", err)
 	}
 	fmt.Printf("✅ SQLite PRAGMA 已设置: journal_mode=%s, busy_timeout=30000ms\n", journalMode)
+
+	// 库文件收敛为 0600：抓包全量模式的明文内容都落在这里。
+	// 必须在首次查询之后——sql.Open 是惰性的，文件到此才真正存在
+	if err := os.Chmod(filepath.Join(configDir, "app.db"), 0600); err != nil {
+		fmt.Printf("[DB] 收紧库文件权限失败（不影响运行）: %v\n", err)
+	}
 
 	// 4. 确保表结构存在
 	if err := ensureRequestLogTable(); err != nil {

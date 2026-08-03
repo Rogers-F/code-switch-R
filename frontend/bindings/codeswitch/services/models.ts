@@ -680,6 +680,46 @@ export class CLITemplate {
 }
 
 /**
+ * CaptureExportOptions 按数据类别选择导出内容（全 false 视为非法）
+ */
+export class CaptureExportOptions {
+    "url": boolean;
+    "request_headers": boolean;
+    "request_body": boolean;
+    "response_headers": boolean;
+    "response_body": boolean;
+
+    /** Creates a new CaptureExportOptions instance. */
+    constructor($$source: Partial<CaptureExportOptions> = {}) {
+        if (!("url" in $$source)) {
+            this["url"] = false;
+        }
+        if (!("request_headers" in $$source)) {
+            this["request_headers"] = false;
+        }
+        if (!("request_body" in $$source)) {
+            this["request_body"] = false;
+        }
+        if (!("response_headers" in $$source)) {
+            this["response_headers"] = false;
+        }
+        if (!("response_body" in $$source)) {
+            this["response_body"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CaptureExportOptions instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CaptureExportOptions {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CaptureExportOptions($$parsedSource as Partial<CaptureExportOptions>);
+    }
+}
+
+/**
  * CaptureExportResult 导出结果
  */
 export class CaptureExportResult {
@@ -773,6 +813,10 @@ export class CaptureSessionLogRow {
     "duration_sec": number;
     "body_bytes": number;
     "body_truncated": boolean;
+    "resp_bytes": number;
+    "resp_truncated": boolean;
+    "budget_skipped": boolean;
+    "size_bytes": number;
 
     /** Creates a new CaptureSessionLogRow instance. */
     constructor($$source: Partial<CaptureSessionLogRow> = {}) {
@@ -805,6 +849,18 @@ export class CaptureSessionLogRow {
         }
         if (!("body_truncated" in $$source)) {
             this["body_truncated"] = false;
+        }
+        if (!("resp_bytes" in $$source)) {
+            this["resp_bytes"] = 0;
+        }
+        if (!("resp_truncated" in $$source)) {
+            this["resp_truncated"] = false;
+        }
+        if (!("budget_skipped" in $$source)) {
+            this["budget_skipped"] = false;
+        }
+        if (!("size_bytes" in $$source)) {
+            this["size_bytes"] = 0;
         }
 
         Object.assign(this, $$source);
@@ -3010,7 +3066,9 @@ export class ReqeustLog {
 }
 
 /**
- * RequestLogDetail 单条日志的抓包详情（按需读取，避免列表携带大字段）
+ * RequestLogDetail 单条日志的抓包详情（按需读取，避免列表携带大字段）。
+ * 每个大字段仅返回有界预览（capturePreview），完整内容走导出——整段 50MiB
+ * 直接塞进 <pre> 会冻死 webview
  */
 export class RequestLogDetail {
     "id": number;
@@ -3018,10 +3076,34 @@ export class RequestLogDetail {
     "provider": string;
     "model": string;
     "created_at": string;
+    "request_url": string;
+
+    /**
+     * 请求
+     */
     "request_headers": string;
     "request_body": string;
+
+    /**
+     * 正文被预览截断（完整内容请导出）
+     */
+    "request_body_preview": boolean;
+
+    /**
+     * 采集时即超 captureFieldLimit
+     */
     "body_truncated": boolean;
     "body_bytes": number;
+
+    /**
+     * 响应
+     */
+    "response_headers": string;
+    "response_body": string;
+    "response_body_preview": boolean;
+    "response_truncated": boolean;
+    "response_bytes": number;
+    "budget_skipped": boolean;
 
     /** Creates a new RequestLogDetail instance. */
     constructor($$source: Partial<RequestLogDetail> = {}) {
@@ -3040,17 +3122,41 @@ export class RequestLogDetail {
         if (!("created_at" in $$source)) {
             this["created_at"] = "";
         }
+        if (!("request_url" in $$source)) {
+            this["request_url"] = "";
+        }
         if (!("request_headers" in $$source)) {
             this["request_headers"] = "";
         }
         if (!("request_body" in $$source)) {
             this["request_body"] = "";
         }
+        if (!("request_body_preview" in $$source)) {
+            this["request_body_preview"] = false;
+        }
         if (!("body_truncated" in $$source)) {
             this["body_truncated"] = false;
         }
         if (!("body_bytes" in $$source)) {
             this["body_bytes"] = 0;
+        }
+        if (!("response_headers" in $$source)) {
+            this["response_headers"] = "";
+        }
+        if (!("response_body" in $$source)) {
+            this["response_body"] = "";
+        }
+        if (!("response_body_preview" in $$source)) {
+            this["response_body_preview"] = false;
+        }
+        if (!("response_truncated" in $$source)) {
+            this["response_truncated"] = false;
+        }
+        if (!("response_bytes" in $$source)) {
+            this["response_bytes"] = 0;
+        }
+        if (!("budget_skipped" in $$source)) {
+            this["budget_skipped"] = false;
         }
 
         Object.assign(this, $$source);

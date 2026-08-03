@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -92,6 +93,8 @@ type ProviderRelayService struct {
 	captureDeletedSessions map[int64]struct{}
 	// captureRecoverOnce 每进程一次的遗留会话恢复（Start 可被前端重复触发）
 	captureRecoverOnce sync.Once
+	// captureInflightBytes 在途抓包缓冲的总占用（全量模式的内存兜底，见 captureBuffer）
+	captureInflightBytes atomic.Int64
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -677,6 +680,37 @@ func (prs *ProviderRelayService) GetRequestCapture() bool {
 	return prs.captureRequests.Load()
 }
 
+// buildCaptureURL 拼接抓包 URL：目标地址 + 查询参数（不脱敏，全量记录）
+func buildCaptureURL(targetURL string, query map[string]string) string {
+	if len(query) == 0 {
+		return targetURL
+	}
+	values := url.Values{}
+	for k, v := range query {
+		values.Set(k, v)
+	}
+	sep := "?"
+	if strings.Contains(targetURL, "?") {
+		sep = "&"
+	}
+	return targetURL + sep + values.Encode()
+}
+
+// captureErrorResponse 已并入 extractUpstreamError（读错误体时一并入抓包缓冲），
+// 此处不再单独提供。
+
+// finalizeCaptureResponse 把响应缓冲收敛进 requestLog 的响应字段（落库前调用一次）
+func finalizeCaptureResponse(requestLog *ReqeustLog) {
+	cb := requestLog.respBuf
+	if cb == nil {
+		return
+	}
+	requestLog.ResponseBody = string(cb.buf)
+	requestLog.RespTruncated = cb.truncated
+	requestLog.RespBytes = cb.total
+	requestLog.BudgetSkipped = cb.budgetSkipped
+}
+
 // stripStaleCapture 落库前的校验：采集发生在请求开始，长流请求可能在
 // "清空全部"（代次不一致）或"删除所属会话"（墓碑命中）之后才结束，
 // 两种情况都说明这批内容已被用户要求删除，置空且摘除会话关联。
@@ -687,23 +721,31 @@ func (prs *ProviderRelayService) stripStaleCapture(requestLog *ReqeustLog) {
 	_, deleted := prs.captureDeletedSessions[requestLog.CaptureSessionID]
 	orphan := requestLog.CaptureSessionID == 0 && requestLogHasCapture(requestLog)
 	if requestLog.captureGen != prs.captureClearGen.Load() || deleted || orphan {
+		requestLog.RequestURL = ""
 		requestLog.RequestHeaders = ""
 		requestLog.RequestBody = ""
 		requestLog.BodyTruncated = false
 		requestLog.BodyBytes = 0
+		requestLog.ResponseHeaders = ""
+		requestLog.ResponseBody = ""
+		requestLog.RespTruncated = false
+		requestLog.RespBytes = 0
+		requestLog.BudgetSkipped = false
 		requestLog.CaptureSessionID = 0
 	}
 }
 
-// requestLogInsertSQL 两条写入路径共用的 19 列 INSERT，避免列清单分叉
+// requestLogInsertSQL 两条写入路径共用的 25 列 INSERT，避免列清单分叉
 const requestLogInsertSQL = `
 	INSERT INTO request_log (
 		platform, model, provider, http_code,
 		input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
 		reasoning_tokens, is_stream, duration_sec,
 		ephemeral_5m_tokens, ephemeral_1h_tokens, service_tier,
-		request_headers, request_body, body_truncated, body_bytes, capture_session_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		request_url, request_headers, request_body, body_truncated, body_bytes,
+		response_headers, response_body, response_truncated, response_bytes, budget_skipped,
+		capture_session_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 func requestLogInsertArgs(requestLog *ReqeustLog) []interface{} {
@@ -713,14 +755,22 @@ func requestLogInsertArgs(requestLog *ReqeustLog) []interface{} {
 		requestLog.CacheReadTokens, requestLog.ReasoningTokens,
 		boolToInt(requestLog.IsStream), requestLog.DurationSec,
 		requestLog.Ephemeral5mTokens, requestLog.Ephemeral1hTokens, requestLog.ServiceTier,
-		requestLog.RequestHeaders, requestLog.RequestBody,
-		boolToInt(requestLog.BodyTruncated), requestLog.BodyBytes, requestLog.CaptureSessionID,
+		requestLog.RequestURL, requestLog.RequestHeaders, requestLog.RequestBody,
+		boolToInt(requestLog.BodyTruncated), requestLog.BodyBytes,
+		requestLog.ResponseHeaders, requestLog.ResponseBody,
+		boolToInt(requestLog.RespTruncated), requestLog.RespBytes, boolToInt(requestLog.BudgetSkipped),
+		requestLog.CaptureSessionID,
 	}
 }
 
+// requestLogHasCapture 判断该行是否携带抓包 payload。会话标记行（session_id!=0）
+// 也走同步栅栏写，避免与清除/删除竞态
 func requestLogHasCapture(requestLog *ReqeustLog) bool {
-	return requestLog.RequestHeaders != "" || requestLog.RequestBody != "" ||
-		requestLog.BodyTruncated || requestLog.BodyBytes != 0
+	return requestLog.CaptureSessionID != 0 ||
+		requestLog.RequestURL != "" || requestLog.RequestHeaders != "" || requestLog.RequestBody != "" ||
+		requestLog.ResponseHeaders != "" || requestLog.ResponseBody != "" ||
+		requestLog.BodyTruncated || requestLog.BodyBytes != 0 ||
+		requestLog.RespTruncated || requestLog.RespBytes != 0 || requestLog.BudgetSkipped
 }
 
 // writeRequestLog 落库统一入口，调用方需已持有 captureWriteMu 读锁。
@@ -1601,19 +1651,25 @@ func (prs *ProviderRelayService) forwardRequest(
 		Model:    model,
 		IsStream: isStream,
 	}
-	// 抓包模式：录制终态出站 headers/body（映射/清理/认证注入均已完成，
-	// 即实际进 transport 前的应用层形态）。地址池内各地址仅 URL 不同，采集一次。
-	// 代次先于开关与内容读取：清除/关停若与采集竞态，只会让本行被误清（安全方向）
-	// 抓包状态一次性快照（读锁内）：开关/会话/代次分开裸读会在与关闭、
-	// 清除的竞态下拼出错位组合
+	// 抓包模式（全量不脱敏）：录制终态出站 headers/body（映射/清理/认证注入均已
+	// 完成，即实际进 transport 前的应用层形态），并在转发时补 URL 与响应。
+	// URL/response 按"实际尝试"在地址池循环内设置，此处只做请求侧一次性采集。
+	// 抓包状态一次性快照（读锁内）：开关/会话/代次分开裸读会在与关闭、清除的
+	// 竞态下拼出错位组合
 	if enabled, sessionID, gen := prs.captureSnapshot(); enabled {
 		requestLog.captureGen = gen
 		requestLog.CaptureSessionID = sessionID
-		requestLog.RequestHeaders = maskCaptureHeaders(headers, provider.ConnectivityAuthType, provider.APIKey)
-		requestLog.RequestBody, requestLog.BodyTruncated, requestLog.BodyBytes = redactCaptureBody(bodyBytes, provider.APIKey)
+		requestLog.RequestHeaders = rawRequestHeaders(headers)
+		requestLog.RequestBody, requestLog.BodyTruncated, requestLog.BodyBytes = rawCaptureBody(bodyBytes)
+		requestLog.respBuf = newCaptureBuffer(&prs.captureInflightBytes)
 	}
 	start := time.Now()
 	defer func() {
+		// 响应缓冲收敛进 requestLog，再归还在途抓包预算
+		finalizeCaptureResponse(requestLog)
+		if requestLog.respBuf != nil {
+			requestLog.respBuf.release()
+		}
 		requestLog.DurationSec = time.Since(start).Seconds()
 		// 若请求过程中发生 rename,把旧名兑换成新名再落库
 		requestLog.Provider = ResolveProviderAlias(requestLog.Platform, requestLog.Provider)
@@ -1647,6 +1703,18 @@ func (prs *ProviderRelayService) forwardRequest(
 		if i > 0 {
 			// 上一地址的失败状态码不能残留进本次尝试的日志
 			requestLog.HttpCode = 0
+			// 抓包按"终态尝试"记录：切地址时丢弃上一地址的 URL/响应捕获，
+			// 释放其占用的在途预算并重建缓冲，否则最终成功行会带上一地址的响应
+			if requestLog.respBuf != nil {
+				requestLog.RequestURL = ""
+				requestLog.ResponseHeaders = ""
+				requestLog.ResponseBody = ""
+				requestLog.RespTruncated = false
+				requestLog.RespBytes = 0
+				requestLog.BudgetSkipped = false
+				requestLog.respBuf.release()
+				requestLog.respBuf = newCaptureBuffer(&prs.captureInflightBytes)
+			}
 			// SSE 转换器有状态，跨地址复用会串流，换新
 			if sseConverter != nil {
 				sseConverter = NewOpenAIToAnthropicSSEConverter(model)
@@ -1700,6 +1768,11 @@ func (prs *ProviderRelayService) forwardToAddress(
 	// 超时与连接池由共享客户端统一提供，不再每请求新建 Transport。
 	req := xrequest.New().
 		SetClient(relayClientFor(provider.InsecureSkipVerify, provider.Name)).
+		// SetDebug(false)：xrequest 的 debug 默认 utils.IsGoRun()，dev 下会对
+		// text/json 响应预调 String() 解析并缓存，使 ToHttpResponseWriter 走
+		// r.parsed 分支、绕过我们装在 RawResponse.Body 上的抓包 tee（响应体录空）。
+		// 显式关掉，保证 dev 与 release 都从字节流层 tee 捕获
+		SetDebug(false).
 		WithContext(c.Request.Context()).
 		SetHeaders(headers).
 		SetQueryParams(query)
@@ -1710,11 +1783,19 @@ func (prs *ProviderRelayService) forwardToAddress(
 	reqBody := bytes.NewReader(bodyBytes)
 	req = req.SetBody(reqBody)
 
+	// 抓包：记录本次实际尝试的完整 URL（含查询参数，不脱敏）
+	if requestLog.respBuf != nil {
+		requestLog.RequestURL = buildCaptureURL(targetURL, query)
+	}
+
 	resp, err := req.Post(targetURL)
 
-	// 无论成功失败，先尝试记录 HttpCode
+	// 无论成功失败，先尝试记录 HttpCode 与响应头
 	if resp != nil {
 		requestLog.HttpCode = resp.StatusCode()
+		if requestLog.respBuf != nil && resp.RawResponse != nil {
+			requestLog.ResponseHeaders = rawResponseHeaders(resp.RawResponse.Header)
+		}
 	}
 
 	if err != nil {
@@ -1725,7 +1806,7 @@ func (prs *ProviderRelayService) forwardToAddress(
 		}
 		// 尝试从响应体提取供应商原始错误信息
 		if resp != nil {
-			if upstreamBody := extractUpstreamError(resp); upstreamBody != "" {
+			if upstreamBody := extractUpstreamError(resp, requestLog); upstreamBody != "" {
 				return false, newUpstreamStatusError(resp, resp.StatusCode(),
 					fmt.Sprintf("upstream status %d: %s", resp.StatusCode(), upstreamBody))
 			}
@@ -1745,12 +1826,12 @@ func (prs *ProviderRelayService) forwardToAddress(
 			fmt.Printf("[INFO] Provider %s 响应期间客户端已断开，不计入供应商失败\n", provider.Name)
 			return false, fmt.Errorf("%w: %v", errClientAbort, resp.Error())
 		}
-		// 优先使用 extractUpstreamError 提取完整错误（覆盖 SSE 空 body 场景）
+		// 无条件读一次错误体（同时入抓包缓冲），错误串优先用 resp.Error()，
+		// 为空再回退到错误体预览
+		bodyPreview := extractUpstreamError(resp, requestLog)
 		errMsg := strings.TrimSpace(resp.Error().Error())
 		if errMsg == "" {
-			if upstreamBody := extractUpstreamError(resp); upstreamBody != "" {
-				errMsg = upstreamBody
-			}
+			errMsg = bodyPreview
 		}
 		if errMsg == "" {
 			errMsg = fmt.Sprintf("upstream status %d", status)
@@ -1771,8 +1852,8 @@ func (prs *ProviderRelayService) forwardToAddress(
 		return prs.relayResponseToClient(c, kind, provider, resp, sseConverter, isStream, requestLog)
 	}
 
-	// 尝试从响应体提取供应商原始错误信息
-	upstreamBody := extractUpstreamError(resp)
+	// 尝试从响应体提取供应商原始错误信息（同时入抓包缓冲）
+	upstreamBody := extractUpstreamError(resp, requestLog)
 	detail := fmt.Sprintf("upstream status %d", status)
 	if upstreamBody != "" {
 		detail = fmt.Sprintf("upstream status %d: %s", status, upstreamBody)
@@ -1808,6 +1889,11 @@ func (prs *ProviderRelayService) relayResponseToClient(
 	isStream bool,
 	requestLog *ReqeustLog,
 ) (bool, error) {
+	// 抓包：在字节流层 tee 上游响应体（成功路径单协程读取，无竞态）。
+	// xrequest 的逐行 hook 会剥行尾、跳空行，无法还原原始 SSE，必须在此包裹
+	if requestLog.respBuf != nil && resp.RawResponse != nil && resp.RawResponse.Body != nil {
+		resp.RawResponse.Body = newCaptureTeeReader(resp.RawResponse.Body, requestLog.respBuf)
+	}
 	var copyErr error
 	if sseConverter != nil && isStream {
 		// 使用协议转换 Hook
@@ -1857,8 +1943,11 @@ func (prs *ProviderRelayService) relayResponseToClient(
 	return false, fmt.Errorf("%w: %v", errUpstreamStreamAborted, copyErr)
 }
 
-// extractUpstreamError 从供应商响应中提取原始错误信息（最多 512 字节）
-func extractUpstreamError(resp *xrequest.Response) string {
+// extractUpstreamError 读取上游错误响应体，返回 ≤512 字节的错误信息预览。
+// 当 requestLog 处于抓包状态时，同时把完整错误体（SSE 分支放宽到 captureFieldLimit）
+// 喂入抓包缓冲——由 captureBuffer 统一处理上限、截断标记与原始字节计数。
+// 只在主转发协程调用，后台读 goroutine 只回传字节、不触碰 requestLog
+func extractUpstreamError(resp *xrequest.Response, requestLog *ReqeustLog) string {
 	if resp == nil {
 		return ""
 	}
@@ -1869,13 +1958,21 @@ func extractUpstreamError(resp *xrequest.Response) string {
 			_ = resp.RawResponse.Body.Close()
 		}
 	}()
-	// 优先尝试 String()（会自动解压 gzip 等）
+
+	capturing := requestLog != nil && requestLog.respBuf != nil
+	// SSE 分支的读取上限：抓包时放宽到 captureFieldLimit，拿到完整错误体
+	sseLimit := int64(512)
+	if capturing {
+		sseLimit = int64(captureFieldLimit) + 1
+	}
+
+	// 优先尝试 String()（会自动解压 gzip 等）——非 SSE 错误返回完整 body
 	body := resp.String()
 	// SSE 流式响应时 String() 返回空，回退到直接读取 RawResponse.Body（带超时防御）
 	if body == "" && resp.RawResponse != nil && resp.RawResponse.Body != nil {
 		done := make(chan []byte, 1)
 		go func() {
-			raw, err := io.ReadAll(io.LimitReader(resp.RawResponse.Body, 512))
+			raw, err := io.ReadAll(io.LimitReader(resp.RawResponse.Body, sseLimit))
 			if err == nil {
 				done <- raw
 			} else {
@@ -1888,14 +1985,24 @@ func extractUpstreamError(resp *xrequest.Response) string {
 				body = string(raw)
 			}
 		case <-time.After(500 * time.Millisecond):
-			// 超时放弃，关闭 Body 中断后台读取，避免 goroutine 泄漏
+			// 超时放弃，关闭 Body 中断后台读取，避免 goroutine 泄漏。
+			// 抓包时标记截断：读取被中断，存储的错误体不完整，UI/导出如实呈现
 			resp.RawResponse.Body.Close()
+			if capturing {
+				requestLog.respBuf.markTruncated()
+			}
 		}
 	}
 	if body == "" {
 		return ""
 	}
-	// 截断过长的错误信息
+
+	// 抓包：完整错误体入缓冲（缓冲负责截断标记与字节计数）
+	if capturing {
+		requestLog.respBuf.append([]byte(body))
+	}
+
+	// 截断过长的错误信息（仅供错误串展示）
 	if len(body) > 512 {
 		body = body[:512] + "..."
 	}
@@ -2044,6 +2151,12 @@ func ensureRequestLogTableWithDB(db *sql.DB) error {
 		{"body_truncated", "INTEGER DEFAULT 0"},
 		{"body_bytes", "INTEGER DEFAULT 0"},
 		{"capture_session_id", "INTEGER DEFAULT 0"},
+		{"request_url", "TEXT DEFAULT ''"},
+		{"response_headers", "TEXT DEFAULT ''"},
+		{"response_body", "TEXT DEFAULT ''"},
+		{"response_truncated", "INTEGER DEFAULT 0"},
+		{"response_bytes", "INTEGER DEFAULT 0"},
+		{"budget_skipped", "INTEGER DEFAULT 0"},
 	}
 	for _, m := range migrations {
 		if err := ensureRequestLogColumn(db, m.column, m.definition); err != nil {
@@ -2143,16 +2256,25 @@ type ReqeustLog struct {
 	// HasCapture 列表查询计算列：该行是否录有抓包数据（前端据此显示"查看详情"）
 	HasCapture bool `json:"has_capture"`
 
-	// ========== 抓包字段（issue #5）==========
-	// 列表接口不返回大字段（json:"-"），详情走 RequestLogDetail DTO
-	RequestHeaders string `json:"-"`
-	RequestBody    string `json:"-"`
-	BodyTruncated  bool   `json:"-"`
-	BodyBytes      int    `json:"-"`
+	// ========== 抓包字段（全量不脱敏）==========
+	// 列表接口不返回大字段（json:"-"），详情走 RequestLogDetail DTO。
+	// 全量：请求 URL / 请求头 / 请求体 / 响应头 / 响应体，均不脱敏。
+	RequestURL      string `json:"-"`
+	RequestHeaders  string `json:"-"`
+	RequestBody     string `json:"-"`
+	BodyTruncated   bool   `json:"-"` // 请求体触及 captureFieldLimit
+	BodyBytes       int    `json:"-"` // 请求体原始字节数
+	ResponseHeaders string `json:"-"`
+	ResponseBody    string `json:"-"`
+	RespTruncated   bool   `json:"-"` // 响应体触及 captureFieldLimit
+	RespBytes       int    `json:"-"` // 响应体上游原始字节数
+	BudgetSkipped   bool   `json:"-"` // 触及在途预算，响应体未完整暂存
 	// CaptureSessionID 所属抓包会话（0=非会话行/旧数据），见 capturesession.go
 	CaptureSessionID int64 `json:"-"`
 	// captureGen 采集时的清除代次（stripStaleCapture 用，不落库不序列化）
 	captureGen int64
+	// respBuf 响应体累积缓冲（仅录制请求上创建，转发协程内单线程写）
+	respBuf *captureBuffer
 }
 
 // claude code usage parser
@@ -2331,6 +2453,10 @@ func streamGeminiResponseWithHook(body io.Reader, writer io.Writer, requestLog *
 		n, err := body.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
+			// 抓包：原始响应字节喂入缓冲（本函数单协程读写，无竞态）
+			if requestLog != nil {
+				requestLog.respBuf.append(chunk)
+			}
 			// 写入客户端（优先保证数据传输）；写客户端失败=客户端主动断开,
 			// 用 errClientAbort 标记,避免被当作供应商故障计入拉黑
 			if _, writeErr := writer.Write(chunk); writeErr != nil {
@@ -2551,6 +2677,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 
 		// 保存日志的 defer
 		defer func() {
+			// 响应缓冲收敛并归还在途预算
+			finalizeCaptureResponse(requestLog)
+			if requestLog.respBuf != nil {
+				requestLog.respBuf.release()
+			}
 			// Provider 为空说明没有任何一次真实转发（如纯并发忙），
 			// 不落一条 Provider=""、HttpCode=0 的无效记录
 			if requestLog.Provider == "" {
@@ -3044,12 +3175,23 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 	// 【修复】每次尝试开始前重置 HttpCode，避免重试时沿用上一次的状态码
 	requestLog.HttpCode = 0
 	// 抓包字段同步重置：多次尝试复用同一 requestLog，必须在任何提前返回之前清掉
-	// 上一家的残留，否则本家构造请求失败时会落下"新 Provider + 旧请求内容"的错配
+	// 上一家的残留，否则本家构造请求失败时会落下"新 Provider + 旧请求内容"的错配。
+	// 全量模式下 URL/响应也一并按"终态尝试"重置，并释放上一尝试的响应缓冲
+	requestLog.RequestURL = ""
 	requestLog.RequestHeaders = ""
 	requestLog.RequestBody = ""
 	requestLog.BodyTruncated = false
 	requestLog.BodyBytes = 0
+	requestLog.ResponseHeaders = ""
+	requestLog.ResponseBody = ""
+	requestLog.RespTruncated = false
+	requestLog.RespBytes = 0
+	requestLog.BudgetSkipped = false
 	requestLog.CaptureSessionID = 0
+	if requestLog.respBuf != nil {
+		requestLog.respBuf.release()
+		requestLog.respBuf = nil
+	}
 	// 优先从 endpoint 提取模型名（如 gemini-2.5-pro），否则回退到 provider.Model
 	if extractedModel := extractGeminiModelFromEndpoint(endpoint); extractedModel != "" {
 		requestLog.Model = extractedModel
@@ -3084,21 +3226,17 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		req.Header.Set("x-goog-api-key", provider.APIKey)
 	}
 
-	// 抓包模式：字段已在本次尝试开头统一重置，这里按开关采集终态出站请求
-	// （x-goog-api-key 注入完成、进入 transport 之前的应用层形态）。
+	// 抓包模式（全量不脱敏）：字段已在本次尝试开头统一重置，这里按开关采集
+	// 终态出站请求（x-goog-api-key 注入完成、进入 transport 之前的应用层形态）。
 	// 状态一次性快照（读锁内），避免与关闭/清除竞态拼出错位组合
 	if enabled, sessionID, gen := prs.captureSnapshot(); enabled {
 		requestLog.captureGen = gen
 		requestLog.CaptureSessionID = sessionID
-		flat := make(map[string]string, len(req.Header))
-		for k, vs := range req.Header {
-			// 多值头合并保留（transport 会全部发送，丢值会让详情失真）
-			if len(vs) > 0 {
-				flat[k] = strings.Join(vs, ", ")
-			}
-		}
-		requestLog.RequestHeaders = maskCaptureHeaders(flat, "", provider.APIKey)
-		requestLog.RequestBody, requestLog.BodyTruncated, requestLog.BodyBytes = redactCaptureBody(bodyBytes, provider.APIKey)
+		requestLog.RequestURL = targetURL
+		// 请求头以数组保留多值（不逗号合并），与响应头口径一致
+		requestLog.RequestHeaders = rawHTTPHeaders(req.Header)
+		requestLog.RequestBody, requestLog.BodyTruncated, requestLog.BodyBytes = rawCaptureBody(bodyBytes)
+		requestLog.respBuf = newCaptureBuffer(&prs.captureInflightBytes)
 	}
 
 	// 发送请求（与 Claude/Codex 转发共用连接池，避免每请求新建 Transport；
@@ -3119,13 +3257,29 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 
 	// 先记录上游状态码，失败场景也能落库
 	requestLog.HttpCode = resp.StatusCode
+	// 抓包：响应头（含错误响应），全量记录
+	if requestLog.respBuf != nil {
+		requestLog.ResponseHeaders = rawResponseHeaders(resp.Header)
+	}
 
 	// 检查响应状态
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// 上游错误体大小不可控（可能是整页 HTML），限长读取后再进日志与错误串
-		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		// 上游错误体大小不可控（可能是整页 HTML）。抓包时读到 captureFieldLimit，
+		// 完整存入缓冲；错误串仍只取前 2048 字节
+		errBodyLimit := int64(2048)
+		if requestLog.respBuf != nil {
+			errBodyLimit = int64(captureFieldLimit) + 1
+		}
+		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyLimit))
+		if requestLog.respBuf != nil {
+			requestLog.respBuf.append(errorBody)
+		}
+		msgBody := errorBody
+		if len(msgBody) > 2048 {
+			msgBody = msgBody[:2048]
+		}
 		fmt.Printf("[Gemini]   ✗ 失败: %s | HTTP %d | 耗时: %.2fs\n", provider.Name, resp.StatusCode, providerDuration)
-		msg := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(errorBody))
+		msg := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(msgBody))
 		// 请求内容本身被拒（400/413/422 等）：换供应商也一样失败，
 		// 加前缀让调用方跳过失败计数，避免一个坏请求把所有 Gemini 供应商拉黑
 		if isClientSideUpstreamStatus(resp.StatusCode) {
@@ -3173,6 +3327,10 @@ func (prs *ProviderRelayService) forwardGeminiRequest(
 		}
 		// 解析 Gemini 用量数据
 		parseGeminiUsageMetadata(body, requestLog)
+		// 抓包：非流式完整响应体
+		if requestLog.respBuf != nil {
+			requestLog.respBuf.append(body)
+		}
 		// 读取成功后再写 header 和 body
 		for key, values := range resp.Header {
 			for _, value := range values {

@@ -14,235 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ==================== 脱敏辅助函数 ====================
-
-func TestMaskCaptureHeaders(t *testing.T) {
-	tests := []struct {
-		name       string
-		headers    map[string]string
-		authHeader string
-		apiKey     string
-		check      func(t *testing.T, m map[string]string)
-	}{
-		{
-			"固定敏感头被打码",
-			map[string]string{"Authorization": "Bearer sk-live", "X-Api-Key": "sk-live", "Content-Type": "application/json"},
-			"", "",
-			func(t *testing.T, m map[string]string) {
-				if m["Authorization"] != "***" || m["X-Api-Key"] != "***" {
-					t.Errorf("固定敏感头未打码: %v", m)
-				}
-				if m["Content-Type"] != "application/json" {
-					t.Errorf("普通头不应被改动: %v", m)
-				}
-			},
-		},
-		{
-			"自定义认证头按配置名打码",
-			map[string]string{"X-Secret-Auth": "sk-live", "Accept": "application/json"},
-			"X-Secret-Auth", "",
-			func(t *testing.T, m map[string]string) {
-				if m["X-Secret-Auth"] != "***" {
-					t.Errorf("自定义认证头未打码: %v", m)
-				}
-			},
-		},
-		{
-			"任意头的值包含密钥即打码",
-			map[string]string{"X-Debug-Info": "key=sk-live rest", "X-Trace": "abc"},
-			"", "sk-live",
-			func(t *testing.T, m map[string]string) {
-				if m["X-Debug-Info"] != "***" {
-					t.Errorf("含密钥值的头未打码: %v", m)
-				}
-				if m["X-Trace"] != "abc" {
-					t.Errorf("无关头不应被改动: %v", m)
-				}
-			},
-		},
-		{
-			"超长单值被截断且整体仍是合法 JSON",
-			map[string]string{"X-Big": strings.Repeat("啊", 3000)},
-			"", "",
-			func(t *testing.T, m map[string]string) {
-				if len(m["X-Big"]) > 2*1024+8 {
-					t.Errorf("超长值未截断: %d 字节", len(m["X-Big"]))
-				}
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			out := maskCaptureHeaders(tt.headers, tt.authHeader, tt.apiKey)
-			var m map[string]string
-			if err := json.Unmarshal([]byte(out), &m); err != nil {
-				t.Fatalf("输出必须是合法 JSON: %v\n%s", err, out)
-			}
-			tt.check(t, m)
-		})
-	}
-
-	t.Run("空头返回空串", func(t *testing.T) {
-		if got := maskCaptureHeaders(nil, "", ""); got != "" {
-			t.Errorf("空头应返回空串, 实际 %q", got)
-		}
-	})
-
-	t.Run("海量头超总限退化为占位 JSON", func(t *testing.T) {
-		headers := map[string]string{}
-		for i := 0; i < 64; i++ {
-			headers["X-Pad-"+strings.Repeat("a", i)+string(rune('a'+i%26))] = strings.Repeat("v", 1000)
-		}
-		out := maskCaptureHeaders(headers, "", "")
-		var m map[string]string
-		if err := json.Unmarshal([]byte(out), &m); err != nil {
-			t.Fatalf("退化输出也必须是合法 JSON: %v", err)
-		}
-		if len(out) > captureHeadersLimit {
-			t.Errorf("输出超过头部限额: %d", len(out))
-		}
-	})
-}
-
-func TestCaptureSensitiveKey(t *testing.T) {
-	sensitive := []string{
-		"api_key", "apiKey", "accessToken", "refreshToken", "clientSecret",
-		"privateKey", "authToken", "password", "Authorization", "session_id",
-		"keys", "secrets", "credentials", "token",
-		// 凭据型复数：不能被 "tokens" 的数量豁免放过
-		"accessTokens", "refresh_tokens", "apiTokens", "tokens", "2fa_tokens",
-	}
-	for _, k := range sensitive {
-		if !captureSensitiveKey(k) {
-			t.Errorf("%q 应判定为敏感键", k)
-		}
-	}
-	// "tokens" 仅在数量限定词之后豁免
-	benign := []string{
-		"max_tokens", "maxTokens", "max_output_tokens", "budget_tokens",
-		"output_tokens", "prompt_tokens", "completion_tokens",
-		"cache_read_tokens", "ephemeral_5m_tokens",
-		"model", "temperature", "messages", "stream",
-	}
-	for _, k := range benign {
-		if captureSensitiveKey(k) {
-			t.Errorf("%q 不应判定为敏感键", k)
-		}
-	}
-}
-
-func TestRedactCaptureBody(t *testing.T) {
-	t.Run("JSON 敏感键与密钥值均被打码", func(t *testing.T) {
-		body := []byte(`{"model":"m","api_key":"sk-live","nested":{"authorization":"Bearer x","list":[{"token":"t1"},"plain sk-live tail"]},"keep":"ok"}`)
-		out, truncated, n := redactCaptureBody(body, "sk-live")
-		if truncated || n != len(body) {
-			t.Errorf("不应截断, truncated=%v bytes=%d", truncated, n)
-		}
-		if strings.Contains(out, "sk-live") {
-			t.Errorf("密钥泄漏: %s", out)
-		}
-		var tree map[string]any
-		if err := json.Unmarshal([]byte(out), &tree); err != nil {
-			t.Fatalf("输出应是合法 JSON: %v", err)
-		}
-		if tree["api_key"] != "***" {
-			t.Errorf("api_key 未打码: %v", tree["api_key"])
-		}
-		if tree["keep"] != "ok" {
-			t.Errorf("普通字段被误改: %v", tree["keep"])
-		}
-	})
-
-	t.Run("敏感键下的非字符串标量也打码", func(t *testing.T) {
-		body := []byte(`{"password":123456,"config":{"secret":true},"accessToken":"sk-x"}`)
-		out, _, _ := redactCaptureBody(body, "")
-		if strings.Contains(out, "123456") || strings.Contains(out, "true") || strings.Contains(out, "sk-x") {
-			t.Errorf("非字符串凭据或 camelCase 键泄漏: %s", out)
-		}
-	})
-
-	t.Run("token 数量字段与大整数无损保留", func(t *testing.T) {
-		body := []byte(`{"max_tokens":4096,"maxTokens":8192,"metadata":{"trace_id":9007199254740993}}`)
-		out, _, _ := redactCaptureBody(body, "")
-		for _, want := range []string{"4096", "8192", "9007199254740993"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("数字 %s 丢失或被改值: %s", want, out)
-			}
-		}
-	})
-
-	t.Run("超过解析阈值降级为值替换", func(t *testing.T) {
-		big := []byte(`{"pad":"` + strings.Repeat("x", captureParseLimit) + `","api_key":"sk-live"}`)
-		out, truncated, n := redactCaptureBody(big, "sk-live")
-		if !truncated || n != len(big) {
-			t.Errorf("元数据错误: truncated=%v bytes=%d", truncated, n)
-		}
-		if strings.Contains(out, "sk-live") {
-			t.Error("降级路径已知密钥仍须替换")
-		}
-	})
-
-	t.Run("降级路径截断边界不残留半截密钥", func(t *testing.T) {
-		key := "sk-SECRET-0123456789"
-		// 前段塞多个完整密钥（替换后左移文本），让一个恰好跨越前缀边界的
-		// 密钥残段被挪进最终 64KB——残段必须被后缀刮除
-		head := strings.Repeat(key+",", 16)
-		fillerLen := captureBodyLimit + len(key) - len(head) - 5 // 前缀里只装得下密钥前 5 字节
-		big := head + strings.Repeat("x", fillerLen) + key + strings.Repeat("y", captureParseLimit)
-		out, truncated, _ := redactCaptureBody([]byte(big), key)
-		if !truncated {
-			t.Fatal("应标记截断")
-		}
-		if strings.Contains(out, "sk-S") {
-			t.Errorf("截断边界残留密钥片段: 尾部=%q", out[len(out)-32:])
-		}
-		if !strings.Contains(out, "***") {
-			t.Error("完整密钥出现应被替换")
-		}
-	})
-
-	t.Run("密钥作为 JSON 字段名同样被替换", func(t *testing.T) {
-		body := []byte(`{"sk-live":"some value","model":"m"}`)
-		out, _, _ := redactCaptureBody(body, "sk-live")
-		if strings.Contains(out, "sk-live") {
-			t.Errorf("字段名中的密钥泄漏: %s", out)
-		}
-	})
-
-	t.Run("非 JSON 只做密钥值替换", func(t *testing.T) {
-		out, truncated, n := redactCaptureBody([]byte("raw text with sk-live inside"), "sk-live")
-		if strings.Contains(out, "sk-live") {
-			t.Errorf("非 JSON 正文密钥未替换: %s", out)
-		}
-		if !strings.Contains(out, "raw text with") {
-			t.Errorf("其余文本应保留: %s", out)
-		}
-		if truncated || n == 0 {
-			t.Errorf("元数据错误: truncated=%v bytes=%d", truncated, n)
-		}
-	})
-
-	t.Run("超限截断并回报元数据", func(t *testing.T) {
-		big := []byte(`{"pad":"` + strings.Repeat("x", captureBodyLimit+100) + `"}`)
-		out, truncated, n := redactCaptureBody(big, "")
-		if !truncated {
-			t.Error("超限正文应标记截断")
-		}
-		if n != len(big) {
-			t.Errorf("原始字节数应为 %d, 实际 %d", len(big), n)
-		}
-		if len(out) > captureBodyLimit {
-			t.Errorf("截断后仍超限: %d", len(out))
-		}
-	})
-
-	t.Run("空正文", func(t *testing.T) {
-		out, truncated, n := redactCaptureBody(nil, "k")
-		if out != "" || truncated || n != 0 {
-			t.Errorf("空正文应返回零值: %q %v %d", out, truncated, n)
-		}
-	})
-}
 
 func TestTruncateUTF8(t *testing.T) {
 	s := strings.Repeat("汉", 10) // 30 字节
@@ -283,7 +54,8 @@ func TestRequestLogCaptureColumnsMigration(t *testing.T) {
 			t.Fatalf("第 %d 次迁移失败: %v", i+1, err)
 		}
 	}
-	for _, col := range []string{"request_headers", "request_body", "body_truncated", "body_bytes"} {
+	for _, col := range []string{"request_url", "request_headers", "request_body", "body_truncated", "body_bytes",
+		"response_headers", "response_body", "response_truncated", "response_bytes", "budget_skipped", "capture_session_id"} {
 		exists, err := requestLogColumnExists(db, col)
 		if err != nil {
 			t.Fatalf("查询列 %s 失败: %v", col, err)
@@ -389,23 +161,21 @@ func TestForwardRequestCaptureOnOff(t *testing.T) {
 		t.Fatalf("应有 2 条日志, 实际 %d", len(got))
 	}
 
-	// 第一条:开关开启
+	// 第一条:开关开启（全量不脱敏）
 	on := got[0]
 	if on.headers == "" || on.body == "" || on.bodyBytes != len(body) {
 		t.Fatalf("开启时应录制: headers=%q body=%q bytes=%d", on.headers, on.body, on.bodyBytes)
 	}
-	var hm map[string]string
+	var hm map[string]interface{}
 	if err := json.Unmarshal([]byte(on.headers), &hm); err != nil {
 		t.Fatalf("落库请求头必须是合法 JSON: %v", err)
 	}
-	if hm["X-Secret-Auth"] != "***" {
-		t.Errorf("自定义认证头未打码: %v", hm)
-	}
-	if strings.Contains(on.headers, "provider-secret") || strings.Contains(on.body, "provider-secret") {
-		t.Errorf("供应商密钥泄漏到日志: %s | %s", on.headers, on.body)
+	// 全量不脱敏：请求体原样保留，密钥不打码
+	if !strings.Contains(on.body, "provider-secret") {
+		t.Errorf("全量模式请求体应原样保留密钥（不脱敏）: %s", on.body)
 	}
 	if !strings.Contains(on.body, `"messages"`) {
-		t.Errorf("正文非敏感内容应保留: %s", on.body)
+		t.Errorf("正文内容应完整保留: %s", on.body)
 	}
 
 	// 第二条:开关关闭
@@ -432,13 +202,16 @@ func TestForwardRequestCaptureOnOff(t *testing.T) {
 		t.Errorf("列表序列化不应携带抓包大字段: %s", data)
 	}
 
-	// 详情接口:返回完整抓包内容
+	// 详情接口:返回抓包内容（含响应），并录到上游响应体
 	detail, err := ls.GetRequestLogDetail(on.id)
 	if err != nil {
 		t.Fatalf("详情查询失败: %v", err)
 	}
 	if detail.RequestHeaders != on.headers || detail.RequestBody != on.body || detail.BodyBytes != len(body) {
-		t.Errorf("详情与落库内容不一致")
+		t.Errorf("详情与落库请求内容不一致")
+	}
+	if !strings.Contains(detail.ResponseBody, `"ok":true`) {
+		t.Errorf("应录到上游响应体, 实际 %q", detail.ResponseBody)
 	}
 	if _, err := ls.GetRequestLogDetail(99999); err == nil {
 		t.Error("不存在的 ID 应报错")
@@ -453,7 +226,7 @@ func TestForwardRequestCaptureOnOff(t *testing.T) {
 		t.Errorf("应清理 1 行, 实际 %d", affected)
 	}
 	var cnt int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM request_log WHERE request_headers != '' OR request_body != '' OR body_truncated != 0 OR body_bytes != 0`).Scan(&cnt); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM request_log WHERE ` + captureRowPredicate).Scan(&cnt); err != nil {
 		t.Fatalf("复查失败: %v", err)
 	}
 	if cnt != 0 {
@@ -518,15 +291,13 @@ func TestGeminiForwardCaptureFinalAttempt(t *testing.T) {
 	if headers == "" || body == "" {
 		t.Fatalf("gemini 路径未录制: headers=%q body=%q", headers, body)
 	}
-	var hm map[string]string
+	// 全量不脱敏：请求头以 JSON 对象（值为数组）落库，认证头原样保留密钥
+	var hm map[string][]string
 	if err := json.Unmarshal([]byte(headers), &hm); err != nil {
-		t.Fatalf("请求头必须是合法 JSON: %v", err)
+		t.Fatalf("请求头必须是合法 JSON（值为数组）: %v", err)
 	}
-	if v, ok := hm["X-Goog-Api-Key"]; !ok || v != "***" {
-		t.Errorf("gemini 认证头未打码: %v", hm)
-	}
-	if strings.Contains(headers, "key-good") || strings.Contains(headers, "key-bad") {
-		t.Errorf("gemini 密钥泄漏: %s", headers)
+	if vals, ok := hm["X-Goog-Api-Key"]; !ok || len(vals) == 0 || vals[0] != "key-good" {
+		t.Errorf("gemini 认证头应原样保留密钥（不脱敏）: %v", hm)
 	}
 	if !strings.Contains(body, "hello") {
 		t.Errorf("正文应保留原始内容: %s", body)

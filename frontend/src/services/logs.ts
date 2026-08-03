@@ -34,10 +34,18 @@ export type RequestLogDetail = {
   provider: string
   model: string
   created_at: string
+  request_url: string
   request_headers: string
   request_body: string
+  request_body_preview: boolean
   body_truncated: boolean
   body_bytes: number
+  response_headers: string
+  response_body: string
+  response_body_preview: boolean
+  response_truncated: boolean
+  response_bytes: number
+  budget_skipped: boolean
 }
 
 export const fetchRequestLogDetail = async (id: number): Promise<RequestLogDetail> => {

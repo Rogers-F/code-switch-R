@@ -99,12 +99,13 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 	}
 	model := xdb.New("request_log")
 	options := []xdb.Option{
-		// 显式投影：绝不把抓包大字段（request_headers/request_body）拉进列表——
-		// 一页 200 行最坏能带出十几 MB 正文。has_capture 供前端判断可否展开详情
+		// 显式投影：绝不把抓包大字段（request/response body 等）拉进列表——
+		// 一页 200 行最坏能带出几百 MB 正文。has_capture 供前端判断可否展开详情。
+		// 谓词须与 capturesession.go 的 captureRowPredicate 覆盖同一批列
 		xdb.Field("id, platform, model, provider, http_code, input_tokens, output_tokens, " +
 			"cache_create_tokens, cache_read_tokens, reasoning_tokens, is_stream, duration_sec, " +
 			"created_at, ephemeral_5m_tokens, ephemeral_1h_tokens, service_tier, " +
-			"(request_headers != '' OR request_body != '' OR body_truncated != 0 OR body_bytes != 0) AS has_capture"),
+			"(request_url != '' OR request_headers != '' OR request_body != '' OR response_headers != '' OR response_body != '' OR body_truncated != 0 OR body_bytes != 0 OR response_truncated != 0 OR response_bytes != 0 OR budget_skipped != 0) AS has_capture"),
 		xdb.OrderByDesc("id"),
 		xdb.Limit(limit),
 	}
@@ -145,24 +146,37 @@ func (ls *LogService) ListRequestLogs(platform string, provider string, limit in
 	return logs, nil
 }
 
-// RequestLogDetail 单条日志的抓包详情（按需读取，避免列表携带大字段）
+// RequestLogDetail 单条日志的抓包详情（按需读取，避免列表携带大字段）。
+// 每个大字段仅返回有界预览（capturePreview），完整内容走导出——整段 50MiB
+// 直接塞进 <pre> 会冻死 webview
 type RequestLogDetail struct {
-	ID             int64  `json:"id"`
-	Platform       string `json:"platform"`
-	Provider       string `json:"provider"`
-	Model          string `json:"model"`
-	CreatedAt      string `json:"created_at"`
-	RequestHeaders string `json:"request_headers"`
-	RequestBody    string `json:"request_body"`
-	BodyTruncated  bool   `json:"body_truncated"`
-	BodyBytes      int    `json:"body_bytes"`
+	ID       int64  `json:"id"`
+	Platform string `json:"platform"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	CreatedAt string `json:"created_at"`
+	RequestURL string `json:"request_url"`
+	// 请求
+	RequestHeaders     string `json:"request_headers"`
+	RequestBody        string `json:"request_body"`
+	RequestBodyPreview bool   `json:"request_body_preview"` // 正文被预览截断（完整内容请导出）
+	BodyTruncated      bool   `json:"body_truncated"`       // 采集时即超 captureFieldLimit
+	BodyBytes          int    `json:"body_bytes"`
+	// 响应
+	ResponseHeaders     string `json:"response_headers"`
+	ResponseBody        string `json:"response_body"`
+	ResponseBodyPreview bool   `json:"response_body_preview"`
+	RespTruncated       bool   `json:"response_truncated"`
+	RespBytes           int    `json:"response_bytes"`
+	BudgetSkipped       bool   `json:"budget_skipped"`
 }
 
-// GetRequestLogDetail 读取单条日志的出站请求详情（抓包模式录制的内容）
+// GetRequestLogDetail 读取单条日志的抓包详情（全量不脱敏录制的内容）。
+// 大字段返回有界预览
 func (ls *LogService) GetRequestLogDetail(id int64) (*RequestLogDetail, error) {
 	model := xdb.New("request_log")
 	records, err := model.Selects(
-		xdb.Field("id, platform, provider, model, created_at, request_headers, request_body, body_truncated, body_bytes"),
+		xdb.Field("id, platform, provider, model, created_at, request_url, request_headers, request_body, body_truncated, body_bytes, response_headers, response_body, response_truncated, response_bytes, budget_skipped"),
 		xdb.WhereEq("id", id),
 		xdb.Limit(1),
 	)
@@ -173,16 +187,26 @@ func (ls *LogService) GetRequestLogDetail(id int64) (*RequestLogDetail, error) {
 		return nil, fmt.Errorf("未找到 ID 为 %d 的日志", id)
 	}
 	record := records[0]
+	reqBody, reqPreview := capturePreview(record.GetString("request_body"))
+	respBody, respPreview := capturePreview(record.GetString("response_body"))
 	return &RequestLogDetail{
-		ID:             record.GetInt64("id"),
-		Platform:       record.GetString("platform"),
-		Provider:       record.GetString("provider"),
-		Model:          record.GetString("model"),
-		CreatedAt:      record.GetString("created_at"),
-		RequestHeaders: record.GetString("request_headers"),
-		RequestBody:    record.GetString("request_body"),
-		BodyTruncated:  record.GetBool("body_truncated"),
-		BodyBytes:      record.GetInt("body_bytes"),
+		ID:                  record.GetInt64("id"),
+		Platform:            record.GetString("platform"),
+		Provider:            record.GetString("provider"),
+		Model:               record.GetString("model"),
+		CreatedAt:           record.GetString("created_at"),
+		RequestURL:          record.GetString("request_url"),
+		RequestHeaders:      record.GetString("request_headers"),
+		RequestBody:         reqBody,
+		RequestBodyPreview:  reqPreview,
+		BodyTruncated:       record.GetBool("body_truncated"),
+		BodyBytes:           record.GetInt("body_bytes"),
+		ResponseHeaders:     record.GetString("response_headers"),
+		ResponseBody:        respBody,
+		ResponseBodyPreview: respPreview,
+		RespTruncated:       record.GetBool("response_truncated"),
+		RespBytes:           record.GetInt("response_bytes"),
+		BudgetSkipped:       record.GetBool("budget_skipped"),
 	}, nil
 }
 

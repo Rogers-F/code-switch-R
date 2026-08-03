@@ -1,295 +1,199 @@
 package services
 
 import (
-	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
 	"sort"
-	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
-// ========== 抓包模式（issue #5）==========
+// ========== 抓包采集（全量不脱敏）==========
 //
-// 语义：录制"终态供应商尝试、进入 HTTP transport 之前"的应用层出站
-// 请求头与正文（映射/清理/认证注入后的最终形态）。开关为进程内状态，
-// 重启即关——这是调试态功能，不持久化避免用户遗忘后长期落敏感数据。
-// 脱敏承诺的边界：已知认证信息（认证头与配置的 API Key 值、JSON 正文
-// 中的敏感键）会被打码；正文其余内容原样保存，仍可能包含敏感信息。
+// 语义：录制"终态供应商尝试、进入 HTTP transport 之前"的应用层出站请求
+// （URL / 请求头 / 请求体，映射与认证注入后的最终形态）与上游响应（响应头 /
+// 响应体）。录制开关为进程内状态、重启即关（调试态功能）。
+//
+// 【安全告警】不做任何脱敏：明文 API Key、完整提示词与响应内容都会原样落库。
+// 这是用户显式选择的调试模式，导出文件切勿分享。数据库删除仅为逻辑删除，
+// 磁盘回收依赖 ClearCapturedRequests 的 VACUUM。
 
 const (
-	// captureHeadersLimit 请求头序列化后的存储上限
-	captureHeadersLimit = 8 * 1024
-	// captureBodyLimit 请求正文的存储上限
-	captureBodyLimit = 64 * 1024
-	// captureParseLimit JSON 树式脱敏的解析上限。超大正文整树解析 + 重序列化
-	// 会造成数倍内存放大，超过该阈值退化为"密钥值替换 + 截断"的降级路径
-	captureParseLimit = 2 * 1024 * 1024
-	// captureMaskValue 打码占位
-	captureMaskValue = "***"
+	// captureFieldLimit 单个字段（请求体/响应体）落库上限。超出即截断并置标记，
+	// 但计数与转发不受影响。真实提示词/响应远小于此，该上限只是 OOM 兜底
+	captureFieldLimit = 50 * 1024 * 1024
+	// captureInflightBudget 进程内在途“响应缓冲累积”的总预算。多路大响应并发时，
+	// 累计占用触顶后新增响应内容不再暂存（置 budget_skipped），仍照常转发。
+	// 注意：这是响应流累积的软上限（主要 OOM 风险），不计入已在内存中的请求体
+	// 与落库前的字符串副本，因此不是进程总内存的硬保证
+	captureInflightBudget = 128 * 1024 * 1024
+	// captureDetailPreviewLimit 明细接口每字段返回的预览上限。整段 50MiB 直接
+	// 塞进 <pre> 会冻死 webview，完整内容只能走导出
+	captureDetailPreviewLimit = 256 * 1024
 )
 
-// captureSensitiveHeaders 固定敏感头名（小写）；自定义认证头名由调用方传入
-var captureSensitiveHeaders = map[string]bool{
-	"authorization":       true,
-	"proxy-authorization": true,
-	"x-api-key":           true,
-	"api-key":             true,
-	"x-goog-api-key":      true,
-	"cookie":              true,
-}
-
-// captureSensitiveSegments 正文敏感键的分段词表（小写）
-var captureSensitiveSegments = map[string]bool{
-	"key": true, "apikey": true, "token": true, "secret": true,
-	"password": true, "passwd": true, "credential": true, "credentials": true,
-	"auth": true, "authorization": true, "bearer": true, "cookie": true, "session": true,
-}
-
-// captureKeySegments 把键名切成小写分段：非字母数字是边界，camelCase 的
-// 小写→大写转折也是边界（accessToken → access/token）
-func captureKeySegments(name string) []string {
-	segments := []string{}
-	seg := strings.Builder{}
-	prevLower := false
-	for _, r := range name {
-		isUpper := r >= 'A' && r <= 'Z'
-		isLower := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
-		if !isUpper && !isLower {
-			if seg.Len() > 0 {
-				segments = append(segments, seg.String())
-				seg.Reset()
-			}
-			prevLower = false
-			continue
-		}
-		if isUpper && prevLower && seg.Len() > 0 {
-			segments = append(segments, seg.String())
-			seg.Reset()
-		}
-		if isUpper {
-			r += 'a' - 'A'
-		}
-		seg.WriteRune(r)
-		prevLower = isLower
-	}
-	if seg.Len() > 0 {
-		segments = append(segments, seg.String())
-	}
-	return segments
-}
-
-// captureQuantityQualifiers "tokens" 前缀为这些分段时是数量语义（max_tokens、
-// output_tokens、cache_read_tokens…），不按凭据处理；数字开头的分段
-// （ephemeral_5m_tokens 的 "5m"）同样视为数量限定词
-var captureQuantityQualifiers = map[string]bool{
-	"max": true, "min": true, "num": true, "count": true, "total": true,
-	"budget": true, "input": true, "output": true, "prompt": true,
-	"completion": true, "thinking": true, "reasoning": true,
-	"cache": true, "cached": true, "read": true, "write": true, "creation": true,
-}
-
-// captureDurationSegment 判断分段是否是时长/容量形状（5m/1h/200k…）：
-// 全数字加至多一个单位字母。不能放宽成"数字开头"，否则 2fa_tokens
-// 这类认证键会被误判为数量语义
-func captureDurationSegment(s string) bool {
-	if s == "" {
-		return false
-	}
-	last := s[len(s)-1]
-	digits := s
-	switch last {
-	case 's', 'm', 'h', 'd', 'k':
-		digits = s[:len(s)-1]
-	}
-	if digits == "" {
-		return false
-	}
-	for i := 0; i < len(digits); i++ {
-		if digits[i] < '0' || digits[i] > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// captureSensitiveKey 判断正文键名是否敏感。与导出侧 sensitiveKeyName 的差异：
-//  1. 额外切分 camelCase（accessToken/clientSecret 才能命中）；
-//  2. "tokens" 仅在前一分段是数量限定词或时长形状时豁免（max_tokens/
-//     ephemeral_5m_tokens 是数量，accessTokens/refresh_tokens/2fa_tokens
-//     仍是凭据）；无限定词默认按凭据打码。
-func captureSensitiveKey(name string) bool {
-	segments := captureKeySegments(name)
-	for i, s := range segments {
-		if s == "tokens" {
-			if i > 0 {
-				prev := segments[i-1]
-				if captureQuantityQualifiers[prev] || captureDurationSegment(prev) {
-					continue
-				}
-			}
-			return true
-		}
-		if captureSensitiveSegments[s] {
-			return true
-		}
-		if strings.HasSuffix(s, "s") && captureSensitiveSegments[strings.TrimSuffix(s, "s")] {
-			return true
-		}
-		// "api"+"key" 连段（api_key / api-key / apiKey 已被切开）
-		if s == "api" && i+1 < len(segments) && captureSensitiveSegments[segments[i+1]] {
-			return true
-		}
-	}
-	return false
-}
-
-// maskCaptureHeaders 序列化出站请求头（键排序 JSON），打码敏感头。
-// authHeaderName 是供应商配置的认证方式（可能是任意自定义头名），
-// apiKey 是该供应商密钥——任何头的值包含它都会被整体打码，
-// 兜住"密钥被写进非常规头"的场景。
-func maskCaptureHeaders(headers map[string]string, authHeaderName, apiKey string) string {
+// rawRequestHeaders 序列化出站请求头（键排序 JSON 对象），不脱敏。
+// 请求头由本程序构造，体量受 HTTP 实践约束（KB 级），不设截断
+func rawRequestHeaders(headers map[string]string) string {
 	if len(headers) == 0 {
 		return ""
 	}
-	customAuth := strings.ToLower(strings.TrimSpace(authHeaderName))
-
 	keys := make([]string, 0, len(headers))
 	for k := range headers {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-
-	masked := make(map[string]string, len(headers))
+	ordered := make([][2]string, 0, len(keys))
 	for _, k := range keys {
-		v := headers[k]
-		lower := strings.ToLower(k)
-		switch {
-		case captureSensitiveHeaders[lower]:
-			v = captureMaskValue
-		case customAuth != "" && lower == customAuth:
-			v = captureMaskValue
-		case apiKey != "" && strings.Contains(v, apiKey):
-			v = captureMaskValue
-		}
-		// 单值预限长：总量超限时不能直接截断序列化字节（会产出非法 JSON）
-		if len(v) > 2*1024 {
-			v = truncateUTF8(v, 2*1024) + "…"
-		}
-		masked[k] = v
+		ordered = append(ordered, [2]string{k, headers[k]})
 	}
-
-	data, err := json.Marshal(masked)
+	// 用有序切片保证键序稳定；json.Marshal(map) 也排序，但显式更清晰
+	obj := make(map[string]string, len(headers))
+	for _, kv := range ordered {
+		obj[kv[0]] = kv[1]
+	}
+	data, err := json.Marshal(obj)
 	if err != nil {
 		return ""
-	}
-	if len(data) > captureHeadersLimit {
-		// 极端场景（海量头）：宁可放弃明细也要保证字段是合法 JSON
-		return `{"_capture":"headers exceed size limit"}`
 	}
 	return string(data)
 }
 
-// redactCaptureBody 脱敏并限长正文。返回 (存储文本, 是否截断, 原始字节数)。
-// 合法 JSON：递归打码敏感键（captureSensitiveKey，含 camelCase）并按值替换
-// 已知 API Key；数字经 UseNumber 无损透传，避免大整数被 float64 改值。
-// 非 JSON 或超过解析阈值：仅按值替换已知 Key。截断信息走元数据列，
-// 不往原文里塞标记。
-func redactCaptureBody(body []byte, apiKey string) (string, bool, int) {
-	originalBytes := len(body)
-	if originalBytes == 0 {
+// rawResponseHeaders 序列化上游响应头（JSON 对象，值为数组），保留重复头
+// （尤其 Set-Cookie）。响应头体量受 Go http.Transport 的 MaxResponseHeaderBytes
+// 约束（默认 10MB），不再单独截断
+func rawResponseHeaders(header http.Header) string {
+	if len(header) == 0 {
+		return ""
+	}
+	obj := make(map[string][]string, len(header))
+	for k, v := range header {
+		vs := make([]string, len(v))
+		copy(vs, v)
+		obj[k] = vs
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// rawHTTPHeaders 与 rawResponseHeaders 同构：把 http.Header 序列化为 JSON 对象
+// （值为数组，保留多值），供 Gemini 请求头采集复用（不逗号合并）
+func rawHTTPHeaders(header http.Header) string {
+	return rawResponseHeaders(header)
+}
+
+// rawCaptureBody 把请求体原样转为存储文本（不脱敏），按 captureFieldLimit 截断。
+// 返回 (存储文本, 是否截断, 原始字节数)。请求体已完整在内存，截断只影响落库量
+func rawCaptureBody(body []byte) (string, bool, int) {
+	total := len(body)
+	if total == 0 {
 		return "", false, 0
 	}
-
-	text := ""
-	truncated := false
-	if originalBytes <= captureParseLimit {
-		dec := json.NewDecoder(bytes.NewReader(body))
-		dec.UseNumber()
-		var tree any
-		if dec.Decode(&tree) == nil && !dec.More() {
-			redactCaptureValue(&tree, false, apiKey)
-			if data, err := json.Marshal(tree); err == nil {
-				text = string(data)
-				// 树遍历只处理值,密钥出现在字段名里时兜底按值替换
-				if apiKey != "" {
-					text = strings.ReplaceAll(text, apiKey, captureMaskValue)
-				}
-			}
-		}
+	if total <= captureFieldLimit {
+		return string(body), false, total
 	}
-	if text == "" {
-		// 降级路径（非 JSON 或超过解析阈值）：只在有界前缀上工作，避免为超大
-		// 正文再造整份字符串。前缀多留 len(apiKey)，让跨截断边界的密钥出现
-		// 尽量完整落入前缀被整体替换
-		prefix := body
-		if len(prefix) > captureBodyLimit+len(apiKey) {
-			prefix = prefix[:captureBodyLimit+len(apiKey)]
-			truncated = true // 替换可能让文本缩回限额内，但内容已经丢了
-		}
-		text = string(prefix)
-		if apiKey != "" {
-			text = strings.ReplaceAll(text, apiKey, captureMaskValue)
-		}
-	}
-
-	if len(text) > captureBodyLimit {
-		// 截断产物是子串引用，底层仍攥着完整分配；克隆彻底放掉
-		text = strings.Clone(truncateUTF8(text, captureBodyLimit))
-		truncated = true
-	}
-	if truncated && apiKey != "" {
-		// 前面的替换会左移后续内容,截断边界处未被整体替换的密钥残段可能
-		// 被挪进最终文本;残段只可能出现在末尾(完整出现均已替换),按后缀刮除
-		text = scrubKeyFragmentSuffix(text, apiKey)
-	}
-	return text, truncated, originalBytes
+	return string(truncateUTF8(string(body[:captureFieldLimit]), captureFieldLimit)), true, total
 }
 
-// scrubKeyFragmentSuffix 刮掉文本末尾与密钥前缀重合的残段，
-// 保证截断永远不会持久化半截密钥
-func scrubKeyFragmentSuffix(text, apiKey string) string {
-	max := len(apiKey) - 1
-	if max > len(text) {
-		max = len(text)
-	}
-	for j := max; j >= 1; j-- {
-		if strings.HasSuffix(text, apiKey[:j]) {
-			return text[:len(text)-j]
-		}
-	}
-	return text
+// captureBuffer 累积上游响应体，带每字段硬上限与进程级在途预算。
+// 只在录制请求上创建；append 在转发协程内单线程调用（无需加锁）。
+// 预算随缓冲增长增量占用、请求结束时整体释放
+type captureBuffer struct {
+	inflight      *atomic.Int64 // 指向 ProviderRelayService.captureInflightBytes
+	buf           []byte
+	total         int  // 上游实际产出的字节数（用于 response_bytes，即使未全存）
+	reserved      int  // 已向全局预算占用的字节数
+	truncated     bool // 触及 captureFieldLimit
+	budgetSkipped bool // 触及全局预算，停止暂存
 }
 
-// redactCaptureValue 递归脱敏 JSON 树：敏感键下的标量（字符串/数字/布尔）
-// 一律打码，敏感父键的子树进入敏感上下文；任何字符串值包含已知 Key 也打码
-func redactCaptureValue(v *any, sensitiveCtx bool, apiKey string) {
-	switch val := (*v).(type) {
-	case string:
-		if val == "" {
+func newCaptureBuffer(inflight *atomic.Int64) *captureBuffer {
+	return &captureBuffer{inflight: inflight}
+}
+
+// append 记录一段响应字节。始终累加 total；仅在未截断、未触预算时尝试暂存
+func (cb *captureBuffer) append(p []byte) {
+	if cb == nil || len(p) == 0 {
+		return
+	}
+	cb.total += len(p)
+	if cb.truncated || cb.budgetSkipped {
+		return
+	}
+	room := captureFieldLimit - len(cb.buf)
+	if room <= 0 {
+		cb.truncated = true
+		return
+	}
+	want := len(p)
+	if want > room {
+		want = room
+		cb.truncated = true
+	}
+	// 增量占用全局预算；触顶则停止暂存（已存部分保留）
+	if cb.inflight != nil {
+		if cb.inflight.Add(int64(want)) > captureInflightBudget {
+			cb.inflight.Add(int64(-want))
+			cb.budgetSkipped = true
 			return
 		}
-		if sensitiveCtx || (apiKey != "" && strings.Contains(val, apiKey)) {
-			*v = captureMaskValue
-		}
-	case json.Number, bool, float64:
-		// 非字符串标量也可能是凭据（如纯数字密码）
-		if sensitiveCtx {
-			*v = captureMaskValue
-		}
-	case map[string]any:
-		for k := range val {
-			child := val[k]
-			childSensitive := sensitiveCtx || captureSensitiveKey(k)
-			redactCaptureValue(&child, childSensitive, apiKey)
-			val[k] = child
-		}
-	case []any:
-		for i := range val {
-			child := val[i]
-			redactCaptureValue(&child, sensitiveCtx, apiKey)
-			val[i] = child
-		}
+		cb.reserved += want
 	}
+	cb.buf = append(cb.buf, p[:want]...)
+}
+
+// release 归还占用的预算。请求结束时调用一次
+func (cb *captureBuffer) release() {
+	if cb == nil || cb.inflight == nil || cb.reserved == 0 {
+		return
+	}
+	cb.inflight.Add(int64(-cb.reserved))
+	cb.reserved = 0
+}
+
+// markTruncated 强制标记为截断（非"触及上限"，而是读取被中断，如 SSE 错误体
+// 读取超时）。使详情/导出如实呈现"内容不完整"，不把空/残缺当成完整响应
+func (cb *captureBuffer) markTruncated() {
+	if cb != nil {
+		cb.truncated = true
+	}
+}
+
+// captureTeeReader 包装上游响应体：转发读取的同时把原始字节喂给 captureBuffer。
+// 用于 Claude/Codex/custom 路径——xrequest 的逐行 hook 会剥掉行尾、跳过空行，
+// 无法还原原始 SSE，必须在字节流层 tee
+type captureTeeReader struct {
+	src io.ReadCloser
+	cb  *captureBuffer
+}
+
+func newCaptureTeeReader(src io.ReadCloser, cb *captureBuffer) *captureTeeReader {
+	return &captureTeeReader{src: src, cb: cb}
+}
+
+func (t *captureTeeReader) Read(p []byte) (int, error) {
+	n, err := t.src.Read(p)
+	if n > 0 {
+		t.cb.append(p[:n])
+	}
+	return n, err
+}
+
+func (t *captureTeeReader) Close() error {
+	return t.src.Close()
+}
+
+// capturePreview 截取字段预览（明细接口用），返回 (预览文本, 是否截断)。
+// 按 UTF-8 边界安全截断
+func capturePreview(s string) (string, bool) {
+	if len(s) <= captureDetailPreviewLimit {
+		return s, false
+	}
+	return truncateUTF8(s, captureDetailPreviewLimit), true
 }
 
 // truncateUTF8 在不打断多字节序列的前提下截断到至多 limit 字节

@@ -570,11 +570,17 @@
         "detail": "抓包"
       },
       "captureDetail": {
-        "title": "出站请求详情",
+        "title": "抓包详情",
         "view": "查看",
-        "headers": "请求头（已脱敏）",
-        "body": "请求正文（已脱敏已知认证信息，仍可能包含敏感内容）",
-        "truncated": "正文超过存储上限已截断，原始大小 {bytes} 字节",
+        "url": "请求 URL",
+        "reqHeaders": "请求头",
+        "reqBody": "请求正文",
+        "respHeaders": "响应头",
+        "respBody": "响应正文",
+        "sensitiveWarning": "全量不脱敏：含明文 API Key 与完整对话/响应内容，切勿分享导出文件",
+        "previewHint": "内容较大，此处仅显示预览（前 256KB）；完整内容原始大小 {bytes}，请使用导出查看",
+        "captureTruncatedHint": "内容在采集时已超上限被截断（原始大小 {bytes}），超出部分未保存、导出也无法获取",
+        "budgetSkippedHint": "响应过大超出内存预算，正文未保存",
         "empty": "该请求未录制内容",
         "copy": "复制",
         "loadFailed": "加载详情失败："
@@ -1131,9 +1137,12 @@
       "clearFailed": "清空失败：",
       "export": "导出",
       "exporting": "导出中...",
+      "exportTitle": "选择导出内容",
       "exportDone": "已导出 {count} 条到 {path}",
       "exportFailed": "导出失败：",
-      "sensitiveHint": "导出与展示内容已脱敏已知认证信息，但请求正文仍可能包含敏感的提示词内容，请谨慎分享",
+      "sensitiveHint": "全量不脱敏：导出与展示内容含明文 API Key 与完整对话/响应，切勿分享",
+      "sizeWarning": "抓包数据已达 {size}，建议删除不需要的会话或清空以回收磁盘",
+      "budgetSkipped": "响应过大，超出内存预算部分未暂存",
       "noRequests": "该会话暂无抓包的请求",
       "loadMore": "加载更多",
       "table": {
@@ -1142,7 +1151,8 @@
         "provider": "供应商",
         "model": "模型",
         "status": "状态",
-        "size": "正文大小"
+        "reqSize": "请求大小",
+        "respSize": "响应大小"
       }
     }
   }

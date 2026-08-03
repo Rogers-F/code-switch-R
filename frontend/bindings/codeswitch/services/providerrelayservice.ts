@@ -44,14 +44,15 @@ export function DeleteCaptureSession(sessionID: number): $CancellablePromise<num
 }
 
 /**
- * ExportCaptureSessionWithDialog 弹系统保存对话框并导出指定会话的全部捕获内容。
- * 录制中的会话同样可导出（导出已提交的部分）。
- * 内容在采集时已做认证脱敏，但正文仍可能包含敏感的提示词内容（前端文案有提示）。
- * 单会话可达数百 MB（64KB/条 × 数千条），因此不整载进内存：
- * 对话框确认后开只读事务逐行流式写入目标目录内的临时文件，成功后原子替换
+ * ExportCaptureSessionWithDialog 弹系统保存对话框并导出指定会话的抓包内容。
+ * opts 按数据类别裁剪导出字段（全 false 视为非法）。录制中的会话同样可导出。
+ * 
+ * 【安全告警】全量不脱敏：导出文件含明文 API Key、完整提示词与响应，切勿分享。
+ * 单会话可达数百 MB，因此不整载内存：对话框确认后开只读事务逐行流式写入目标
+ * 目录内的临时文件，成功后原子替换；未选中的大字段不进 SQL 投影
  */
-export function ExportCaptureSessionWithDialog(sessionID: number): $CancellablePromise<$models.CaptureExportResult> {
-    return $Call.ByID(587151650, sessionID).then(($result: any) => {
+export function ExportCaptureSessionWithDialog(sessionID: number, opts: $models.CaptureExportOptions): $CancellablePromise<$models.CaptureExportResult> {
+    return $Call.ByID(587151650, sessionID, opts).then(($result: any) => {
         return $$createType1($result);
     });
 }
@@ -76,6 +77,14 @@ export function GetCaptureSessionLogs(sessionID: number, sinceID: number, before
     return $Call.ByID(3711165611, sessionID, sinceID, beforeID, limit).then(($result: any) => {
         return $$createType6($result);
     });
+}
+
+/**
+ * GetCaptureTotalBytes 返回全部抓包字段的存储字节总量（200MB 提醒用）。
+ * 按需查询，不常驻扫描；octet_length 计字节，与磁盘占用近似但非等同
+ */
+export function GetCaptureTotalBytes(): $CancellablePromise<number> {
+    return $Call.ByID(590634181);
 }
 
 /**

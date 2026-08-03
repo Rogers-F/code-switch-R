@@ -68,6 +68,7 @@ export {
     CLIConfigSnapshots,
     CLIPlatform,
     CLITemplate,
+    CaptureExportOptions,
     CaptureExportResult,
     CaptureSessionInfo,
     CaptureSessionLogRow,

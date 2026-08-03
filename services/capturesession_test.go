@@ -295,13 +295,14 @@ func TestCaptureSessionExportStream(t *testing.T) {
 	}
 	sid := relay.captureSessionID.Load()
 	for i := 0; i < 3; i++ {
-		if _, err := db.Exec(`INSERT INTO request_log (platform, provider, model, http_code, request_headers, request_body, body_bytes, capture_session_id)
-			VALUES ('claude', 'p', 'm', 200, '{"h":"v"}', '{"body":true}', 13, ?)`, sid); err != nil {
+		if _, err := db.Exec(`INSERT INTO request_log (platform, provider, model, http_code, request_url, request_headers, request_body, body_bytes, response_headers, response_body, response_bytes, capture_session_id)
+			VALUES ('claude', 'p', 'm', 200, 'https://up/v1', '{"h":["v"]}', '{"body":true}', 13, '{"Content-Type":["application/json"]}', '{"ok":true}', 11, ?)`, sid); err != nil {
 			t.Fatal(err)
 		}
 	}
 	dest := t.TempDir() + "/export.json"
-	count, err := relay.streamCaptureExport(db, sid, CaptureSessionInfo{ID: sid}, dest)
+	opts := CaptureExportOptions{URL: true, RequestHeaders: true, RequestBody: true, ResponseHeaders: true, ResponseBody: true}
+	count, err := relay.streamCaptureExport(db, sid, opts, dest)
 	if err != nil {
 		t.Fatalf("导出失败: %v", err)
 	}
