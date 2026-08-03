@@ -154,7 +154,46 @@ jobs:
         run: cd frontend && npx vue-tsc --noEmit
 
       - name: Install NSIS
-        run: choco install nsis -y
+        shell: pwsh
+        run: |
+          # Chocolatey 社区源偶发 5xx（choco 遇 503/504 会"装 0 个包"但仍退出 0），
+          # 因此一律以"makensis 是否真的存在"为准，并层层兜底：
+          # 已预装 → 重试 choco → 直接下载官方便携版
+          function Find-NsisDir {
+            foreach ($p in @("C:\Program Files (x86)\NSIS\makensis.exe", "C:\Program Files\NSIS\makensis.exe")) {
+              if (Test-Path $p) { return (Split-Path $p) }
+            }
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($cmd) { return (Split-Path $cmd.Source) }
+            return $null
+          }
+          # 把发现的目录导出到后续步骤的 PATH，兼容 choco/预装/便携版各种落点
+          function Publish-Nsis($dir) {
+            Add-Content -Path $env:GITHUB_PATH -Value $dir
+            Write-Host "NSIS 目录已加入 PATH: $dir"
+          }
+
+          $dir = Find-NsisDir
+          if ($dir) { Publish-Nsis $dir; exit 0 }
+
+          for ($i = 1; $i -le 3; $i++) {
+            Write-Host "choco install nsis 第 $i 次尝试"
+            choco install nsis -y --no-progress
+            $dir = Find-NsisDir
+            if ($dir) { Publish-Nsis $dir; exit 0 }
+            Write-Host "第 $i 次未成功（源可能暂不可用），20s 后重试"
+            Start-Sleep -Seconds 20
+          }
+
+          Write-Host "choco 持续不可用，回退到官方便携版直接下载"
+          $ver = "3.10"
+          $zip = Join-Path $env:RUNNER_TEMP "nsis.zip"
+          $dest = "C:\nsis-portable"
+          Invoke-WebRequest -Uri "https://prdownloads.sourceforge.net/nsis/nsis-$ver.zip?download" -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          $makensis = Get-ChildItem -Path $dest -Recurse -Filter makensis.exe | Select-Object -First 1
+          if (-not $makensis) { throw "NSIS 便携版下载/解压失败，未找到 makensis.exe" }
+          Publish-Nsis (Split-Path $makensis.FullName)
 
       - name: Update build assets
         run: wails3 task common:update:build-assets
