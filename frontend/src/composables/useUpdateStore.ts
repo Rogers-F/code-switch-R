@@ -5,6 +5,7 @@
  */
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { Call, Events } from '@wailsio/runtime'
+import { fetchAppSettings } from '../services/appSettings'
 
 // ==================== 类型定义 ====================
 
@@ -193,8 +194,19 @@ export function useUpdateStore() {
 
     isInitialized.value = true
 
-    // 延迟 1 秒后自动检查更新
-    setTimeout(() => {
+    // 启动时自动检查更新：必须遵守"自动检查更新"设置。
+    // 此前无条件检查，用户关掉开关后更新提示弹窗照旧弹出（形同虚设）。
+    // 手动"检查更新"按钮不受此限制。
+    setTimeout(async () => {
+      try {
+        const settings = await fetchAppSettings()
+        if (settings?.auto_update === false) {
+          return
+        }
+      } catch (e) {
+        // 读设置失败时保持原有行为（默认开启）
+        console.error('Failed to read auto_update setting:', e)
+      }
       doCheckUpdate()
     }, 1000)
   }
