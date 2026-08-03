@@ -4,7 +4,7 @@
       <div v-if="show" class="modal-backdrop" @click.self="handleCancel">
         <div class="modal-container">
           <div class="modal-header">
-            <h3>{{ t('deeplink.title') }}</h3>
+            <h3>{{ t('components.deeplink.title') }}</h3>
             <button class="modal-close" @click="handleCancel">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -25,7 +25,7 @@
                 <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
               <div>
-                <p class="error-title">{{ t('deeplink.error.title') }}</p>
+                <p class="error-title">{{ t('components.deeplink.error.title') }}</p>
                 <p class="error-detail">{{ error }}</p>
               </div>
             </div>
@@ -36,55 +36,55 @@
                 <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
                 <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
-              <p>{{ t('deeplink.success') }}</p>
+              <p>{{ t('components.deeplink.success') }}</p>
             </div>
 
             <!-- 正在导入 -->
             <div v-else-if="importing" class="loading-message">
               <div class="spinner"></div>
-              <p>{{ t('deeplink.importing') }}</p>
+              <p>{{ t('components.deeplink.importing') }}</p>
             </div>
 
             <!-- 预览信息 -->
             <div v-else-if="request" class="preview-container">
-              <p class="preview-hint">{{ t('deeplink.preview') }}</p>
+              <p class="preview-hint">{{ t('components.deeplink.preview') }}</p>
 
               <div class="preview-field">
-                <span class="field-label">{{ t('deeplink.field.name') }}</span>
+                <span class="field-label">{{ t('components.deeplink.field.name') }}</span>
                 <span class="field-value">{{ request.name }}</span>
               </div>
 
               <div class="preview-field">
-                <span class="field-label">{{ t('deeplink.field.app') }}</span>
+                <span class="field-label">{{ t('components.deeplink.field.app') }}</span>
                 <span class="field-value app-badge" :class="`app-${request.app}`">
                   {{ request.app }}
                 </span>
               </div>
 
               <div v-if="request.homepage" class="preview-field">
-                <span class="field-label">{{ t('deeplink.field.homepage') }}</span>
+                <span class="field-label">{{ t('components.deeplink.field.homepage') }}</span>
                 <a :href="request.homepage" target="_blank" class="field-link">
                   {{ request.homepage }}
                 </a>
               </div>
 
               <div v-if="request.endpoint" class="preview-field">
-                <span class="field-label">{{ t('deeplink.field.endpoint') }}</span>
+                <span class="field-label">{{ t('components.deeplink.field.endpoint') }}</span>
                 <span class="field-value mono">{{ request.endpoint }}</span>
               </div>
 
               <div v-if="request.apiKey" class="preview-field">
-                <span class="field-label">{{ t('deeplink.field.apiKey') }}</span>
+                <span class="field-label">{{ t('components.deeplink.field.apiKey') }}</span>
                 <span class="field-value mono masked">{{ maskApiKey(request.apiKey) }}</span>
               </div>
 
               <div v-if="request.model" class="preview-field">
-                <span class="field-label">{{ t('deeplink.field.model') }}</span>
+                <span class="field-label">{{ t('components.deeplink.field.model') }}</span>
                 <span class="field-value">{{ request.model }}</span>
               </div>
 
               <div v-if="request.notes" class="preview-field">
-                <span class="field-label">{{ t('deeplink.field.notes') }}</span>
+                <span class="field-label">{{ t('components.deeplink.field.notes') }}</span>
                 <span class="field-value">{{ request.notes }}</span>
               </div>
             </div>
@@ -99,7 +99,7 @@
                 {{ t('common.cancel') }}
               </button>
               <button class="btn-primary" @click="handleImport" :disabled="importing">
-                {{ t('deeplink.import') }}
+                {{ t('components.deeplink.import') }}
               </button>
             </template>
           </div>

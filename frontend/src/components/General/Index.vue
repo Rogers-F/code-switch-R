@@ -221,7 +221,11 @@ const modelSyncStatusText = computed(() => {
 const modelSyncDefaultsText = computed(() => {
   const models = modelSyncStatus.value?.defaultModels
   if (!models) return '—'
-  return `Codex: ${models.codexDefault} · Gemini: ${models.geminiDefault} · Claude(探测): ${models.claudeProbe}`
+  return t('components.general.sync.defaultsSummary', {
+    codex: models.codexDefault,
+    gemini: models.geminiDefault,
+    claude: models.claudeProbe,
+  })
 })
 
 const pendingSave = ref(false)
@@ -383,10 +387,10 @@ const saveBlacklistSettings = async () => {
   blacklistSaving.value = true
   try {
     await updateBlacklistSettings(blacklistThreshold.value, blacklistDuration.value)
-    alert('拉黑配置已保存')
+    alert(t('components.general.blacklist.saved'))
   } catch (error) {
     console.error('failed to save blacklist settings', error)
-    alert('保存失败：' + (error as Error).message)
+    alert(t('components.general.blacklist.saveFailed') + (error as Error).message)
   } finally {
     blacklistSaving.value = false
   }
@@ -402,7 +406,7 @@ const toggleBlacklist = async () => {
     console.error('failed to toggle blacklist', error)
     // 回滚状态
     blacklistEnabled.value = !blacklistEnabled.value
-    alert('切换失败：' + (error as Error).message)
+    alert(t('components.general.blacklist.toggleFailed') + (error as Error).message)
   } finally {
     blacklistSaving.value = false
   }
@@ -418,7 +422,7 @@ const toggleLevelBlacklist = async () => {
     console.error('failed to toggle level blacklist', error)
     // 回滚状态
     levelBlacklistEnabled.value = !levelBlacklistEnabled.value
-    alert('切换失败：' + (error as Error).message)
+    alert(t('components.general.blacklist.toggleFailed') + (error as Error).message)
   } finally {
     blacklistSaving.value = false
   }

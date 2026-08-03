@@ -31,7 +31,7 @@ const loadLogs = async () => {
 }
 
 const clearLogs = async () => {
-  if (!confirm('确定要清空所有控制台日志吗？')) {
+  if (!confirm(t('components.console.clearConfirm'))) {
     return
   }
 
@@ -40,7 +40,7 @@ const clearLogs = async () => {
     logs.value = []
   } catch (error) {
     console.error('清空日志失败:', error)
-    alert('清空失败：' + (error as Error).message)
+    alert(t('components.console.clearFailed') + (error as Error).message)
   }
 }
 

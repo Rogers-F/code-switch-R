@@ -160,7 +160,7 @@
             type="button"
             @click="onTabChange(idx)"
           >
-            {{ tab.label }}
+            {{ tab.id === 'others' ? t('components.main.tabs.others') : tab.label }}
           </button>
         </div>
         <div class="section-controls">

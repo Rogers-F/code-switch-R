@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Call, Window } from '@wailsio/runtime'
 import { fetchCostSince, fetchLogStats } from '../../services/logs'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { fetchProxyStatus } from '../../services/claudeSettings'
+
+const { t } = useI18n()
 
 type Platform = 'claude' | 'codex'
 type ForecastMethod = 'cycle' | '10m' | '1h' | 'yesterday' | 'last24h'
@@ -62,7 +65,7 @@ const formatCountdown = (remainingMs: number) => {
   const days = Math.floor(totalMinutes / (24 * 60))
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
   const minutes = totalMinutes % 60
-  return `${pad2(days)}天 ${pad2(hours)}:${pad2(minutes)}`
+  return `${pad2(days)}${t('components.tray.dayUnit')} ${pad2(hours)}:${pad2(minutes)}`
 }
 
 const calculateRate = (cost: number, seconds: number) => {
@@ -99,7 +102,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   let nextReset: Date | null = null
 
   const usedLabel = computed(() => formatCurrency(used.value))
-  const totalLabel = computed(() => (total.value > 0 ? formatCurrency(total.value) : '未设置'))
+  const totalLabel = computed(() => (total.value > 0 ? formatCurrency(total.value) : t('components.tray.notSet')))
   const progressRatio = computed(() => {
     if (total.value <= 0) return 0
     return Math.min(Math.max(used.value / total.value, 0), 1)
@@ -108,8 +111,8 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
     const percent = Math.round(progressRatio.value * 100)
     return `${percent}%`
   })
-  const budgetTitle = computed(() => (cycleEnabled.value && cycleMode.value === 'weekly' ? '本周预算' : '今日预算'))
-  const hostingLabel = computed(() => (hostingEnabled.value ? '托管中' : '未托管'))
+  const budgetTitle = computed(() => (cycleEnabled.value && cycleMode.value === 'weekly' ? t('components.tray.budgetWeekly') : t('components.tray.budgetDaily')))
+  const hostingLabel = computed(() => (hostingEnabled.value ? t('components.tray.hosting') : t('components.tray.notHosting')))
 
   const applyUsedAdjustment = (rawUsed: number) => {
     const adjusted = rawUsed + usedAdjustment.value
@@ -202,7 +205,7 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
   const updateDerivedLabels = (now: Date) => {
     if (showCountdown.value && cycleEnabled.value && nextReset) {
       const remaining = nextReset.getTime() - now.getTime()
-      countdownLabel.value = remaining > 0 ? `重置倒计时 ${formatCountdown(remaining)}` : '即将重置'
+      countdownLabel.value = remaining > 0 ? t('components.tray.resetCountdown', { time: formatCountdown(remaining) }) : t('components.tray.resettingSoon')
     } else {
       countdownLabel.value = ''
     }
@@ -212,11 +215,11 @@ const createTrayCard = (platform: Platform, brandName: string, brandIcon: string
       if (rate > 0 && used.value < total.value) {
         const secondsToBudget = (total.value - used.value) / rate
         const forecastTime = new Date(now.getTime() + secondsToBudget * 1000)
-        forecastLabel.value = `预计耗尽 ${formatLocalDateTimeLabel(forecastTime)}`
+        forecastLabel.value = t('components.tray.forecastExhaust', { time: formatLocalDateTimeLabel(forecastTime) })
       } else if (used.value >= total.value && total.value > 0) {
-        forecastLabel.value = '已达预算'
+        forecastLabel.value = t('components.tray.budgetReached')
       } else {
-        forecastLabel.value = '预计耗尽 —'
+        forecastLabel.value = t('components.tray.forecastNone')
       }
     } else {
       forecastLabel.value = ''
@@ -434,7 +437,7 @@ onUnmounted(() => {
             </div>
             <div class="tray-item__summary">
               <div class="tray-item__value" :class="{ loading: card.loading }">
-                <span>已用 {{ card.usedLabel }}</span>
+                <span>{{ t('components.tray.used') }} {{ card.usedLabel }}</span>
                 <span class="tray-divider">/</span>
                 <span>{{ card.totalLabel }}</span>
               </div>

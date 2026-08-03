@@ -139,7 +139,8 @@
   "common": {
     "save": "Save",
     "saving": "Saving...",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "close": "Close"
   },
   "prompts": {
     "hero": {
@@ -215,7 +216,7 @@
           "title": "Examples:",
           "exact": "Exact match",
           "prefix": "Prefix match all Claude models",
-          "vendor": "Match models with vendor prefix"
+          "vendor": "Match models with provider prefix"
         }
       },
       "modelMapping": {
@@ -248,9 +249,9 @@
     },
     "main": {
       "hero": {
-        "eyebrow": "Claude & Codex vendor overview",
+        "eyebrow": "Claude & Codex provider overview",
         "title": "Stay on top of AI coding supply.",
-        "lead": "The green heatmap highlights daily compute and token usage so we can monitor each vendor's load."
+        "lead": "The green heatmap highlights daily compute and token usage so we can monitor each provider's load."
       },
       "heatmap": {
         "ariaLabel": "Daily compute consumption heatmap",
@@ -266,9 +267,10 @@
         }
       },
       "tabs": {
-        "ariaLabel": "AI vendor switcher",
-        "addCard": "Add vendor card",
-        "refresh": "Refresh data"
+        "ariaLabel": "AI provider switcher",
+        "addCard": "Add provider card",
+        "refresh": "Refresh data",
+        "others": "Others"
       },
       "relayToggle": {
         "label": "Claude proxy",
@@ -366,10 +368,10 @@
         "proxyEnabled": "Disable proxy first"
       },
       "form": {
-        "createTitle": "Add vendor",
-        "editTitle": "Edit vendor",
+        "createTitle": "Add provider",
+        "editTitle": "Edit provider",
         "labels": {
-          "name": "Vendor name",
+          "name": "Provider name",
           "apiUrl": "API endpoint",
           "fallbackApiUrls": "Fallback API URLs",
           "maxConcurrency": "Max concurrent requests",
@@ -399,7 +401,7 @@
           "maxConcurrency": "0 = unlimited",
           "apiKey": "sk-xxxxx",
           "apiEndpoint": "Leave blank for default, e.g. /v1/chat/completions",
-          "officialSite": "https://vendor.com",
+          "officialSite": "https://provider.com",
           "icon": "e.g. aicoding, kimi",
           "availabilityTestModel": "Leave empty to use platform default",
           "availabilityTestEndpoint": "e.g., /v1/messages",
@@ -454,7 +456,7 @@
           "openaiChat": "OpenAI Chat",
           "openaiChatDesc": "Use OpenAI Chat Completions API with auto format conversion"
         },
-        "confirmDeleteTitle": "Remove vendor",
+        "confirmDeleteTitle": "Remove provider",
         "confirmDeleteMessage": "Are you sure you want to remove {name}? This action cannot be undone.",
         "errors": {
           "invalidUrl": "Please enter a valid API URL",
@@ -598,6 +600,14 @@
       }
     },
     "general": {
+      "blacklist": {
+        "saved": "Blacklist settings saved",
+        "saveFailed": "Failed to save: ",
+        "toggleFailed": "Failed to toggle: "
+      },
+      "sync": {
+        "defaultsSummary": "Codex: {codex} · Gemini: {gemini} · Claude (probe): {claude}"
+      },
       "title": {
         "application": "Apply settings",
         "trayPanel": "Tray panel",
@@ -1070,7 +1080,7 @@
       "saveAllFailed": "All config files failed to save",
       "savePartialSuccess": "{success} saved, {fail} failed",
       "tabPreview": "Preview",
-      "tabCurrent": "Current",
+      "tabCurrent": "On disk",
       "saveError": "Failed to save configuration"
     },
     "console": {
@@ -1078,7 +1088,23 @@
       "clear": "Clear logs",
       "autoScroll": "Auto scroll",
       "loading": "Loading...",
-      "empty": "No logs yet"
+      "empty": "No logs yet",
+      "clearConfirm": "Clear all console logs?",
+      "clearFailed": "Failed to clear: "
+    },
+    "tray": {
+      "dayUnit": "d",
+      "notSet": "Not set",
+      "budgetWeekly": "This week's budget",
+      "budgetDaily": "Today's budget",
+      "hosting": "Hosting",
+      "notHosting": "Not hosting",
+      "resetCountdown": "Resets in {time}",
+      "resettingSoon": "Resetting soon",
+      "forecastExhaust": "Exhausts {time}",
+      "budgetReached": "Budget reached",
+      "forecastNone": "Exhausts —",
+      "used": "Used"
     },
     "capture": {
       "title": "Capture",

@@ -139,7 +139,8 @@
   "common": {
     "save": "保存",
     "saving": "保存中...",
-    "cancel": "取消"
+    "cancel": "取消",
+    "close": "关闭"
   },
   "prompts": {
     "hero": {
@@ -269,7 +270,8 @@
       "tabs": {
         "ariaLabel": "AI 供应商切换",
         "addCard": "新增供应商卡片",
-        "refresh": "刷新数据"
+        "refresh": "刷新数据",
+        "others": "其他"
       },
       "relayToggle": {
         "label": "Claude proxy",
@@ -305,10 +307,10 @@
         "authTokenFieldPlaceholder": "认证 Token 字段路径（可选）",
         "proxyHint": "代理注入会将本地代理地址写入指定的配置文件字段",
         "presetSection": "从预设开始",
-        "presetStateNone": "未检测到 opencode 配置，启用代理时将自动创建并写入 provider 配置",
+        "presetStateNone": "未检测到 opencode 配置，启用代理时将自动创建并写入供应商配置",
         "presetStateExisting": "检测到现有配置，启用代理时只补齐缺失字段，不覆盖已有内容",
-        "presetStateJsonc": "检测到 .jsonc 配置：无注释可直接使用；含注释暂不支持，启用会失败并提示",
-        "presetStateBoth": "同时存在 .json 与 .jsonc，opencode 的取用优先级未定义，已预填 .json，请确认实际使用的文件",
+        "presetStateJsonc": "检测到 .jsonc 配置：不含注释的可直接使用；含注释的暂不支持，启用会失败并给出提示",
+        "presetStateBoth": "同时存在 .json 与 .jsonc，opencode 未定义两者的读取优先级，已预填 .json，请确认实际使用的文件",
         "seedFieldsBadge": "含 {count} 个预设管理字段（启用代理时自动补齐，不覆盖已有配置）",
         "nameRequired": "请输入工具名称",
         "configRequired": "请至少添加一个有效的配置文件路径",
@@ -456,7 +458,7 @@
           "openaiChatDesc": "使用 OpenAI Chat Completions API，自动转换格式"
         },
         "confirmDeleteTitle": "删除供应商",
-        "confirmDeleteMessage": "确认删除 {name} 吗？操作不可撤销",
+        "confirmDeleteMessage": "确认删除 {name} 吗？此操作不可撤销。",
         "errors": {
           "invalidUrl": "请输入合法的 API 地址",
           "tooManyFallbacks": "备用地址最多 4 个",
@@ -599,6 +601,14 @@
       }
     },
     "general": {
+      "blacklist": {
+        "saved": "拉黑配置已保存",
+        "saveFailed": "保存失败：",
+        "toggleFailed": "切换失败："
+      },
+      "sync": {
+        "defaultsSummary": "Codex: {codex} · Gemini: {gemini} · Claude（探测）: {claude}"
+      },
       "title": {
         "power": "权限设置",
         "application": "应用设置",
@@ -859,7 +869,7 @@
           "savedWithPlaceholders": "✅ 配置已保存，但因包含占位符（{vars}），未同步到 Claude/Codex。请填写占位符后重新保存。"
         },
         "deleteTitle": "删除 MCP 服务器",
-        "deleteMessage": "确认删除 {name} 吗？操作不可撤销"
+        "deleteMessage": "确认删除 {name} 吗？此操作不可撤销。"
       }
     },
     "gemini": {
@@ -907,7 +917,7 @@
         "createTitle": "新增 Gemini 供应商",
         "editTitle": "编辑 Gemini 供应商",
         "deleteTitle": "删除供应商",
-        "deleteMessage": "确认删除 {name} 吗？操作不可撤销",
+        "deleteMessage": "确认删除 {name} 吗？此操作不可撤销。",
         "name": "供应商名称",
         "baseUrl": "API 地址",
         "apiKey": "API 密钥",
@@ -1052,7 +1062,7 @@
       "loadError": "加载配置失败",
       "setAsTemplate": "设为新供应商的默认模板",
       "restoreDefault": "恢复默认",
-      "restoreConfirm": "确定要恢复默认配置吗？这将覆盖当前设置。",
+      "restoreConfirm": "确定恢复默认配置吗？这会覆盖当前配置。",
       "restoreSuccess": "配置已恢复默认",
       "restoreError": "恢复默认配置失败",
       "templateSaved": "模板已保存",
@@ -1071,7 +1081,7 @@
       "saveAllFailed": "所有配置文件保存失败",
       "savePartialSuccess": "成功 {success} 个，失败 {fail} 个",
       "tabPreview": "预览效果",
-      "tabCurrent": "当前磁盘",
+      "tabCurrent": "磁盘现状",
       "saveError": "保存配置失败"
     },
     "console": {
@@ -1079,7 +1089,23 @@
       "clear": "清空日志",
       "autoScroll": "自动滚动",
       "loading": "加载中...",
-      "empty": "暂无日志"
+      "empty": "暂无日志",
+      "clearConfirm": "确定清空所有控制台日志吗？",
+      "clearFailed": "清空失败："
+    },
+    "tray": {
+      "dayUnit": "天",
+      "notSet": "未设置",
+      "budgetWeekly": "本周预算",
+      "budgetDaily": "今日预算",
+      "hosting": "托管中",
+      "notHosting": "未托管",
+      "resetCountdown": "重置倒计时 {time}",
+      "resettingSoon": "即将重置",
+      "forecastExhaust": "预计耗尽 {time}",
+      "budgetReached": "已达预算",
+      "forecastNone": "预计耗尽 —",
+      "used": "已用"
     },
     "capture": {
       "title": "抓包",
@@ -1108,7 +1134,7 @@
       "exportDone": "已导出 {count} 条到 {path}",
       "exportFailed": "导出失败：",
       "sensitiveHint": "导出与展示内容已脱敏已知认证信息，但请求正文仍可能包含敏感的提示词内容，请谨慎分享",
-      "noRequests": "该会话暂无捕获的请求",
+      "noRequests": "该会话暂无抓包的请求",
       "loadMore": "加载更多",
       "table": {
         "time": "时间",
