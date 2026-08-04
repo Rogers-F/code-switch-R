@@ -23,6 +23,14 @@ const aliasTTL = 48 * time.Hour
 //   - 48h 内 alias 表未占用该 newName
 //   - 该 provider_id 在 48h 内未 rename 过(禁止链式)
 func (ps *ProviderService) RenameProvider(kind string, id int64, newName string) error {
+	// 数据库维护（VACUUM）期间拒绝：本函数持供应商全局互斥直写 alias 表与
+	// 事务——撞上排他锁会按 busy_timeout 自旋 30s，连带卡住代理读取配置的
+	// 同一把互斥。屏障读锁关闭"检查 → 执行"的窗口
+	if !AcquireDBWrite() {
+		return ErrDBMaintenance
+	}
+	defer ReleaseDBWrite()
+
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 

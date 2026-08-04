@@ -6,12 +6,14 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"log/slog"
 	"math"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/daodao97/xgo/xlog"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/dock"
@@ -98,6 +100,12 @@ func main() {
 	// appStarted：Run() 之前窗口 impl 尚未创建，同一批方法在启动早期同样会炸
 	var shuttingDown atomic.Bool
 	var appStarted atomic.Bool
+
+	// xgo 的 xlog 默认 Debug 级别：xrequest 会把每个转发请求的完整 curl（含整个
+	// 请求体）作为 Debug 日志格式化输出，大上下文会话下每请求多出数十 MB 的
+	// 字符串处理。收敛到 Warn 只保留网络错误类告警。必须放在任何 xgo 组件与
+	// NewConsoleService 之前：xlog 的 handler 在创建时捕获当时的 os.Stdout
+	xlog.SetLogger(xlog.StdoutTextPretty(xlog.WithLevel(slog.LevelWarn)))
 
 	// 【修复】第一步：初始化数据库（必须最先执行）
 	// 解决问题：InitGlobalDBQueue 依赖 xdb.DB("default")，但 xdb.Inits() 在 NewProviderRelayService 中

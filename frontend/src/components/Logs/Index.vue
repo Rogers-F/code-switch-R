@@ -197,7 +197,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted, watch, onUnmounted } from 'vue'
+import { computed, reactive, ref, onMounted, watch, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseButton from '../common/BaseButton.vue'
 import BaseModal from '../common/BaseModal.vue'
@@ -226,6 +226,7 @@ import {
 } from 'chart.js'
 import type { ChartOptions } from 'chart.js'
 import { Line } from 'vue-chartjs'
+import { createPoller } from '../../composables/usePoller'
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
@@ -480,29 +481,34 @@ const formatSeriesLabel = (value?: string) => {
 
 const REFRESH_INTERVAL = 30
 const countdown = ref(REFRESH_INTERVAL)
-let timer: number | undefined
+// 倒计时触发的自动刷新单飞：上一轮仍在加载时跳过本轮，不排队
+let autoRefreshing = false
 
 const resetTimer = () => {
   countdown.value = REFRESH_INTERVAL
 }
 
-const startCountdown = () => {
-  stopCountdown()
-  timer = window.setInterval(() => {
-    if (countdown.value <= 1) {
-      countdown.value = REFRESH_INTERVAL
-      void loadDashboard()
-    } else {
-      countdown.value -= 1
+// 每秒走一格倒计时，归零时自动刷新；仅页面激活期间运行（keep-alive 下切走即停）
+const countdownPoller = createPoller(() => {
+  if (countdown.value <= 1) {
+    countdown.value = REFRESH_INTERVAL
+    if (!autoRefreshing) {
+      autoRefreshing = true
+      void loadDashboard().finally(() => {
+        autoRefreshing = false
+      })
     }
-  }, 1000)
+  } else {
+    countdown.value -= 1
+  }
+}, 1000)
+
+const startCountdown = () => {
+  countdownPoller.start()
 }
 
 const stopCountdown = () => {
-  if (timer) {
-    clearInterval(timer)
-    timer = undefined
-  }
+  countdownPoller.stop()
 }
 
 const normalizeProviderName = (value: string) => value.trim()
@@ -742,17 +748,30 @@ watch(
   },
 )
 
-// 卸载标记：首次加载期间离开页面时，阻止 await 之后再启动倒计时定时器造成泄漏
-let isUnmounted = false
+// 首载 Promise：keep-alive 下首次进入 mounted 与 activated 均触发，
+// activated 等首载完成后再启动倒计时，避免双份加载
+let initialLoad: Promise<void> | null = null
+// 页面是否处于激活状态：首次加载期间离开页面时，阻止 await 之后再启动倒计时造成泄漏
+let pageActive = false
 
-onMounted(async () => {
-  await loadDashboard()
-  if (isUnmounted) return
+onMounted(() => {
+  initialLoad = loadDashboard()
+})
+
+onActivated(async () => {
+  pageActive = true
+  await initialLoad
+  if (!pageActive) return
   startCountdown()
 })
 
+onDeactivated(() => {
+  pageActive = false
+  stopCountdown()
+})
+
 onUnmounted(() => {
-  isUnmounted = true
+  pageActive = false
   stopCountdown()
 })
 </script>

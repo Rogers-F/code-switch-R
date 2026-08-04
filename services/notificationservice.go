@@ -107,14 +107,18 @@ func (ns *NotificationService) ensureIconFile() string {
 	return iconPath
 }
 
-// isEnabled 检查通知是否开启
+// isEnabled 检查通知是否开启。
+// 设置读取失败时 fail-closed（不发通知）：通知是便利功能，读不到设置就放行
+// 会出现"界面显示已关闭（本地缓存），后端却按默认开启继续弹通知"的失控状态；
+// 宁可少发也不违背用户已表达过的关闭意愿
 func (ns *NotificationService) isEnabled() bool {
 	if ns.appSettings == nil {
-		return true // 默认开启
+		return true // 未注入设置服务（仅测试场景）：保持默认开启
 	}
 	settings, err := ns.appSettings.GetAppSettings()
 	if err != nil {
-		return true // 获取失败时默认开启
+		log.Printf("[Notification] 读取通知开关失败，本次不发通知: %v", err)
+		return false
 	}
 	return settings.EnableSwitchNotify
 }

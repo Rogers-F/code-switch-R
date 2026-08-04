@@ -111,23 +111,37 @@ func ensureCaptureSessionTable(db *sql.DB) error {
 
 // recoverStaleCaptureSessions 把上个进程遗留的"未关闭"会话标记为已中断。
 // 结束时间取该会话最后一条捕获的时间，没有则取开始时间。
-// 只在进程首次触碰会话状态时执行一次（Start 可被前端重复触发，不能挂在那里）
+// 进程内成功执行一次即不再重复（Start 可被前端重复触发，不能挂在那里）；
+// 失败（含撞上数据库维护时的快速跳过）不消耗执行资格，下次调用重试
 func (prs *ProviderRelayService) recoverStaleCaptureSessions() {
-	prs.captureRecoverOnce.Do(func() {
-		db, err := xdb.DB("default")
-		if err != nil {
-			fmt.Printf("[Capture] 恢复遗留会话失败(db): %v\n", err)
-			return
-		}
-		if _, err := db.Exec(`UPDATE capture_session SET interrupted = 1,
-			ended_at = COALESCE(
-				(SELECT MAX(created_at) FROM request_log
-				 WHERE capture_session_id = capture_session.id AND capture_session_id != 0),
-				started_at)
-			WHERE ended_at IS NULL`); err != nil {
-			fmt.Printf("[Capture] 恢复遗留会话失败: %v\n", err)
-		}
-	})
+	if prs.captureRecoverDone.Load() {
+		return
+	}
+	prs.captureRecoverMu.Lock()
+	defer prs.captureRecoverMu.Unlock()
+	if prs.captureRecoverDone.Load() {
+		return
+	}
+	// 屏障读锁：VACUUM 期间直写会撞排他锁自旋 30s，先跳过
+	if !AcquireDBWrite() {
+		return
+	}
+	defer ReleaseDBWrite()
+	db, err := xdb.DB("default")
+	if err != nil {
+		fmt.Printf("[Capture] 恢复遗留会话失败(db): %v\n", err)
+		return
+	}
+	if _, err := db.Exec(`UPDATE capture_session SET interrupted = 1,
+		ended_at = COALESCE(
+			(SELECT MAX(created_at) FROM request_log
+			 WHERE capture_session_id = capture_session.id AND capture_session_id != 0),
+			started_at)
+		WHERE ended_at IS NULL`); err != nil {
+		fmt.Printf("[Capture] 恢复遗留会话失败: %v\n", err)
+		return
+	}
+	prs.captureRecoverDone.Store(true)
 }
 
 // SetRequestCapture 设置抓包模式开关。录制开关为进程内状态、重启即关
@@ -142,6 +156,12 @@ func (prs *ProviderRelayService) SetRequestCapture(enabled bool) error {
 	if enabled == prs.captureRequests.Load() {
 		return nil
 	}
+	// 数据库维护（VACUUM）期间会话行写不进去，屏障读锁内明确拒绝
+	// （关闭"检查标志 → 执行写入"的竞态窗口）
+	if !AcquireDBWrite() {
+		return fmt.Errorf("数据库维护中，请稍后再试")
+	}
+	defer ReleaseDBWrite()
 	db, err := xdb.DB("default")
 	if err != nil {
 		return err
@@ -246,27 +266,80 @@ func (prs *ProviderRelayService) ListCaptureSessions() ([]CaptureSessionInfo, er
 		return nil, err
 	}
 
-	// 0 号伪会话：迁移前的旧抓包数据。必须叠加抓包谓词，否则会把普通日志当抓包
-	var legacyCount int64
-	if err := db.QueryRow(`SELECT COUNT(*) FROM request_log
-		WHERE capture_session_id = 0 AND `+captureRowPredicate).Scan(&legacyCount); err == nil && legacyCount > 0 {
+	// 0 号伪会话：迁移前的旧抓包数据。必须叠加抓包谓词，否则会把普通日志当抓包。
+	// 计数走进程内缓存：旧数据只减不增（仅维护操作会改变），octet_length 谓词
+	// 无法索引，3s 轮询下每次全表扫描是持续性开销
+	if legacyCount, err := prs.legacyCaptureCount(db); err == nil && legacyCount > 0 {
 		sessions = append(sessions, CaptureSessionInfo{ID: 0, Legacy: true, RequestCount: legacyCount})
 	}
 	return sessions, nil
 }
 
+// legacyCaptureCount 0 号伪会话行数（缓存一次，维护操作后失效重算）。
+// 基线建立与失效同用 captureWriteMu 写锁线性化（与 GetCaptureTotalBytes 同构）：
+// 无锁建立会让维护批处理期间启动的旧 COUNT 在失效之后把"半清"值发布成新基线
+func (prs *ProviderRelayService) legacyCaptureCount(db *sql.DB) (int64, error) {
+	if prs.captureLegacyCountInit.Load() {
+		return prs.captureLegacyCount.Load(), nil
+	}
+	// 维护期间不建基线（同 GetCaptureTotalBytes）
+	if InDBMaintenance() {
+		return 0, ErrDBMaintenance
+	}
+	prs.captureWriteMu.Lock()
+	defer prs.captureWriteMu.Unlock()
+	if prs.captureLegacyCountInit.Load() { // 双检：等锁期间别人可能已建好基线
+		return prs.captureLegacyCount.Load(), nil
+	}
+	// 屏障读锁（理由同 GetCaptureTotalBytes）
+	if !AcquireDBWrite() {
+		return 0, ErrDBMaintenance
+	}
+	defer ReleaseDBWrite()
+	var legacyCount int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM request_log
+		WHERE capture_session_id = 0 AND ` + captureRowPredicate).Scan(&legacyCount); err != nil {
+		return 0, err
+	}
+	prs.captureLegacyCount.Store(legacyCount)
+	prs.captureLegacyCountInit.Store(true)
+	return legacyCount, nil
+}
+
 // GetCaptureTotalBytes 返回全部抓包字段的存储字节总量（200MB 提醒用）。
-// 按需查询，不常驻扫描；octet_length 计字节，与磁盘占用近似但非等同
+// "基线 + 增量"缓存：首次在 captureWriteMu 写锁内做一次全表 SUM 建基线
+// （与捕获 INSERT 线性化，某行不会既进 SUM 又进增量或两边都漏），此后
+// 写入侧在读锁内原子累加，维护操作完成后基线失效重建。
+// 取代旧实现"前端每 10s 一次全表扫描"——那是随库增长的无界周期开销
 func (prs *ProviderRelayService) GetCaptureTotalBytes() (int64, error) {
+	if prs.captureTotalInit.Load() {
+		return prs.captureTotalBytes.Load(), nil
+	}
+	// 维护期间不建基线：全表 SUM 会撞 VACUUM 排他锁并持写锁自旋 30s
+	if InDBMaintenance() {
+		return 0, ErrDBMaintenance
+	}
 	db, err := xdb.DB("default")
 	if err != nil {
 		return 0, err
 	}
+	prs.captureWriteMu.Lock()
+	defer prs.captureWriteMu.Unlock()
+	if prs.captureTotalInit.Load() { // 双检：等锁期间别人可能已建好基线
+		return prs.captureTotalBytes.Load(), nil
+	}
+	// 屏障读锁关闭"检查维护标志 → 全表 SUM"的窗口：VACUUM 在两步之间启动时
+	// TryRLock 立即失败，不会持写锁去撞排他锁自旋 30s
+	if !AcquireDBWrite() {
+		return 0, ErrDBMaintenance
+	}
+	defer ReleaseDBWrite()
 	var total int64
-	err = db.QueryRow(`SELECT COALESCE(SUM(` + captureSizeExpr + `), 0) FROM request_log WHERE ` + captureRowPredicate).Scan(&total)
-	if err != nil {
+	if err := db.QueryRow(`SELECT COALESCE(SUM(` + captureSizeExpr + `), 0) FROM request_log WHERE ` + captureRowPredicate).Scan(&total); err != nil {
 		return 0, err
 	}
+	prs.captureTotalBytes.Store(total)
+	prs.captureTotalInit.Store(true)
 	return total, nil
 }
 
@@ -335,13 +408,142 @@ func (prs *ProviderRelayService) GetCaptureSessionLogs(sessionID int64, sinceID 
 	return result, rows.Err()
 }
 
-// DeleteCaptureSession 删除单个会话：清除其捕获内容（保留统计行本身）并移除
-// 会话元数据。删除的是活动会话时原地轮换出新会话（录制不中断、白纸重来）。
-// 事务提交在前、内存状态（墓碑/活动会话 id）变更在后；回滚时内存不动。
-// 墓碑兜住在途长流请求：采集发生在请求开始，落库时校验会话已删则自我置空
-func (prs *ProviderRelayService) DeleteCaptureSession(sessionID int64) (int64, error) {
+// ========== 维护操作：分批清除 ==========
+//
+// v2.6.43 前清空/删除是"写锁内单事务全表 UPDATE"：GB 级库上重写分钟级，
+// 而 Go RWMutex writer 排队会阻塞所有新 RLock——每个转发请求开始即要读锁
+// （captureSnapshot），等于清理期间整条代理链路冻结，正是"点清空后整个
+// 应用卡死"的直接来源。现改为：写锁内只做元数据短事务（记上界、封会话、
+// 轮换、推进代次），数据行在锁外按 id 单调游标 + 行数/字节双预算分批清除。
+// 中途崩溃/失败留下的是"会话仍可见、数据部分已清"的一致状态，重试即幂等
+// 续清（末批才删除会话元数据，不产生不可见的孤儿行）。
+
+const (
+	// captureStripBatchRows / captureStripBatchBytes 单批上限：行数与
+	// captureSizeExpr 估算字节双限制。单行最大可达 ~100MiB（请求+响应各
+	// 50MiB），字节预算保证批事务持 SQLite 写锁的时长可控，普通落库最多
+	// 等一个小批而不是整表重写
+	captureStripBatchRows  = 200
+	captureStripBatchBytes = 8 << 20
+)
+
+// stripCaptureRowsInBatches 按 id 升序分批清除 (cursor, maxID] 内满足
+// extraPredicate 的抓包行。必须在 captureMaintenanceMu 内、captureWriteMu 外
+// 调用。批事务耗时超 2s 时行/字节预算减半（下限 1 行），批间让路 10ms。
+// 返回已清除行数；失败时已清除的部分保持提交（调用方提示可重试）
+func stripCaptureRowsInBatches(db *sql.DB, extraPredicate string, extraArgs []interface{}, maxID int64) (int64, error) {
+	cursor := int64(0)
+	rowLimit := captureStripBatchRows
+	byteBudget := int64(captureStripBatchBytes)
+	var total int64
+	for {
+		ids, next, err := selectStripBatch(db, extraPredicate, extraArgs, cursor, maxID, rowLimit, byteBudget)
+		if err != nil {
+			return total, err
+		}
+		if len(ids) == 0 {
+			return total, nil
+		}
+		cursor = next
+
+		start := time.Now()
+		placeholders := strings.Repeat("?,", len(ids))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]interface{}, len(ids))
+		for i, id := range ids {
+			args[i] = id
+		}
+		res, err := db.Exec(`UPDATE request_log SET `+captureStripSet+
+			` WHERE id IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return total, err
+		}
+		if n, err := res.RowsAffected(); err == nil {
+			total += n
+		}
+		// 自适应降档：批事务过慢说明单批仍太重（大行/磁盘慢），减半预算
+		if time.Since(start) > 2*time.Second {
+			if rowLimit > 1 {
+				rowLimit /= 2
+			}
+			if byteBudget > 1<<20 {
+				byteBudget /= 2
+			}
+		}
+		time.Sleep(10 * time.Millisecond) // 让普通落库穿插进来
+	}
+}
+
+// selectStripBatch 取下一批候选行 id（含字节预算截批；首行无条件纳入，
+// 防止超大单行导致空批死循环）。返回 (ids, 新游标)
+func selectStripBatch(db *sql.DB, extraPredicate string, extraArgs []interface{}, cursor, maxID int64, rowLimit int, byteBudget int64) ([]int64, int64, error) {
+	args := append([]interface{}{cursor, maxID}, extraArgs...)
+	args = append(args, rowLimit)
+	rows, err := db.Query(`SELECT id, `+captureSizeExpr+` FROM request_log
+		WHERE id > ? AND id <= ? AND `+extraPredicate+` ORDER BY id LIMIT ?`, args...)
+	if err != nil {
+		return nil, cursor, err
+	}
+	defer rows.Close()
+
+	ids := make([]int64, 0, rowLimit)
+	var batchBytes int64
+	for rows.Next() {
+		var id, size int64
+		if err := rows.Scan(&id, &size); err != nil {
+			return nil, cursor, err
+		}
+		if len(ids) > 0 && batchBytes+size > byteBudget {
+			break // 本批到此为止，剩余行归下一批
+		}
+		ids = append(ids, id)
+		batchBytes += size
+		cursor = id
+	}
+	if err := rows.Err(); err != nil {
+		return nil, cursor, err
+	}
+	return ids, cursor, nil
+}
+
+// beginCaptureMaintenance 进入维护临界区（TryLock 拒绝并发）并推进导出栅栏。
+// epoch/active 的发布在 captureWriteMu 写锁内完成：导出以读锁快照起点，
+// 二者线性化后不存在"active 尚未发布、epoch 已推进"之类的错位观察。
+// 返回的 done 必须 defer 调用
+func (prs *ProviderRelayService) beginCaptureMaintenance() (func(), error) {
+	if InDBMaintenance() {
+		return nil, fmt.Errorf("数据库维护中，请稍后再试")
+	}
+	if !prs.captureMaintenanceMu.TryLock() {
+		return nil, fmt.Errorf("已有清理任务进行中，请稍后再试")
+	}
 	prs.captureWriteMu.Lock()
-	defer prs.captureWriteMu.Unlock()
+	prs.captureMaintenanceEpoch.Add(1)
+	prs.captureMaintenanceActive.Store(true)
+	prs.captureWriteMu.Unlock()
+	return func() {
+		// 基线失效与 active 清除同在写锁内：维护期间启动的旧 SUM/COUNT
+		// （持写锁）要么在本失效前完成而被作废，要么在其后启动读到终态，
+		// 不会把批处理中途的"半清"值反向发布成新基线
+		prs.captureWriteMu.Lock()
+		prs.captureTotalInit.Store(false)
+		prs.captureLegacyCountInit.Store(false)
+		prs.captureMaintenanceActive.Store(false)
+		prs.captureWriteMu.Unlock()
+		prs.captureMaintenanceMu.Unlock()
+	}, nil
+}
+
+// DeleteCaptureSession 删除单个会话：分批清除其捕获内容（保留统计行本身），
+// 末批删除会话元数据。删除活动会话时先在短事务内轮换出新会话（录制不中断、
+// 白纸重来）。墓碑兜住在途长流请求：采集发生在请求开始，落库时校验会话已删
+// 则自我置空；墓碑在元数据删除前就已生效，批处理期间无新行进入该会话
+func (prs *ProviderRelayService) DeleteCaptureSession(sessionID int64) (int64, error) {
+	done, err := prs.beginCaptureMaintenance()
+	if err != nil {
+		return 0, err
+	}
+	defer done()
 
 	db, err := xdb.DB("default")
 	if err != nil {
@@ -349,120 +551,170 @@ func (prs *ProviderRelayService) DeleteCaptureSession(sessionID int64) (int64, e
 	}
 
 	if sessionID == 0 {
-		// 0 号伪会话：只清旧数据行，无会话元数据、无在途写入（旧数据不会再产生）
-		res, err := db.Exec(`UPDATE request_log SET ` + captureStripSet +
-			` WHERE capture_session_id = 0 AND ` + captureRowPredicate)
-		if err != nil {
+		// 0 号伪会话：只清旧数据行，无会话元数据、无在途写入（旧数据不会再产生；
+		// stale 自清行落库时 payload 已置空，不命中谓词），上界锁外读取即可
+		var maxID int64
+		if err := db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM request_log`).Scan(&maxID); err != nil {
 			return 0, err
 		}
-		affected, _ := res.RowsAffected()
+		affected, err := stripCaptureRowsInBatches(db,
+			`capture_session_id = 0 AND `+captureRowPredicate, nil, maxID)
+		if err != nil {
+			return affected, fmt.Errorf("旧数据部分清除（%d 行）后失败，可重试: %w", affected, err)
+		}
 		return affected, nil
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-
-	// 显式带 capture_session_id != 0 才能命中部分索引（参数化谓词不被自动推导）
-	res, err := tx.Exec(`UPDATE request_log SET `+captureStripSet+
-		` WHERE capture_session_id = ? AND capture_session_id != 0`, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := res.RowsAffected()
-	if _, err := tx.Exec(`DELETE FROM capture_session WHERE id = ?`, sessionID); err != nil {
-		return 0, err
-	}
-
+	// 短事务（写锁内）：读取清理上界 + 封存目标会话 + 删除活动会话时原地轮换。
+	// maxID 必须在写锁内取——锁外读取会与"读上界之后、墓碑生效之前"完成提交的
+	// 在途捕获写竞态，该行 id 超出清理上界、元数据又随后被删，留下敏感孤儿行。
+	// 提交在前、内存状态（墓碑/活动会话 id）变更在后；回滚时内存不动
+	var maxID int64
 	rotated := int64(0)
-	if prs.captureRequests.Load() && prs.captureSessionID.Load() == sessionID {
-		r, err := tx.Exec(`INSERT INTO capture_session (started_at) VALUES (?)`, captureNowUTC())
-		if err != nil {
-			return 0, err
-		}
-		if rotated, err = r.LastInsertId(); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-
-	// 提交成功后才变更内存状态
-	prs.captureDeletedSessions[sessionID] = struct{}{}
-	if rotated != 0 {
-		prs.captureSessionID.Store(rotated)
-	} else if prs.captureSessionID.Load() == sessionID {
-		prs.captureSessionID.Store(0)
-	}
-	return affected, nil
-}
-
-// ClearCapturedRequests 清空全部抓包数据：所有会话 + 0 号旧数据的捕获内容
-// 一并清除（保留统计行本身），会话元数据整表删除；录制中则轮换出新会话。
-// 全局清除以代次推进兜在途行（任何旧代次行落库时自我置空），返回清理行数
-func (prs *ProviderRelayService) ClearCapturedRequests() (int64, error) {
-	db, err := xdb.DB("default")
-	if err != nil {
-		return 0, err
-	}
-
-	affected, err := func() (int64, error) {
+	if err := func() error {
 		prs.captureWriteMu.Lock()
 		defer prs.captureWriteMu.Unlock()
 
 		tx, err := db.Begin()
 		if err != nil {
-			return 0, err
+			return err
 		}
 		defer tx.Rollback()
 
-		// anyCapture 谓词：会话标记行也要一并摘除（session_id!=0 或含 payload）
-		res, err := tx.Exec(`UPDATE request_log SET ` + captureStripSet +
-			` WHERE capture_session_id != 0 OR ` + captureRowPredicate)
-		if err != nil {
-			return 0, err
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM request_log`).Scan(&maxID); err != nil {
+			return err
 		}
-		affected, _ := res.RowsAffected()
-		if _, err := tx.Exec(`DELETE FROM capture_session`); err != nil {
-			return 0, err
+		if _, err := tx.Exec(`UPDATE capture_session SET ended_at = ?, interrupted = 0
+			WHERE id = ? AND ended_at IS NULL`, captureNowUTC(), sessionID); err != nil {
+			return err
 		}
-		rotated := int64(0)
-		if prs.captureRequests.Load() {
+		if prs.captureRequests.Load() && prs.captureSessionID.Load() == sessionID {
 			r, err := tx.Exec(`INSERT INTO capture_session (started_at) VALUES (?)`, captureNowUTC())
 			if err != nil {
-				return 0, err
+				return err
 			}
 			if rotated, err = r.LastInsertId(); err != nil {
-				return 0, err
+				return err
 			}
 		}
 		if err := tx.Commit(); err != nil {
-			return 0, err
+			return err
 		}
 
-		// 提交成功后才推进代次并轮换：写侧以读锁包住"代次校验 + 提交"，
-		// 在途行要么在本次 UPDATE 前已完整提交（被清掉），要么在写锁释放后
-		// 校验（读到新代次而自我置空）
-		prs.captureClearGen.Add(1)
-		prs.captureSessionID.Store(rotated)
-		return affected, nil
-	}()
+		// 提交成功后才变更内存状态；墓碑先于批处理生效
+		prs.captureDeletedSessions[sessionID] = struct{}{}
+		if rotated != 0 {
+			prs.captureSessionID.Store(rotated)
+		} else if prs.captureSessionID.Load() == sessionID {
+			prs.captureSessionID.Store(0)
+		}
+		return nil
+	}(); err != nil {
+		return 0, err
+	}
+
+	// 批处理（写锁外）：清数据行；末批删元数据。中断时会话仍可见、可重试
+	affected, err := stripCaptureRowsInBatches(db,
+		`capture_session_id = ? AND capture_session_id != 0`, []interface{}{sessionID}, maxID)
+	if err != nil {
+		return affected, fmt.Errorf("会话部分清除（%d 行）后失败，可重试: %w", affected, err)
+	}
+	if _, err := db.Exec(`DELETE FROM capture_session WHERE id = ?`, sessionID); err != nil {
+		return affected, fmt.Errorf("会话数据已清除但元数据删除失败，可重试: %w", err)
+	}
+	return affected, nil
+}
+
+// ClearCapturedRequests 清空全部抓包数据：所有会话 + 0 号旧数据的捕获内容
+// 分批清除（保留统计行本身），末批删除旧会话元数据；录制中则轮换出新会话。
+// 全局清除以代次推进兜在途行（任何旧代次行落库时自我置空）。
+// 磁盘空间不在此回收（逻辑清空）：VACUUM 移至设置页的显式维护操作，
+// 同步 VACUUM 曾把"清空"放大成分钟级排他锁全库冻结
+func (prs *ProviderRelayService) ClearCapturedRequests() (int64, error) {
+	done, err := prs.beginCaptureMaintenance()
+	if err != nil {
+		return 0, err
+	}
+	defer done()
+
+	db, err := xdb.DB("default")
 	if err != nil {
 		return 0, err
 	}
 
-	// 磁盘回收放在写锁之外：VACUUM 重写整库可能耗时，若在写锁内会卡住所有
-	// 请求的落库栅栏。全量模式落的是明文，逻辑删除后 VACUUM 收缩库文件、
-	// checkpoint(TRUNCATE) 截断 WAL。二者相互独立、均尽力而为
-	if _, err := db.Exec(`VACUUM`); err != nil {
-		fmt.Printf("[Capture] 清空后 VACUUM 失败（磁盘未回收，数据已逻辑删除）: %v\n", err)
+	// 短事务（写锁内）：记录清理上界、封存活动会话、轮换、推进代次。
+	// maxID：批处理只清 id <= maxID 的行，轮换会话及此后新录的行不受影响；
+	// maxOldSessionID：末批只删 id <= 它的会话元数据，不误删批处理期间
+	// 用户重开录制新建的会话
+	var maxID, maxOldSessionID, rotated int64
+	if err := func() error {
+		prs.captureWriteMu.Lock()
+		defer prs.captureWriteMu.Unlock()
+
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM request_log`).Scan(&maxID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM capture_session`).Scan(&maxOldSessionID); err != nil {
+			return err
+		}
+		// 封存所有未结束的旧会话：批处理失败中断时列表里不会长期挂着
+		// "非活动却未结束"的会话
+		if _, err := tx.Exec(`UPDATE capture_session SET ended_at = ?, interrupted = 0
+			WHERE ended_at IS NULL`, captureNowUTC()); err != nil {
+			return err
+		}
+		if prs.captureRequests.Load() {
+			r, err := tx.Exec(`INSERT INTO capture_session (started_at) VALUES (?)`, captureNowUTC())
+			if err != nil {
+				return err
+			}
+			if rotated, err = r.LastInsertId(); err != nil {
+				return err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+
+		// 提交成功后才推进代次并轮换：写侧以读锁包住"代次校验 + 提交"，
+		// 在途行要么在批处理清理范围内（id <= maxID），要么落库时读到新代次
+		// 而自我置空
+		prs.captureClearGen.Add(1)
+		prs.captureSessionID.Store(rotated)
+		return nil
+	}(); err != nil {
+		return 0, err
 	}
-	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
-		fmt.Printf("[Capture] 清空后 WAL 截断失败: %v\n", err)
+
+	// 批处理（写锁外）：anyCapture 谓词——会话标记行也要一并摘除
+	affected, err := stripCaptureRowsInBatches(db,
+		`(capture_session_id != 0 OR `+captureRowPredicate+`)`, nil, maxID)
+	if err != nil {
+		return affected, fmt.Errorf("部分清除（%d 行）后失败，可重试: %w", affected, err)
 	}
+	// 末批：删除旧会话元数据（轮换会话与批处理期间新建的会话 id 均大于上界）
+	if _, err := db.Exec(`DELETE FROM capture_session WHERE id <= ?`, maxOldSessionID); err != nil {
+		return affected, fmt.Errorf("数据已清除但旧会话元数据删除失败，可重试: %w", err)
+	}
+
+	// WAL 尽力回收（后台 PASSIVE，不与长读事务对峙）；主库空间回收走设置页
+	// 的显式 VACUUM 维护操作。维护进行中直接跳过：与"清空后立即回收"交错时
+	// 别让 checkpoint 抢先占位害 VACUUM 首次报忙
+	SafeGo("capture-clear-checkpoint", func() {
+		if !AcquireDBWrite() {
+			return
+		}
+		defer ReleaseDBWrite()
+		if _, err := db.Exec(`PRAGMA wal_checkpoint(PASSIVE)`); err != nil {
+			fmt.Printf("[Capture] 清空后 WAL checkpoint 失败（不影响数据）: %v\n", err)
+		}
+	})
 	return affected, nil
 }
 
@@ -505,9 +757,8 @@ func (prs *ProviderRelayService) ExportCaptureSessionWithDialog(sessionID int64,
 
 	// 会话存在性先粗验：无效会话不弹对话框（元数据与行数据的一致快照在事务内重取）
 	if sessionID == 0 {
-		var legacyCount int64
-		if err := db.QueryRow(`SELECT COUNT(*) FROM request_log
-			WHERE capture_session_id = 0 AND ` + captureRowPredicate).Scan(&legacyCount); err != nil {
+		legacyCount, err := prs.legacyCaptureCount(db)
+		if err != nil {
 			return CaptureExportResult{}, err
 		}
 		if legacyCount == 0 {
@@ -552,6 +803,23 @@ func (prs *ProviderRelayService) ExportCaptureSessionWithDialog(sessionID int64,
 // 临时文件、原子替换。未选中的大字段不进 SQL SELECT，避免无谓扫描。
 // 任何失败都会清掉临时文件，不留半成品
 func (prs *ProviderRelayService) streamCaptureExport(db *sql.DB, sessionID int64, opts CaptureExportOptions, destPath string) (count int, err error) {
+	// 导出栅栏起点：维护批处理期间的快照是"部分清理"的错乱状态，开始前拒绝；
+	// 起点快照（active/epoch/gen/墓碑）整体在读锁内读取，与维护发布（写锁内）
+	// 线性化——锁外分开读会观察到"active 未发布、epoch 已推进"的错位组合，
+	// 让并发导出把进行中的维护代次当作自己的起点
+	prs.captureWriteMu.RLock()
+	maintenanceActive := prs.captureMaintenanceActive.Load()
+	epochStart := prs.captureMaintenanceEpoch.Load()
+	genStart := prs.captureClearGen.Load()
+	_, tombstoned := prs.captureDeletedSessions[sessionID]
+	prs.captureWriteMu.RUnlock()
+	if maintenanceActive {
+		return 0, fmt.Errorf("抓包数据清理进行中，请稍后再导出")
+	}
+	if sessionID != 0 && tombstoned {
+		return 0, fmt.Errorf("会话不存在或已被删除")
+	}
+
 	dir := filepath.Dir(destPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, fmt.Errorf("创建目录失败: %w", err)
@@ -730,7 +998,24 @@ func (prs *ProviderRelayService) streamCaptureExport(db *sql.DB, sessionID int64
 	if err = tmp.Close(); err != nil {
 		return 0, fmt.Errorf("关闭导出文件失败: %w", err)
 	}
-	if err = atomicRename(tmpPath, destPath); err != nil {
+	// 发布栅栏：复查与 atomicRename 同在读锁内（与维护短事务的写锁互斥，
+	// 检查通过后维护操作无法在发布完成前开始）。期间发生过任何维护操作或
+	// 目标会话已被墓碑，则丢弃临时文件
+	prs.captureWriteMu.RLock()
+	_, tombstonedNow := prs.captureDeletedSessions[sessionID]
+	fenceOK := !prs.captureMaintenanceActive.Load() &&
+		prs.captureMaintenanceEpoch.Load() == epochStart &&
+		prs.captureClearGen.Load() == genStart &&
+		!(sessionID != 0 && tombstonedNow)
+	if fenceOK {
+		err = atomicRename(tmpPath, destPath)
+	}
+	prs.captureWriteMu.RUnlock()
+	if !fenceOK {
+		os.Remove(tmpPath)
+		return 0, fmt.Errorf("导出期间抓包数据被清理，已取消导出")
+	}
+	if err != nil {
 		os.Remove(tmpPath)
 		return 0, err
 	}
@@ -741,4 +1026,89 @@ func (prs *ProviderRelayService) streamCaptureExport(db *sql.DB, sessionID int64
 // （DEFAULT CURRENT_TIMESTAMP，UTC）同口径，前端统一转本地展示
 func captureNowUTC() string {
 	return time.Now().UTC().Format("2006-01-02 15:04:05")
+}
+
+// VacuumResult 磁盘回收结果（字节数供前端展示）
+type VacuumResult struct {
+	BeforeBytes int64 `json:"before_bytes"`
+	AfterBytes  int64 `json:"after_bytes"`
+	FreedBytes  int64 `json:"freed_bytes"`
+}
+
+// VacuumDatabase 显式回收数据库磁盘空间（设置页维护操作）。
+// 抓包清空/删除只做逻辑清除，被清内容仍占据主库 freelist；VACUUM 重写整库
+// 才能真正收缩文件。VACUUM 持排他锁可达分钟级，因此：
+//   - 前置要求录制已关闭，且经确认框明示"期间新请求的日志不会入库"；
+//   - 与清空/删除共用维护互斥（TryLock 拒绝并发）；
+//   - 全程置全局维护标志：普通落库与队列写入快速失败（fail-open），
+//     不去撞排他锁，转发链路与供应商并发配额不受牵连；
+//   - 用独立连接执行且 busy_timeout 收紧到 800ms：抢不到锁快速失败提示重试，
+//     不自旋 30 秒。
+func (prs *ProviderRelayService) VacuumDatabase() (VacuumResult, error) {
+	var result VacuumResult
+	if prs.captureRequests.Load() {
+		return result, fmt.Errorf("请先停止抓包录制，再回收磁盘空间")
+	}
+	if InDBMaintenance() {
+		return result, fmt.Errorf("数据库维护中，请稍后再试")
+	}
+	if !prs.captureMaintenanceMu.TryLock() {
+		return result, fmt.Errorf("已有清理任务进行中，请稍后再试")
+	}
+	defer prs.captureMaintenanceMu.Unlock()
+
+	// 顺序关键：先立 DB 写入屏障、后发布抓包维护状态。
+	// 反过来（先等 captureWriteMu 写锁）会与"持读锁等日志落库"的请求收尾
+	// 对峙：RWMutex 有等待写者时新读锁全部排队，等于把整条转发链路冻结在
+	// 屏障建立之前。屏障先行则写入者全部快速失败，读锁很快清空
+	unlock := LockDBForMaintenance()
+	defer unlock()
+
+	// 发布维护状态（写锁内，与导出起点快照线性化）并复查录制状态：
+	// 前置检查与屏障建立之间用户可能恰好重新开启录制
+	if err := func() error {
+		prs.captureWriteMu.Lock()
+		defer prs.captureWriteMu.Unlock()
+		if prs.captureRequests.Load() {
+			return fmt.Errorf("请先停止抓包录制，再回收磁盘空间")
+		}
+		prs.captureMaintenanceEpoch.Add(1)
+		prs.captureMaintenanceActive.Store(true)
+		return nil
+	}(); err != nil {
+		return result, err
+	}
+	defer func() {
+		// 基线失效与 active 清除同在写锁内（理由见 beginCaptureMaintenance）。
+		// 此时屏障仍持有：写入者对屏障只做非阻塞 TryRLock、且总是先拿
+		// captureWriteMu 再进屏障，不存在反向持有，无锁序环
+		prs.captureWriteMu.Lock()
+		prs.captureTotalInit.Store(false)
+		prs.captureLegacyCountInit.Store(false)
+		prs.captureMaintenanceActive.Store(false)
+		prs.captureWriteMu.Unlock()
+	}()
+
+	mdb, err := OpenMaintenanceDB()
+	if err != nil {
+		return result, err
+	}
+	defer mdb.Close()
+
+	result.BeforeBytes = DatabaseFileSize()
+	start := time.Now()
+	if _, err := mdb.Exec(`VACUUM`); err != nil {
+		return result, fmt.Errorf("数据库正忙（有查询或写入进行中），未能开始回收，建议应用空闲时重试: %v", err)
+	}
+	if _, err := mdb.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		fmt.Printf("[Maintenance] WAL 截断失败（主库已回收，WAL 稍后自然回收）: %v\n", err)
+	}
+	result.AfterBytes = DatabaseFileSize()
+	result.FreedBytes = result.BeforeBytes - result.AfterBytes
+	if result.FreedBytes < 0 {
+		result.FreedBytes = 0
+	}
+	fmt.Printf("[Maintenance] VACUUM 完成：%d → %d 字节（耗时 %v）\n",
+		result.BeforeBytes, result.AfterBytes, time.Since(start).Round(time.Millisecond))
+	return result, nil
 }

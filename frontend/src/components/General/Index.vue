@@ -522,6 +522,42 @@ const handleImport = async () => {
   }
 }
 
+// ===== 数据维护 =====
+const vacuuming = ref(false)
+
+// 字节数格式化为 MB/GB 展示
+const formatBytesSize = (bytes: number) => {
+  const mb = bytes / 1024 / 1024
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`
+  return `${mb.toFixed(1)} MB`
+}
+
+// 回收数据库磁盘空间：VACUUM 会重写整个数据库文件，期间新请求日志不入库，
+// 耗时可能达分钟级，必须经确认框明示后再执行
+const handleVacuum = async () => {
+  if (vacuuming.value) return
+  if (!window.confirm(t('components.general.maintenance.vacuumConfirm'))) return
+  vacuuming.value = true
+  try {
+    const result = (await Call.ByName('codeswitch/services.ProviderRelayService.VacuumDatabase')) as {
+      before_bytes: number
+      after_bytes: number
+      freed_bytes: number
+    }
+    alert(t('components.general.maintenance.vacuumSuccess', {
+      freed: formatBytesSize(Math.max(result?.freed_bytes ?? 0, 0)),
+      before: formatBytesSize(result?.before_bytes ?? 0),
+      after: formatBytesSize(result?.after_bytes ?? 0),
+    }))
+  } catch (error) {
+    console.error('vacuum database failed', error)
+    // 后端会返回"请先停止抓包录制"/"已有清理任务进行中"等具体提示，原样透出
+    alert(t('components.general.maintenance.vacuumFailed') + extractErrorMessage(error))
+  } finally {
+    vacuuming.value = false
+  }
+}
+
 onMounted(async () => {
   await loadAppSettings()
 
@@ -1077,6 +1113,23 @@ onMounted(async () => {
               class="action-btn">
               {{ exporting ? $t('components.general.export.exporting') : $t('components.general.export.exportBtn') }}
             </button>
+          </ListItem>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mac-section-title">{{ $t('components.general.maintenance.title') }}</h2>
+        <div class="mac-panel">
+          <ListItem :label="$t('components.general.maintenance.vacuumLabel')">
+            <div class="toggle-with-hint">
+              <button
+                @click="handleVacuum"
+                :disabled="vacuuming"
+                class="action-btn">
+                {{ vacuuming ? $t('components.general.maintenance.vacuumRunning') : $t('components.general.maintenance.vacuumBtn') }}
+              </button>
+              <span class="hint-text">{{ $t('components.general.maintenance.vacuumHint') }}</span>
+            </div>
           </ListItem>
         </div>
       </section>

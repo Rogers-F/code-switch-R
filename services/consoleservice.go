@@ -26,6 +26,8 @@ type ConsoleService struct {
 	writer       *consoleWriter
 	oldStdout    *os.File
 	oldStderr    *os.File
+	stdoutWriter *os.File    // 劫持 os.Stdout 后的管道写端，fail-open 时需要关闭
+	stderrWriter *os.File    // 劫持 os.Stderr 后的管道写端
 	pauseLogging atomic.Bool // 暂停日志捕获标志(原子读写,避免与 readPipe/addLog 的并发访问产生数据竞争)
 }
 
@@ -84,10 +86,33 @@ func (cs *ConsoleService) captureStdout() {
 	os.Stdout = stdoutWriter
 	os.Stderr = stderrWriter
 	log.SetOutput(stdoutWriter)
+	cs.stdoutWriter = stdoutWriter
+	cs.stderrWriter = stderrWriter
 
 	// 启动 goroutine 读取管道内容
 	go cs.readPipe(stdoutReader, "INFO", cs.oldStdout)
 	go cs.readPipe(stderrReader, "ERROR", cs.oldStderr)
+}
+
+// failOpen 排水协程永久退出前的兜底：把被劫持的标准流恢复为原始文件并关闭
+// 管道写端。若不恢复，管道 64KB 缓冲写满后进程内每一个 fmt.Printf 都会永久
+// 阻塞——包括正持有并发配额、各服务全局锁的协程，等价于整个应用挂死。
+// 恢复后日志不再进控制台面板，但进程存活优先
+func (cs *ConsoleService) failOpen(level string) {
+	if level == "INFO" {
+		os.Stdout = cs.oldStdout
+		log.SetOutput(cs.oldStdout)
+		if cs.stdoutWriter != nil {
+			cs.stdoutWriter.Close()
+		}
+		fmt.Fprintln(cs.oldStdout, "[ConsoleService] stdout 排水协程退出，已恢复原始输出（控制台面板停更）")
+		return
+	}
+	os.Stderr = cs.oldStderr
+	if cs.stderrWriter != nil {
+		cs.stderrWriter.Close()
+	}
+	fmt.Fprintln(cs.oldStderr, "[ConsoleService] stderr 排水协程退出，已恢复原始输出（控制台面板停更）")
 }
 
 // readPipe 读取管道内容
@@ -95,19 +120,21 @@ func (cs *ConsoleService) readPipe(reader *os.File, level string, output *os.Fil
 	buf := make([]byte, 1024)
 	for {
 		n, err := reader.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Fprintf(output, "读取管道失败: %v\n", err)
-			}
-			return
-		}
-
+		// Read 契约：n>0 与 err 可同时返回，先消费数据再处理错误
 		if n > 0 {
 			msg := string(buf[:n])
 			// 写入原始输出
 			output.Write(buf[:n])
 			// 添加到日志缓存
 			cs.addLog(level, msg)
+		}
+		if err != nil {
+			if err != io.EOF {
+				fmt.Fprintf(output, "读取管道失败: %v\n", err)
+			}
+			// 排水者退出前必须恢复原始标准流，否则写端堵死全进程
+			cs.failOpen(level)
+			return
 		}
 	}
 }

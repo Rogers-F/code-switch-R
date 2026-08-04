@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
+import { createPoller } from '../../composables/usePoller'
 
 interface ConsoleLog {
   timestamp: string
@@ -14,11 +15,11 @@ const logs = ref<ConsoleLog[]>([])
 const autoScroll = ref(true)
 const loading = ref(false)
 const logsContainer = ref<HTMLElement>()
-let refreshInterval: number | null = null
 
 const loadLogs = async () => {
   try {
-    const result = await Call.ByName('codeswitch/services.ConsoleService.GetLogs')
+    // 只取最近 200 条：全量拉取在日志堆积后每轮都是大 payload
+    const result = await Call.ByName('codeswitch/services.ConsoleService.GetRecentLogs', 200)
     logs.value = result as ConsoleLog[]
 
     if (autoScroll.value) {
@@ -66,19 +67,37 @@ const getLevelClass = (level: string) => {
   }
 }
 
-onMounted(async () => {
-  loading.value = true
-  await loadLogs()
-  loading.value = false
+// 每 2 秒刷新一次日志，仅页面激活期间运行（keep-alive 下切走即停）
+const logPoller = createPoller(loadLogs, 2000)
+// 首载 Promise：keep-alive 下首次进入 mounted 与 activated 均触发，
+// activated 等首载完成后再启动轮询，避免双份加载
+let initialLoad: Promise<void> | null = null
+// 页面是否处于激活状态：等待首载期间被切走时不得启动轮询
+let pageActive = false
 
-  // 每秒刷新一次日志
-  refreshInterval = window.setInterval(loadLogs, 1000)
+onMounted(() => {
+  initialLoad = (async () => {
+    loading.value = true
+    await loadLogs()
+    loading.value = false
+  })()
+})
+
+onActivated(async () => {
+  pageActive = true
+  await initialLoad
+  if (!pageActive) return
+  logPoller.start()
+})
+
+onDeactivated(() => {
+  pageActive = false
+  logPoller.stop()
 })
 
 onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-  }
+  pageActive = false
+  logPoller.stop()
 })
 </script>
 

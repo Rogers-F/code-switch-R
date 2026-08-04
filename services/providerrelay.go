@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"database/sql"
@@ -91,10 +92,33 @@ type ProviderRelayService struct {
 	// 在途长流请求落库时若其会话已被单独删除，捕获内容自我置空。
 	// 会话只会由当前进程产生新行，进程生命期的墓碑即完备
 	captureDeletedSessions map[int64]struct{}
-	// captureRecoverOnce 每进程一次的遗留会话恢复（Start 可被前端重复触发）
-	captureRecoverOnce sync.Once
+	// captureRecoverMu / captureRecoverDone 遗留会话恢复的一次性执行控制。
+	// 不用 sync.Once：恢复失败（如撞上数据库维护）时 Once 会被消耗、
+	// 此后永不重试；改为成功才置位，失败下次调用再试
+	captureRecoverMu   sync.Mutex
+	captureRecoverDone atomic.Bool
 	// captureInflightBytes 在途抓包缓冲的总占用（全量模式的内存兜底，见 captureBuffer）
 	captureInflightBytes atomic.Int64
+	// captureMaintenanceMu 串行化维护操作（清空/删除会话/VACUUM）：TryLock
+	// 失败直接拒绝，不排队——排队的第二次清空会重取 maxID，把等待期间新录的
+	// 数据一并清掉，与用户预期不符
+	captureMaintenanceMu sync.Mutex
+	// captureMaintenanceActive 维护批处理进行中的标志；配合 epoch 给导出做栅栏
+	captureMaintenanceActive atomic.Bool
+	// captureMaintenanceEpoch 维护操作单调代次：导出开始时快照、发布前复查，
+	// 期间发生过任何维护操作则放弃发布（防止把已清理数据的旧快照写出）
+	captureMaintenanceEpoch atomic.Int64
+	// captureTotalBytes / captureTotalInit 抓包总字节量的"基线 + 增量"缓存：
+	// 首次读取在 captureWriteMu 写锁内做一次全表 SUM 建基线（与捕获 INSERT
+	// 线性化），此后写入侧在读锁内原子累加，维护操作完成后失效重建。
+	// 取代此前每 10s 一次的全表扫描轮询
+	captureTotalBytes atomic.Int64
+	captureTotalInit  atomic.Bool
+	// captureLegacyCount / captureLegacyCountInit 0 号伪会话行数缓存：旧数据
+	// 只减不增（仅清空/删除会使其减少），缓存一次 + 维护后失效即可，
+	// 免去会话列表 3s 轮询里的 octet_length 全表谓词扫描
+	captureLegacyCount     atomic.Int64
+	captureLegacyCountInit atomic.Bool
 }
 
 // errClientAbort 表示客户端中断连接，不应计入 provider 失败次数
@@ -109,6 +133,33 @@ var errUpstreamStreamAborted = errors.New("upstream stream aborted after respons
 // 换供应商同样会失败，因此不计入供应商失败次数，避免一个坏请求把所有供应商拉黑。
 var errUpstreamClientError = errors.New("upstream rejected the request payload")
 
+// errFirstByteBudget 表示整条降级链的"首响预算"耗尽：从收到客户端请求起，
+// 若累计 relayFirstByteBudget 仍没有任何供应商返回响应头（且未向客户端写出
+// 任何字节），继续串行尝试只会让客户端无限等待。调度循环遇到它应立即终止
+// 降级并返回 502；预算耗尽属于上游整体不可用，不是客户端主动断开，
+// 也不该给"从未真正发出请求"的后续供应商记失败
+var errFirstByteBudget = errors.New("first-byte budget exhausted before upstream response headers")
+
+// relayFirstByteBudget 首响预算：覆盖"请求体上传 + 等响应头"的全部串行尝试
+// （多地址、拉黑模式原地重试、供应商降级），补上 ResponseHeaderTimeout
+// 只按单次尝试计时的盲区。响应头一旦到达即不再受此预算约束
+const relayFirstByteBudget = 300 * time.Second
+
+// respondFirstByteBudgetExceeded 首响预算耗尽时的终止响应。
+// 只在尚未向客户端写出任何字节时发送（预算只约束首响前的阶段，正常不会
+// 出现已写出的情况，判断仅是兜底）
+func respondFirstByteBudgetExceeded(c *gin.Context) {
+	if c.Writer.Written() {
+		return
+	}
+	msg := fmt.Sprintf("上游在 %d 秒内未返回响应头，已停止供应商降级", int(relayFirstByteBudget/time.Second))
+	c.JSON(http.StatusBadGateway, gin.H{
+		"type":    "error",
+		"error":   map[string]string{"type": "upstream_timeout", "message": msg},
+		"message": msg,
+	})
+}
+
 // relayHTTPClient 转发共用的 HTTP 客户端。
 // xrequest 的默认路径每次调用都会新建 http.Client 与 http.Transport，
 // 连接完全无法复用，用后的空闲连接与其读写协程会长期滞留；这里改为共享连接池。
@@ -122,8 +173,14 @@ var relayHTTPClient = &http.Client{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   16,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 16,
+		// MaxConnsPerHost 拦"活着但沉默"的上游积累在途连接（KeepAlive 只能
+		// 探测对端已死）；64 远高于正常并发，仅防病态堆积。
+		// ResponseHeaderTimeout 给"请求已发完、响应头迟迟不来"的阶段兜底，
+		// 不影响响应头到达后的长流转发（那由 32h 总超时与 ctx 管理）
+		MaxConnsPerHost:       64,
+		ResponseHeaderTimeout: 120 * time.Second,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
@@ -144,6 +201,8 @@ var relayHTTPClientInsecure = &http.Client{
 		}).DialContext,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   16,
+		MaxConnsPerHost:       64,
+		ResponseHeaderTimeout: 120 * time.Second,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
@@ -172,6 +231,142 @@ func relayClientFor(insecure bool, providerName string) *http.Client {
 	}
 	warnInsecureProviderOnce(providerName)
 	return relayHTTPClientInsecure
+}
+
+// relayDispatchStartKey 存于 gin.Context：本次客户端请求进入调度的时刻，
+// 首响预算按它跨供应商/地址/重试累计
+const relayDispatchStartKey = "relayDispatchStart"
+
+// markRelayDispatchStart 在 handler 入口记录调度起点
+func markRelayDispatchStart(c *gin.Context) {
+	c.Set(relayDispatchStartKey, time.Now())
+}
+
+// relayBudgetRemaining 返回本次请求剩余的首响预算；handler 未打点时按全额
+func relayBudgetRemaining(c *gin.Context) time.Duration {
+	if v, ok := c.Get(relayDispatchStartKey); ok {
+		if t0, ok := v.(time.Time); ok {
+			return relayFirstByteBudget - time.Since(t0)
+		}
+	}
+	return relayFirstByteBudget
+}
+
+// budgetBodyCloser 包装响应体：Close 时一并释放首响预算派生的 context，
+// 避免长流期间 cancel 函数悬挂不释放
+type budgetBodyCloser struct {
+	io.ReadCloser
+	release func()
+}
+
+func (b *budgetBodyCloser) Close() error {
+	err := b.ReadCloser.Close()
+	b.release()
+	return err
+}
+
+// relayDoPost 直接构造 *http.Request 经共享客户端发送，替代 xrequest 的发送
+// 路径。xrequest 的 do() 会无条件把完整请求体序列化成 curl 命令再作为 Debug
+// 日志格式化（实测 8MiB body 每请求约 92MB 瞬时分配、54 次拷贝级操作），
+// 大上下文会话下 GC 压力随会话长度线性上涨。响应仍包成 *xrequest.Response，
+// 下游 tee/SSE 转换/写回管线不变（NewResponse 只存指针与状态码，不预读、
+// 不关闭 body，与旧路径 SetDebug(false) 的行为一致）。
+//
+// 语义对齐旧路径（对照 xrequest v20251030 源码，providerrelay_relaydo_test.go
+// 表驱动锁定）：
+//   - 头部原始赋值 req.Header[k]={v}，不做键规范化（认证头的去重与规范化
+//     已在 cloneHeaders/注入阶段完成）；
+//   - query 经 url.Values 合并进目标 URL 既有 RawQuery；
+//   - singleAddress 对应旧路径的 SetRetry(1,500ms)：该配置从不产生第二次
+//     请求（xrequest Do() 中 attempt < retryAttempts 恒假、从不 sleep），
+//     仅把网络错误/5xx 聚合成 (resp, err) 同时返回；多地址路径无 SetRetry，
+//     5xx 返回 (resp, nil) 由调用方 resp.Error() 判定。
+//
+// remainBudget > 0 时给"上传请求体 + 等响应头"阶段挂预算取消：预算触发与
+// 响应头到达用 CAS 决出唯一胜者——计时器胜出则关闭已到的响应体并返回
+// errFirstByteBudget；响应头胜出则预算不再介入，派生 context 的释放交给
+// 响应体的 Close。返回值第二项是实际请求 URL（含 query，供抓包记录）。
+func relayDoPost(
+	reqCtx context.Context,
+	client *http.Client,
+	targetURL string,
+	query map[string]string,
+	headers map[string]string,
+	bodyBytes []byte,
+	singleAddress bool,
+	remainBudget time.Duration,
+) (*xrequest.Response, string, error) {
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		return nil, targetURL, fmt.Errorf("解析目标 URL 失败: %w", err)
+	}
+	if len(query) > 0 {
+		values := parsedURL.Query()
+		for k, v := range query {
+			values.Add(k, v)
+		}
+		parsedURL.RawQuery = values.Encode()
+	}
+	finalURL := parsedURL.String()
+
+	// 预算已耗尽：同步返回，不构造请求也不上行。此前用 1ns 计时器兜底，
+	// 但快速上游仍可能在计时器回调前抢赢 CAS，造成"零预算却真实发出请求"
+	if remainBudget <= 0 {
+		return nil, finalURL, fmt.Errorf("上游 %s 首响预算已耗尽: %w", targetURL, errFirstByteBudget)
+	}
+	ctx, cancel := context.WithCancelCause(reqCtx)
+	release := func() { cancel(nil) }
+	// budgetSettled：预算计时器与"响应头到达"只能有一方生效。
+	// Timer.Stop() 返回 false 不能区分"已触发"与"正在触发"，必须用 CAS 决胜
+	var budgetSettled atomic.Bool
+	timer := time.AfterFunc(remainBudget, func() {
+		if budgetSettled.CompareAndSwap(false, true) {
+			cancel(errFirstByteBudget)
+		}
+	})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, finalURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		timer.Stop()
+		release()
+		return nil, finalURL, fmt.Errorf("创建请求失败: %w", err)
+	}
+	for k, v := range headers {
+		req.Header[k] = []string{v}
+	}
+
+	resp, err := client.Do(req)
+
+	if !budgetSettled.CompareAndSwap(false, true) {
+		// 计时器已胜出：即使响应恰好同时到达，其 context 也已取消、body 不可用
+		timer.Stop()
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		release()
+		return nil, finalURL, fmt.Errorf("上游 %s 在首响预算内未返回响应头: %w", targetURL, errFirstByteBudget)
+	}
+	timer.Stop()
+
+	if err != nil {
+		release()
+		// 预算取消经 http 层包装后不一定保留 cause 链，统一从 context 取因
+		if context.Cause(ctx) == errFirstByteBudget {
+			return nil, finalURL, fmt.Errorf("上游 %s 在首响预算内未返回响应头: %w", targetURL, errFirstByteBudget)
+		}
+		return nil, finalURL, fmt.Errorf("请求失败: %w", err)
+	}
+
+	// 响应头已到：派生 context 需存活到响应体读完，释放动作挂到 Body.Close
+	resp.Body = &budgetBodyCloser{ReadCloser: resp.Body, release: release}
+	xresp := xrequest.NewResponse(resp)
+
+	// 对齐旧路径 SetRetry(1) 的错误聚合：单地址时网络错误/5xx 返回 resp+err，
+	// 让调用方走"从响应体提取上游错误"的分支
+	if singleAddress && resp.StatusCode >= http.StatusInternalServerError {
+		return xresp, finalURL, fmt.Errorf("request failed after 1 attempts, status: %d", resp.StatusCode)
+	}
+	return xresp, finalURL, nil
 }
 
 // deleteHeaderFold 按 HTTP 头大小写不敏感的语义删除。
@@ -780,12 +975,30 @@ func requestLogHasCapture(requestLog *ReqeustLog) bool {
 // 抓包是低频调试态，直写不构成写入热点
 func (prs *ProviderRelayService) writeRequestLog(requestLog *ReqeustLog) error {
 	if requestLogHasCapture(requestLog) {
+		// 数据库维护（VACUUM）期间 fail-open：不去撞排他锁（会自旋 busy_timeout
+		// 30s，且 defer LIFO 下供应商并发配额要等本函数返回才释放）。
+		// 屏障读锁关闭"检查 → 执行"的窗口；丢几条日志优先于卡住转发链路
+		if !AcquireDBWrite() {
+			return ErrDBMaintenance
+		}
+		defer ReleaseDBWrite()
 		db, err := xdb.DB("default")
 		if err != nil {
 			return err
 		}
 		_, err = db.Exec(requestLogInsertSQL, requestLogInsertArgs(requestLog)...)
+		if err == nil && prs.captureTotalInit.Load() {
+			// 总量"基线+增量"：INSERT 成功后按实际存储字节累加（与
+			// captureSizeExpr 的 octet_length 同口径）。本函数在读锁内执行，
+			// 与基线建立（写锁内 SUM）线性化，无重计/漏计窗口
+			prs.captureTotalBytes.Add(int64(len(requestLog.RequestURL) + len(requestLog.RequestHeaders) +
+				len(requestLog.RequestBody) + len(requestLog.ResponseHeaders) + len(requestLog.ResponseBody)))
+		}
 		return err
+	}
+	// 普通行经批量队列：维护标志在入队与 worker 执行两级都有快速失败门控
+	if InDBMaintenance() {
+		return ErrDBMaintenance
 	}
 	if GlobalDBQueueLogs == nil {
 		return fmt.Errorf("队列未初始化")
@@ -919,6 +1132,8 @@ func (prs *ProviderRelayService) registerRoutes(router gin.IRouter) {
 
 func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 首响预算从进入调度起计：覆盖后续全部供应商降级/地址兜底/原地重试
+		markRelayDispatchStart(c)
 		var bodyBytes []byte
 		if c.Request.Body != nil {
 			data, err := io.ReadAll(c.Request.Body)
@@ -1172,6 +1387,13 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 								return
 							}
 
+							// 首响预算耗尽：上游整体不可用，继续降级只是空转。
+							// 终止调度回 502，不给"预算清零后未真正发出请求"的供应商记失败
+							if errors.Is(err, errFirstByteBudget) {
+								respondFirstByteBudgetExceeded(c)
+								return
+							}
+
 							// 客户端中断不计入失败次数，直接返回
 							if errors.Is(err, errClientAbort) {
 								fmt.Printf("[INFO] 客户端中断，停止重试\n")
@@ -1410,6 +1632,12 @@ func (prs *ProviderRelayService) proxyHandler(kind string, endpoint string) gin.
 							"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
 							"message": errorMsg,
 						})
+						return
+					}
+
+					// 首响预算耗尽：终止调度回 502（同拉黑模式分支的语义）
+					if errors.Is(err, errFirstByteBudget) {
+						respondFirstByteBudgetExceeded(c)
 						return
 					}
 
@@ -1684,7 +1912,8 @@ func (prs *ProviderRelayService) forwardRequest(
 	}()
 
 	// ========== 地址池遍历（issue #27）==========
-	// 单地址供应商：行为与旧实现完全一致（含 HTTP 层 1 次自动重试）。
+	// 单地址供应商：保持旧路径 SetRetry(1,500ms) 的错误聚合语义（xrequest 的
+	// Do() 在 attempts=1 时从不真正重发，只把网络错误/5xx 聚合成 resp+err）。
 	// 多地址供应商：同一请求内每个地址至多试一次，仅传输层失败/408/421/429/5xx
 	// 且响应未提交时切下一地址；全部失败返回 errEndpointPoolExhausted，
 	// 调用方记一次供应商失败后立即换供应商。整个池遍历共用上面这一条 requestLog。
@@ -1748,8 +1977,8 @@ func (prs *ProviderRelayService) forwardRequest(
 }
 
 // forwardToAddress 向单个地址发一次请求并转发响应。
-// singleAddress=true 时保留 HTTP 层 1 次自动重试（旧行为）；
-// 多地址路径关闭隐藏重试，重试预算统一由地址池承担。
+// singleAddress=true 时沿用旧路径的 5xx 错误聚合语义（并不产生第二次请求）；
+// 多地址路径 5xx 由调用方按状态码分支处理，重试预算统一由地址池承担。
 func (prs *ProviderRelayService) forwardToAddress(
 	c *gin.Context,
 	kind string,
@@ -1766,29 +1995,21 @@ func (prs *ProviderRelayService) forwardToAddress(
 	// 绑定客户端 context：客户端取消（用户 Ctrl-C / CLI 超时断开）时立即释放上游连接，
 	// 否则处理协程与上游请求会一直挂到 32 小时超时，上游还在持续产出并计费。
 	// 超时与连接池由共享客户端统一提供，不再每请求新建 Transport。
-	req := xrequest.New().
-		SetClient(relayClientFor(provider.InsecureSkipVerify, provider.Name)).
-		// SetDebug(false)：xrequest 的 debug 默认 utils.IsGoRun()，dev 下会对
-		// text/json 响应预调 String() 解析并缓存，使 ToHttpResponseWriter 走
-		// r.parsed 分支、绕过我们装在 RawResponse.Body 上的抓包 tee（响应体录空）。
-		// 显式关掉，保证 dev 与 release 都从字节流层 tee 捕获
-		SetDebug(false).
-		WithContext(c.Request.Context()).
-		SetHeaders(headers).
-		SetQueryParams(query)
-	if singleAddress {
-		req = req.SetRetry(1, 500*time.Millisecond)
-	}
-
-	reqBody := bytes.NewReader(bodyBytes)
-	req = req.SetBody(reqBody)
+	// 直发路径 relayDoPost 替代 xrequest 的发送（消除其无条件的 curl 序列化开销），
+	// 响应包装为 xrequest.Response（不预读、不缓存解析结果），保证 dev 与 release
+	// 都从 RawResponse.Body 的字节流层 tee 抓包。
+	// singleAddress 保持旧路径 SetRetry(1,500ms) 的错误聚合语义（该配置实际从不重发）。
+	resp, finalURL, err := relayDoPost(
+		c.Request.Context(),
+		relayClientFor(provider.InsecureSkipVerify, provider.Name),
+		targetURL, query, headers, bodyBytes, singleAddress,
+		relayBudgetRemaining(c),
+	)
 
 	// 抓包：记录本次实际尝试的完整 URL（含查询参数，不脱敏）
 	if requestLog.respBuf != nil {
-		requestLog.RequestURL = buildCaptureURL(targetURL, query)
+		requestLog.RequestURL = finalURL
 	}
-
-	resp, err := req.Post(targetURL)
 
 	// 无论成功失败，先尝试记录 HttpCode 与响应头
 	if resp != nil {
@@ -1799,6 +2020,12 @@ func (prs *ProviderRelayService) forwardToAddress(
 	}
 
 	if err != nil {
+		// 首响预算耗尽：整条降级链到此为止，由调度循环终止并回 502；
+		// 必须先于"客户端断开"判定——预算取消不是客户端行为
+		if errors.Is(err, errFirstByteBudget) {
+			fmt.Printf("[WARN] Provider %s 首响预算耗尽，终止降级: %v\n", provider.Name, err)
+			return false, err
+		}
 		// 客户端已断开：不是供应商故障，不计入失败次数
 		if c.Request.Context().Err() != nil || errors.Is(err, context.Canceled) {
 			fmt.Printf("[INFO] Provider %s 请求期间客户端已断开，不计入供应商失败\n", provider.Name)
@@ -1944,69 +2171,125 @@ func (prs *ProviderRelayService) relayResponseToClient(
 }
 
 // extractUpstreamError 读取上游错误响应体，返回 ≤512 字节的错误信息预览。
-// 当 requestLog 处于抓包状态时，同时把完整错误体（SSE 分支放宽到 captureFieldLimit）
-// 喂入抓包缓冲——由 captureBuffer 统一处理上限、截断标记与原始字节计数。
-// 只在主转发协程调用，后台读 goroutine 只回传字节、不触碰 requestLog
+// 读取策略分层：
+//   - 非抓包：解压后至多读 64KiB——错误体只用于拼错误串，无界 ReadAll 在
+//     恶意/异常上游（超大错误体、慢速滴水）下是无上限分配 + 最长 32h 的阻塞点；
+//   - 抓包：分块读到 EOF 或 500ms 超时。存储上限（50MiB/字段）与全局预算由
+//     captureBuffer.append 自身执行——触顶后它丢弃存储但继续累计原始字节数，
+//     所以这里"读到底"才能保证 response_bytes 语义不变。
+//
+// Content-Encoding 解码（gzip）在读取协程内完成（gzip.NewReader 需要先读头）。
+// captureBuffer 要求单协程访问：读取协程只回传字节块，append/markTruncated
+// 全部发生在本（主转发）协程
 func extractUpstreamError(resp *xrequest.Response, requestLog *ReqeustLog) string {
-	if resp == nil {
+	if resp == nil || resp.RawResponse == nil || resp.RawResponse.Body == nil {
 		return ""
 	}
 	// 错误响应不会再走 ToHttpResponseWriter（那里才有 Body.Close），
 	// 这里必须自己关闭，否则每次失败都泄漏一条上游连接
 	defer func() {
-		if resp.RawResponse != nil && resp.RawResponse.Body != nil {
-			_ = resp.RawResponse.Body.Close()
-		}
+		_ = resp.RawResponse.Body.Close()
 	}()
 
 	capturing := requestLog != nil && requestLog.respBuf != nil
-	// SSE 分支的读取上限：抓包时放宽到 captureFieldLimit，拿到完整错误体
-	sseLimit := int64(512)
+	readLimit := int64(64 * 1024)
 	if capturing {
-		sseLimit = int64(captureFieldLimit) + 1
+		// 抓包按"读到 EOF 或 500ms 超时"为主：存储上限（50MiB/字段）与全局
+		// 预算由 captureBuffer 执行、超限后丢弃存储但继续计数。这里的
+		// captureFieldLimit×4 只是防解压炸弹的硬性读取下界兜底——正常错误体
+		// 远小于它；命中时按截断语义处理（response_bytes 为已观测下界）
+		readLimit = int64(captureFieldLimit) * 4
 	}
 
-	// 优先尝试 String()（会自动解压 gzip 等）——非 SSE 错误返回完整 body
-	body := resp.String()
-	// SSE 流式响应时 String() 返回空，回退到直接读取 RawResponse.Body（带超时防御）
-	if body == "" && resp.RawResponse != nil && resp.RawResponse.Body != nil {
-		done := make(chan []byte, 1)
-		go func() {
-			raw, err := io.ReadAll(io.LimitReader(resp.RawResponse.Body, sseLimit))
-			if err == nil {
-				done <- raw
-			} else {
-				done <- nil
+	type chunkMsg struct {
+		data []byte
+		err  error
+	}
+	chunks := make(chan chunkMsg, 8)
+	done := make(chan struct{})
+	defer close(done)
+	body := resp.RawResponse.Body
+	encoding := strings.ToLower(strings.TrimSpace(resp.RawResponse.Header.Get("Content-Encoding")))
+	go func() {
+		defer close(chunks)
+		var r io.Reader = body
+		if encoding == "gzip" {
+			gz, err := gzip.NewReader(body)
+			if err != nil {
+				select {
+				case chunks <- chunkMsg{err: err}:
+				case <-done:
+				}
+				return
 			}
-		}()
+			defer gz.Close()
+			r = gz
+		}
+		r = io.LimitReader(r, readLimit)
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				select {
+				case chunks <- chunkMsg{data: data}:
+				case <-done: // 主协程已超时放弃，退出防止泄漏
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	const previewLimit = 512
+	preview := make([]byte, 0, previewLimit)
+	previewTruncated := false
+	deadline := time.NewTimer(500 * time.Millisecond)
+	defer deadline.Stop()
+readLoop:
+	for {
 		select {
-		case raw := <-done:
-			if raw != nil {
-				body = string(raw)
+		case m, ok := <-chunks:
+			if !ok {
+				break readLoop
 			}
-		case <-time.After(500 * time.Millisecond):
-			// 超时放弃，关闭 Body 中断后台读取，避免 goroutine 泄漏。
-			// 抓包时标记截断：读取被中断，存储的错误体不完整，UI/导出如实呈现
+			if m.err != nil {
+				break readLoop
+			}
+			if capturing {
+				requestLog.respBuf.append(m.data)
+			}
+			if len(preview) < previewLimit {
+				take := previewLimit - len(preview)
+				if take > len(m.data) {
+					take = len(m.data)
+				}
+				preview = append(preview, m.data[:take]...)
+				previewTruncated = previewTruncated || take < len(m.data)
+			} else {
+				previewTruncated = true
+			}
+		case <-deadline.C:
+			// 超时放弃，关闭 Body 中断底层读取。
+			// 抓包时标记截断：存储的错误体不完整，UI/导出如实呈现
 			resp.RawResponse.Body.Close()
 			if capturing {
 				requestLog.respBuf.markTruncated()
 			}
+			break readLoop
 		}
 	}
-	if body == "" {
+
+	if len(preview) == 0 {
 		return ""
 	}
-
-	// 抓包：完整错误体入缓冲（缓冲负责截断标记与字节计数）
-	if capturing {
-		requestLog.respBuf.append([]byte(body))
+	if previewTruncated {
+		return string(preview) + "..."
 	}
-
-	// 截断过长的错误信息（仅供错误串展示）
-	if len(body) > 512 {
-		body = body[:512] + "..."
-	}
-	return body
+	return string(preview)
 }
 
 func cloneHeaders(header http.Header) map[string]string {
@@ -2804,8 +3087,13 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 							fmt.Printf("[Gemini] [拉黑模式] Provider: %s (Level %d) | 重试 %d/%d\n",
 								provider.Name, level, retryCount+1, maxRetryPerProvider)
 
-							ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
-							prs.concurrency.Release("gemini", provider.ID)
+							// Release 用闭包 defer 兜住 forward 内部 panic：gin Recovery 会吞掉
+							// panic 并照常执行 handler 级 defer，但裸调用的 Release 不会执行，
+							// 配额从此永久少一个，累计到上限后该供应商每请求空等 30s
+							ok, errMsg, responseWritten := func() (bool, string, bool) {
+								defer prs.concurrency.Release("gemini", provider.ID)
+								return prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
+							}()
 							// 实际尝试过：等待阶段重扫不再碰它
 							attemptedProviders[provider.ID] = true
 							delete(busyPending, provider.ID)
@@ -2996,8 +3284,11 @@ func (prs *ProviderRelayService) geminiProxyHandler(apiVersion string) gin.Handl
 						}
 					}
 
-					ok, errMsg, responseWritten := prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
-					prs.concurrency.Release("gemini", provider.ID)
+					// Release 用闭包 defer 兜住 forward 内部 panic（同拉黑模式，防配额永久泄漏）
+					ok, errMsg, responseWritten := func() (bool, string, bool) {
+						defer prs.concurrency.Release("gemini", provider.ID)
+						return prs.forwardGeminiRequest(c, &provider, providerEndpoint, bodyBytes, isStream, requestLog)
+					}()
 					// 实际尝试过：等待阶段重扫不再碰它
 					attemptedProviders[provider.ID] = true
 					delete(busyPending, provider.ID)
@@ -3361,6 +3652,8 @@ func parseGeminiUsageMetadata(body []byte, reqLog *ReqeustLog) {
 // toolId 用于区分不同的 CLI 工具，对应 provider kind 为 "custom:{toolId}"
 func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 首响预算从进入调度起计（与 claude/codex 主链路同规则）
+		markRelayDispatchStart(c)
 		// 从 URL 参数提取 toolId
 		toolId := c.Param("toolId")
 		if toolId == "" {
@@ -3622,6 +3915,12 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 								return
 							}
 
+							// 首响预算耗尽：终止调度回 502（与 claude/codex 路径一致）
+							if errors.Is(err, errFirstByteBudget) {
+								respondFirstByteBudgetExceeded(c)
+								return
+							}
+
 							// 客户端中断不计入失败次数，直接返回
 							if errors.Is(err, errClientAbort) {
 								fmt.Printf("[CustomCLI][INFO] 客户端中断，停止重试\n")
@@ -3843,6 +4142,12 @@ func (prs *ProviderRelayService) customCliProxyHandler() gin.HandlerFunc {
 							"error":   map[string]string{"type": "invalid_request_error", "message": errorMsg},
 							"message": errorMsg,
 						})
+						return
+					}
+
+					// 首响预算耗尽：终止调度回 502
+					if errors.Is(err, errFirstByteBudget) {
+						respondFirstByteBudgetExceeded(c)
 						return
 					}
 

@@ -744,6 +744,16 @@
         "redactedNote": "{count} credential fields cleared. The bundle can be imported back; restored providers stay disabled until you refill credentials.",
         "secretsNote": "This file contains plaintext credentials. Keep it safe.",
         "failed": "Export failed"
+      },
+      "maintenance": {
+        "title": "Data Maintenance",
+        "vacuumLabel": "Reclaim database disk space",
+        "vacuumHint": "The database file does not shrink after clearing/deleting captures; reclaiming rewrites the file to actually free the space",
+        "vacuumBtn": "Reclaim now",
+        "vacuumRunning": "Reclaiming...",
+        "vacuumConfirm": "Reclaiming rewrites the entire database file. New request logs will not be recorded while it runs, and it may take a while (several minutes for large data). Run it while the app is idle. Continue?",
+        "vacuumSuccess": "Reclaim finished: {freed} freed ({before} → {after})",
+        "vacuumFailed": "Reclaim failed: "
       }
     },
     "mcp": {

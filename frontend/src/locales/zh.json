@@ -745,6 +745,16 @@
         "redactedNote": "已清除 {count} 处凭据字段；该包可导回本应用，恢复的供应商为禁用状态，补上凭据即可启用",
         "secretsNote": "该文件包含明文凭据，请妥善保管",
         "failed": "导出失败"
+      },
+      "maintenance": {
+        "title": "数据维护",
+        "vacuumLabel": "回收数据库磁盘空间",
+        "vacuumHint": "清空/删除抓包记录后文件不会自动变小，回收会重写数据库文件以真正释放空间",
+        "vacuumBtn": "立即回收",
+        "vacuumRunning": "回收中...",
+        "vacuumConfirm": "回收会重写整个数据库文件，期间新请求的日志不会入库，耗时可能较长（数据量大时数分钟），建议在应用空闲时执行。确定继续？",
+        "vacuumSuccess": "回收完成：已释放 {freed}（{before} → {after}）",
+        "vacuumFailed": "回收失败："
       }
     },
     "mcp": {

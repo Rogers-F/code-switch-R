@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/daodao97/xgo/xdb"
 	_ "modernc.org/sqlite"
@@ -67,11 +68,22 @@ func InitDatabase() error {
 	// 结果是静默打开另一个数据库文件
 	dbFile := escapeSQLiteURIPath(filepath.ToSlash(filepath.Join(configDir, "app.db")))
 	dsn := "file:" + dbFile + "?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)"
+	// 维护操作（VACUUM）需要独立连接与独立 busy_timeout，记住 URI 路径与
+	// 真实文件路径供 OpenMaintenanceDB / 空间统计使用
+	databaseURIPath = dbFile
+	databaseFilePath = filepath.Join(configDir, "app.db")
+	// 连接池收敛：单文件 SQLite 上默认的 100 连接毫无意义——一次排他操作
+	// （VACUUM/长事务）会让上百条连接各自按 busy_timeout 自旋 30s，表现为全应用
+	// 同时卡住；modernc 为纯 Go 实现，空闲连接各持页缓存且默认永不回收。
+	// 8 条足够覆盖"转发落库 + 前端并发查询"的常态并发。
 	if err := xdb.Inits([]xdb.Config{
 		{
-			Name:   "default",
-			Driver: "sqlite",
-			DSN:    dsn,
+			Name:            "default",
+			Driver:          "sqlite",
+			DSN:             dsn,
+			MaxOpenConn:     8,
+			MaxIdleConn:     8,
+			ConnMaxIdleTime: 5 * time.Minute,
 		},
 	}); err != nil {
 		return fmt.Errorf("初始化数据库失败: %w", err)
@@ -105,6 +117,12 @@ func InitDatabase() error {
 		return fmt.Errorf("初始化 provider_alias 表失败: %w", err)
 	}
 
+	// 4.5 request_log 查询性能索引：此刻写队列与代理都未启动、无并发写者，
+	// 同步创建即可（实测 100 万行/1.1GB 库三索引合计约 10.4s/2016 老 Xeon，
+	// M4+NVMe 折算约 3.5-4.5s；50 万行约 4.6s）。建失败只降级为无索引全表扫描，
+	// 不阻断启动
+	ensureRequestLogPerfIndexes(db)
+
 	// 5. 预热连接池：强制建立数据库连接，避免首次写入时失败
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM request_log").Scan(&count); err != nil {
@@ -114,6 +132,63 @@ func InitDatabase() error {
 	}
 
 	return nil
+}
+
+// databaseURIPath / databaseFilePath 由 InitDatabase 赋值：
+// 前者是 URI 转义后的库路径（拼维护 DSN 用），后者是真实文件路径（统计大小用）
+var (
+	databaseURIPath  string
+	databaseFilePath string
+)
+
+// OpenMaintenanceDB 打开一条独立的维护连接（不进 xdb 连接池）。
+// busy_timeout 收紧到 800ms：VACUUM 抢不到排他锁时快速失败并提示用户，
+// 而不是自旋 30 秒；独立连接也避免把改过的 PRAGMA 归还连接池污染后续请求
+func OpenMaintenanceDB() (*sql.DB, error) {
+	if databaseURIPath == "" {
+		return nil, fmt.Errorf("数据库尚未初始化")
+	}
+	mdb, err := sql.Open("sqlite", "file:"+databaseURIPath+"?_pragma=busy_timeout(800)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return nil, err
+	}
+	mdb.SetMaxOpenConns(1)
+	return mdb, nil
+}
+
+// DatabaseFileSize 返回 app.db 当前大小（维护操作前后对比用）；失败返回 0
+func DatabaseFileSize() int64 {
+	if databaseFilePath == "" {
+		return 0
+	}
+	fi, err := os.Stat(databaseFilePath)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
+// ensureRequestLogPerfIndexes 为 request_log 建统计/筛选类查询用的性能索引。
+// 仪表盘（StatsSince/ProviderDailyStats/CostSince/HeatmapStats）按 created_at
+// 或 (platform, created_at) 范围扫，日志页 ListProviders 的 DISTINCT provider
+// 走 (platform, provider) 覆盖索引扫描（两列都在索引内，不回表）。
+// 必须在写队列与代理启动前调用；逐条尽力而为，失败仅告警
+func ensureRequestLogPerfIndexes(db *sql.DB) {
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_request_log_created_at ON request_log(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_log_platform_created ON request_log(platform, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_log_platform_provider ON request_log(platform, provider)`,
+	}
+	for _, ddl := range indexes {
+		start := time.Now()
+		if _, err := db.Exec(ddl); err != nil {
+			fmt.Printf("⚠️  request_log 性能索引创建失败（降级为全表扫描，不影响启动）: %v\n", err)
+			continue
+		}
+		if cost := time.Since(start); cost > time.Second {
+			fmt.Printf("✅ request_log 性能索引就绪（耗时 %v）\n", cost.Round(time.Millisecond))
+		}
+	}
 }
 
 // ensureBlacklistTables 确保黑名单相关表存在

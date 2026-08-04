@@ -161,11 +161,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Call } from '@wailsio/runtime'
 import CaptureDetailModal from '../common/CaptureDetailModal.vue'
 import BaseModal from '../common/BaseModal.vue'
+import { createPoller } from '../../composables/usePoller'
 import { fetchRequestLogDetail, type RequestLogDetail } from '../../services/logs'
 
 interface CaptureSession {
@@ -209,13 +210,21 @@ const rows = ref<CaptureRow[]>([])
 const loadingRows = ref(false)
 const mayHaveMore = ref(false)
 const PAGE = 200
+// 增量列表在内存中的行数上限：录制中长时间停留会无限头插，超限截尾防止页面越用越重
+const MAX_ROWS = 500
 // rowsEpoch：每次切换会话/重置递增；异步 RPC 返回时若纪元已变则丢弃结果，
 // 防止把上一个会话的行渲染到当前会话（内容可能敏感，不能张冠李戴）
 let rowsEpoch = 0
+// sessionsEpoch：清空/删除/开关录制前递增，作废在途的会话列表轮询响应，
+// 防止操作前发出的 3 秒轮询晚到回填旧列表
+let sessionsEpoch = 0
 
-let sessionTimer: number | null = null
-let liveTimer: number | null = null
-let sizeTimer: number | null = null
+// 页面是否处于激活状态（keep-alive 下切走后停止一切轮询）
+let pageActive = false
+// 是否已激活过：首次激活紧随首载，无需再刷一遍
+let activatedOnce = false
+// 首载 Promise：keep-alive 下首次进入 mounted 与 activated 均触发，共享首载避免双启动
+let initialLoad: Promise<void> | null = null
 
 const sessionKey = (s: CaptureSession) => (s.legacy ? 'legacy' : s.id)
 const isSelected = (s: CaptureSession) =>
@@ -263,6 +272,9 @@ const loadRecordingState = async () => {
 
 const toggleRecording = async () => {
   toggling.value = true
+  // 开关录制会新建/结束会话：先作废在途的会话轮询响应，防止旧列表晚到回填
+  sessionsEpoch++
+  sessionPoller.bump()
   try {
     await Call.ByName(svc + 'SetRequestCapture', recording.value)
   } catch (error) {
@@ -271,13 +283,17 @@ const toggleRecording = async () => {
   } finally {
     await loadRecordingState()
     await refreshSessions()
+    await refreshTotalBytes()
+    syncSizePoller()
     toggling.value = false
   }
 }
 
 const refreshSessions = async () => {
+  const epoch = sessionsEpoch
   try {
     const list = (await Call.ByName(svc + 'ListCaptureSessions')) as CaptureSession[] | null
+    if (epoch !== sessionsEpoch) return // 期间发生清空/删除/开关录制，丢弃过期列表
     sessions.value = list ?? []
     // 维持选中项引用最新数据；被删掉则回退到第一个
     if (selected.value) {
@@ -358,6 +374,11 @@ const pollLive = async () => {
     if (epoch !== rowsEpoch) return
     if (fresh.length > 0) {
       rows.value.unshift(...fresh.reverse())
+      if (rows.value.length > MAX_ROWS) {
+        // 截尾控内存；被截掉的旧行仍可通过"加载更多"按游标取回
+        rows.value.splice(MAX_ROWS)
+        mayHaveMore.value = true
+      }
     }
   } catch (error) {
     console.error('增量拉取失败:', error)
@@ -366,13 +387,20 @@ const pollLive = async () => {
   }
 }
 
+// 会话列表轮询（3s）：页面激活期间常驻
+const sessionPoller = createPoller(refreshSessions, 3000)
+// 录制中会话的增量轮询（2s）：仅"页面激活且选中会话在录制"时运行
+const livePoller = createPoller(pollLive, 2000)
+let livePollerRunning = false
+
 const syncLiveTimer = () => {
-  const needLive = !!selected.value?.active
-  if (needLive && liveTimer === null) {
-    liveTimer = window.setInterval(pollLive, 2000)
-  } else if (!needLive && liveTimer !== null) {
-    clearInterval(liveTimer)
-    liveTimer = null
+  const needLive = pageActive && !!selected.value?.active
+  if (needLive && !livePollerRunning) {
+    livePoller.start()
+    livePollerRunning = true
+  } else if (!needLive && livePollerRunning) {
+    livePoller.stop()
+    livePollerRunning = false
   }
 }
 
@@ -384,6 +412,9 @@ const selectSession = (s: CaptureSession) => {
 
 const deleteSession = async (s: CaptureSession) => {
   if (!confirm(t('components.capture.deleteConfirm', { name: sessionTitle(s) }))) return
+  // 先作废在途的会话轮询响应，防止删除前发出的轮询晚到回填旧列表
+  sessionsEpoch++
+  sessionPoller.bump()
   try {
     await Call.ByName(svc + 'DeleteCaptureSession', s.id)
     await refreshSessions()
@@ -398,6 +429,9 @@ const deleteSession = async (s: CaptureSession) => {
 const clearAll = async () => {
   if (!confirm(t('components.capture.clearConfirm'))) return
   clearing.value = true
+  // 先作废在途的会话轮询响应，防止清空前发出的轮询晚到回填旧列表
+  sessionsEpoch++
+  sessionPoller.bump()
   try {
     const affected = (await Call.ByName(svc + 'ClearCapturedRequests')) as number
     alert(t('components.capture.clearDone', { count: affected }))
@@ -469,6 +503,22 @@ const refreshTotalBytes = async () => {
   }
 }
 
+// 录制进行中抓包体积才会增长：仅"页面激活且正在录制"时低频（30s）轮询总量；
+// 其余时机（激活、开关录制、清空、删除会话）按需刷新一次，不再盲轮询
+const sizePoller = createPoller(refreshTotalBytes, 30000)
+let sizePollerRunning = false
+
+const syncSizePoller = () => {
+  const needSize = pageActive && recording.value
+  if (needSize && !sizePollerRunning) {
+    sizePoller.start()
+    sizePollerRunning = true
+  } else if (!needSize && sizePollerRunning) {
+    sizePoller.stop()
+    sizePollerRunning = false
+  }
+}
+
 // 详情弹窗
 const detailModal = reactive<{
   open: boolean
@@ -503,18 +553,43 @@ const closeDetail = () => {
   detailModal.error = ''
 }
 
-onMounted(async () => {
-  await loadRecordingState()
-  await refreshSessions()
-  await refreshTotalBytes()
-  sessionTimer = window.setInterval(refreshSessions, 3000)
-  sizeTimer = window.setInterval(refreshTotalBytes, 10000)
+onMounted(() => {
+  initialLoad = (async () => {
+    await loadRecordingState()
+    await refreshSessions()
+    await refreshTotalBytes()
+  })()
+})
+
+onActivated(async () => {
+  pageActive = true
+  await initialLoad
+  if (!pageActive) return
+  // 重新进入页面：会话列表与抓包总量各刷一次（首次激活由首载覆盖，跳过）
+  if (activatedOnce) {
+    void refreshSessions()
+    void refreshTotalBytes()
+  }
+  activatedOnce = true
+  sessionPoller.start()
+  syncLiveTimer()
+  syncSizePoller()
+})
+
+onDeactivated(() => {
+  pageActive = false
+  sessionPoller.stop()
+  syncLiveTimer()
+  syncSizePoller()
 })
 
 onUnmounted(() => {
-  if (sessionTimer !== null) clearInterval(sessionTimer)
-  if (liveTimer !== null) clearInterval(liveTimer)
-  if (sizeTimer !== null) clearInterval(sizeTimer)
+  pageActive = false
+  sessionPoller.stop()
+  livePoller.stop()
+  livePollerRunning = false
+  sizePoller.stop()
+  sizePollerRunning = false
 })
 </script>
 

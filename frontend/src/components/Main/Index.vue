@@ -1090,7 +1090,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, reactive, ref, onMounted, onUnmounted, onActivated, onDeactivated, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/vue'
 import { Browser, Call, Events } from '@wailsio/runtime'
@@ -1115,6 +1115,7 @@ import { fetchProviderDailyStats, type ProviderDailyStat } from '../../services/
 import { fetchCurrentVersion } from '../../services/version'
 import { fetchAppSettings, type AppSettings } from '../../services/appSettings'
 import { useTheme } from '../../composables/useTheme'
+import { createPoller } from '../../composables/usePoller'
 import { useRouter } from 'vue-router'
 import { fetchConfigImportStatus, importFromCcSwitch, isFirstRun, markFirstRunDone, type ConfigImportStatus } from '../../services/configImport'
 import { showToast } from '../../utils/toast'
@@ -1258,7 +1259,6 @@ const providerStatsLoaded = reactive<Record<ProviderTab, boolean>>({
   gemini: false,
   others: false,
 })
-let providerStatsTimer: number | undefined
 const showHeatmap = ref(true)
 const showHomeTitle = ref(true)
 const mcpIcon = lobeIcons['mcp'] ?? ''
@@ -1291,7 +1291,6 @@ const blacklistStatusMap = reactive<Record<ProviderTab, Record<string, Blacklist
   gemini: {},
   others: {},
 })
-let blacklistTimer: number | undefined
 
 // 连通性状态（已废弃，保留用于兼容）
 const connectivityResultsMap = reactive<Record<ProviderTab, Record<number, ConnectivityResult>>>({
@@ -1998,23 +1997,38 @@ const loadProviderStats = async (tab: ProviderTab) => {
   }
 }
 
-// 加载黑名单状态
-const loadBlacklistStatus = async (tab: ProviderTab) => {
+// 黑名单状态在途请求表：窗口焦点事件与 10 秒轮询共用 loadBlacklistStatus 入口，
+// 同一 Tab 在途时复用同一 Promise，避免并发重复拉取
+const blacklistStatusInflight: Partial<Record<ProviderTab, Promise<void>>> = {}
+
+// 加载黑名单状态（single-flight 去重）
+const loadBlacklistStatus = (tab: ProviderTab): Promise<void> => {
   // 'others' Tab 暂不加载黑名单状态
   if (tab === 'others') {
-    return
+    return Promise.resolve()
   }
 
-  try {
-    const statuses = await getBlacklistStatus(tab)
-    const map: Record<string, BlacklistStatus> = {}
-    statuses.forEach(status => {
-      map[status.providerName] = status
-    })
-    blacklistStatusMap[tab] = map
-  } catch (err) {
-    console.error(`加载 ${tab} 黑名单状态失败:`, err)
+  const inflight = blacklistStatusInflight[tab]
+  if (inflight) {
+    return inflight
   }
+
+  const task = (async () => {
+    try {
+      const statuses = await getBlacklistStatus(tab)
+      const map: Record<string, BlacklistStatus> = {}
+      statuses.forEach(status => {
+        map[status.providerName] = status
+      })
+      blacklistStatusMap[tab] = map
+    } catch (err) {
+      console.error(`加载 ${tab} 黑名单状态失败:`, err)
+    } finally {
+      delete blacklistStatusInflight[tab]
+    }
+  })()
+  blacklistStatusInflight[tab] = task
+  return task
 }
 
 // 手动解禁并重置（完全重置）
@@ -2256,21 +2270,22 @@ const formatOfficialSite = (site: string) => {
   }
 }
 
+// 供应商统计与可用性监控轮询（60s）：仅页面激活期间运行（keep-alive 下切走即停）。
+// 回调 await 全部 RPC 完成：createPoller 以"上一轮完成"为续排条件，
+// void 发起会让单飞机制形同虚设（慢查询仍会与下一轮重叠）
+const providerStatsPoller = createPoller(async () => {
+  await Promise.all([
+    ...providerTabIds.map((tab) => loadProviderStats(tab)),
+    loadAvailabilityResults(), // 同步刷新可用性监控状态（改用新服务）
+  ])
+}, 60_000)
+
 const startProviderStatsTimer = () => {
-  stopProviderStatsTimer()
-  providerStatsTimer = window.setInterval(() => {
-    providerTabIds.forEach((tab) => {
-      void loadProviderStats(tab)
-    })
-    void loadAvailabilityResults() // 同步刷新可用性监控状态（改用新服务）
-  }, 60_000)
+  providerStatsPoller.start()
 }
 
 const stopProviderStatsTimer = () => {
-  if (providerStatsTimer) {
-    clearInterval(providerStatsTimer)
-    providerStatsTimer = undefined
-  }
+  providerStatsPoller.stop()
 }
 
 // 加载最后使用的供应商
@@ -2358,51 +2373,41 @@ const scrollToCard = (el: HTMLElement | null) => {
 let unsubscribeSwitched: (() => void) | undefined
 let unsubscribeBlacklisted: (() => void) | undefined
 
-onMounted(async () => {
-  void initHeatmap()
-  await loadProvidersFromDisk()
-  await Promise.all(providerTabIds.map(refreshProxyState))
-  await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
-  await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
-  await loadAppSettings()
-  await loadAppVersion()
-  await refreshImportStatus()
-  await checkFirstRun()  // 检查是否首次使用
-  startProviderStatsTimer()
-
-  // 加载初始黑名单状态
-  await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
-
-  // 加载初始可用性监控结果（改用新服务）
-  await loadAvailabilityResults()
-
-  // 每秒更新黑名单倒计时
-  blacklistTimer = window.setInterval(() => {
-    const tab = activeTab.value
-    Object.keys(blacklistStatusMap[tab]).forEach(providerName => {
-      const status = blacklistStatusMap[tab][providerName]
-      if (status && status.isBlacklisted && status.remainingSeconds > 0) {
-        status.remainingSeconds--
-        if (status.remainingSeconds <= 0) {
-          loadBlacklistStatus(tab)
-        }
+// 黑名单倒计时轮询（1s）：本地递减剩余秒数，归零时回读真实状态
+const blacklistCountdownPoller = createPoller(() => {
+  const tab = activeTab.value
+  Object.keys(blacklistStatusMap[tab]).forEach(providerName => {
+    const status = blacklistStatusMap[tab][providerName]
+    if (status && status.isBlacklisted && status.remainingSeconds > 0) {
+      status.remainingSeconds--
+      if (status.remainingSeconds <= 0) {
+        void loadBlacklistStatus(tab)
       }
-    })
-  }, 1000)
+    }
+  })
+}, 1000)
 
-  // 窗口焦点事件：从最小化恢复时立即刷新黑名单状态
+// 黑名单状态轮询（10s）：与窗口焦点事件共用 single-flight 入口，不会重叠
+const blacklistPollPoller = createPoller(() => loadBlacklistStatus(activeTab.value), 10_000)
+
+// 首载 Promise：keep-alive 下首次进入 mounted 与 activated 均触发（Main 为默认页，
+// 首次 mount 后即视为激活），activated 等首载完成后再启动轮询，避免双启动
+let initialLoad: Promise<void> | null = null
+// 页面是否处于激活状态：等待首载期间被切走时不得启动轮询
+let pageActive = false
+
+onMounted(() => {
+  // 先订阅供应商切换/拉黑事件再首载，消除首载期间的事件丢失窗口
+  unsubscribeSwitched = Events.On('provider:switched', handleProviderSwitched as Events.Callback)
+  unsubscribeBlacklisted = Events.On('provider:blacklisted', handleProviderBlacklisted as Events.Callback)
+
+  // 窗口监听器同步注册：若挂在首载 await 之后，长首载期间组件被卸载时
+  // 清理已先执行、注册随后才发生，监听器将永久残留
   const handleWindowFocus = () => {
+    // 窗口焦点事件：从最小化恢复时立即刷新黑名单状态
     void loadBlacklistStatus(activeTab.value)
   }
   window.addEventListener('focus', handleWindowFocus)
-
-  // 定期轮询黑名单状态（每 10 秒）
-  const blacklistPollingTimer = window.setInterval(() => {
-    void loadBlacklistStatus(activeTab.value)
-  }, 10_000)
-
-  // 存储定时器 ID 以便清理
-  ;(window as any).__blacklistPollingTimer = blacklistPollingTimer
   ;(window as any).__handleWindowFocus = handleWindowFocus
 
   window.addEventListener('app-settings-updated', handleAppSettingsUpdated)
@@ -2414,26 +2419,53 @@ onMounted(async () => {
   window.addEventListener('providers-updated', handleProvidersUpdated)
   ;(window as any).__handleProvidersUpdated = handleProvidersUpdated
 
-  // 加载最后使用的供应商
-  await loadLastUsedProviders()
+  initialLoad = (async () => {
+    void initHeatmap()
+    await loadProvidersFromDisk()
+    await Promise.all(providerTabIds.map(refreshProxyState))
+    await Promise.all(providerTabIds.map((tab) => refreshDirectAppliedStatus(tab)))
+    await Promise.all(providerTabIds.map((tab) => loadProviderStats(tab)))
+    await loadAppSettings()
+    await loadAppVersion()
+    await refreshImportStatus()
+    await checkFirstRun()  // 检查是否首次使用
 
-  // 监听供应商切换和拉黑事件
-  unsubscribeSwitched = Events.On('provider:switched', handleProviderSwitched as Events.Callback)
-  unsubscribeBlacklisted = Events.On('provider:blacklisted', handleProviderBlacklisted as Events.Callback)
+    // 加载初始黑名单状态
+    await Promise.all(providerTabIds.map((tab) => loadBlacklistStatus(tab)))
+
+    // 加载初始可用性监控结果（改用新服务）
+    await loadAvailabilityResults()
+
+    // 加载最后使用的供应商
+    await loadLastUsedProviders()
+  })()
+})
+
+onActivated(async () => {
+  pageActive = true
+  await initialLoad
+  if (!pageActive) return
+  blacklistCountdownPoller.start()
+  blacklistPollPoller.start()
+  startProviderStatsTimer()
+})
+
+onDeactivated(() => {
+  pageActive = false
+  blacklistCountdownPoller.stop()
+  blacklistPollPoller.stop()
+  stopProviderStatsTimer()
 })
 
 onUnmounted(() => {
+  pageActive = false
   cleanupHeatmap()
   stopProviderStatsTimer()
   window.removeEventListener('app-settings-updated', handleAppSettingsUpdated)
 
-  // 清理黑名单相关定时器和事件监听
-  if (blacklistTimer) {
-    window.clearInterval(blacklistTimer)
-  }
-  if ((window as any).__blacklistPollingTimer) {
-    window.clearInterval((window as any).__blacklistPollingTimer)
-  }
+  // 清理黑名单相关轮询和事件监听
+  blacklistCountdownPoller.stop()
+  blacklistPollPoller.stop()
   if ((window as any).__handleWindowFocus) {
     window.removeEventListener('focus', (window as any).__handleWindowFocus)
   }

@@ -3551,6 +3551,38 @@ export class UpdateStateSnapshot {
 }
 
 /**
+ * VacuumResult 磁盘回收结果（字节数供前端展示）
+ */
+export class VacuumResult {
+    "before_bytes": number;
+    "after_bytes": number;
+    "freed_bytes": number;
+
+    /** Creates a new VacuumResult instance. */
+    constructor($$source: Partial<VacuumResult> = {}) {
+        if (!("before_bytes" in $$source)) {
+            this["before_bytes"] = 0;
+        }
+        if (!("after_bytes" in $$source)) {
+            this["after_bytes"] = 0;
+        }
+        if (!("freed_bytes" in $$source)) {
+            this["freed_bytes"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VacuumResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): VacuumResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new VacuumResult($$parsedSource as Partial<VacuumResult>);
+    }
+}
+
+/**
  * WSLDetection WSL 检测结果
  */
 export class WSLDetection {

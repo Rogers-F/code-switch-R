@@ -7,6 +7,7 @@ package services
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -213,6 +214,17 @@ func (q *DBWriteQueue) processTask(task *WriteTask) {
 		}
 	}()
 
+	// 维护屏障：维护开始前已入队的任务不能去撞 VACUUM 的排他锁
+	// （会按 busy_timeout 自旋 30 秒并卡死整条队列）。TryRLock 关闭
+	// "检查标志 → 执行 SQL"的窗口：拿到读锁即保证维护不会在执行中开始
+	if !AcquireDBWrite() {
+		q.updateStats(1, time.Since(start), ErrDBMaintenance)
+		task.Result <- ErrDBMaintenance
+		delivered = true
+		return
+	}
+	defer ReleaseDBWrite()
+
 	_, err := q.db.Exec(task.SQL, task.Args...)
 
 	// 更新统计（单次写入，count=1）。统计 panic 时结果尚未投递，recover 会补投
@@ -314,6 +326,11 @@ func (q *DBWriteQueue) commitBatch(tasks []*WriteTask) {
 
 // execBatchTx 在单个事务内执行整批任务，返回批次的统一结果错误
 func (q *DBWriteQueue) execBatchTx(tasks []*WriteTask) error {
+	// 维护屏障（同 processTask）：不去撞 VACUUM 的排他锁
+	if !AcquireDBWrite() {
+		return ErrDBMaintenance
+	}
+	defer ReleaseDBWrite()
 	tx, err := q.db.Begin()
 	if err != nil {
 		// 事务开启失败，所有任务都失败
@@ -341,12 +358,62 @@ func (q *DBWriteQueue) execBatchTx(tasks []*WriteTask) error {
 	return nil
 }
 
+// dbMaintenanceMode 全局数据库维护标志（VACUUM 期间置位）。
+// VACUUM 持整库排他锁可达分钟级，期间任何写入都会按 busy_timeout(30s) 自旋，
+// 请求收尾 defer 里的落库等待又会占住供应商并发配额（defer LIFO：日志写完
+// 配额才释放），一次维护就能演变为全代理限流。置位期间：入队与 worker 执行
+// 一律快速失败（fail-open：丢日志优先于卡住转发链路）
+var dbMaintenanceMode atomic.Bool
+
+// ErrDBMaintenance 维护期间写入被拒绝的统一错误
+var ErrDBMaintenance = errors.New("数据库维护中，写入暂不可用")
+
+// BeginDBMaintenance / EndDBMaintenance / InDBMaintenance 维护标志的读写入口
+func BeginDBMaintenance() { dbMaintenanceMode.Store(true) }
+func EndDBMaintenance()   { dbMaintenanceMode.Store(false) }
+func InDBMaintenance() bool {
+	return dbMaintenanceMode.Load()
+}
+
+// dbWriteBarrier 关闭"检查标志 → 执行 SQL"之间的 TOCTOU 窗口：
+// 写入者以 TryRLock 进入（VACUUM 持写锁期间立即失败，不排队去等分钟级维护）；
+// VACUUM 先置标志（新写入快速失败）再 Lock（等待在途写入自然排空）后才执行，
+// 保证维护开始后没有任何写入会撞上排他锁按 busy_timeout(30s) 自旋
+var dbWriteBarrier sync.RWMutex
+
+// AcquireDBWrite 写入者进入屏障；返回 false 表示维护进行中，应快速失败。
+// 成功后必须配对调用 ReleaseDBWrite
+func AcquireDBWrite() bool {
+	if InDBMaintenance() {
+		return false
+	}
+	return dbWriteBarrier.TryRLock()
+}
+
+// ReleaseDBWrite 离开写入屏障
+func ReleaseDBWrite() { dbWriteBarrier.RUnlock() }
+
+// LockDBForMaintenance 维护方独占屏障：置位标志后阻塞等待在途写入排空。
+// 返回解锁函数（解锁同时清除标志）
+func LockDBForMaintenance() func() {
+	BeginDBMaintenance()
+	dbWriteBarrier.Lock()
+	return func() {
+		dbWriteBarrier.Unlock()
+		EndDBMaintenance()
+	}
+}
+
 // enqueue 在 closeMu 读锁内完成 closed 检查与入队，与 Shutdown 的写锁互斥。
 // 修复竞态：此前 closed 检查与入队非原子，Shutdown 之后任务仍可能进入
 // worker 已排空退出的队列，写入丢失且等待 Result 的 goroutine 永久泄漏。
 // timeout / ctxDone 允许为 nil（nil channel 在 select 中永久阻塞，等价于不启用该分支）。
 // 返回 (是否成功入队, 队列已关闭错误)。
 func (q *DBWriteQueue) enqueue(ch chan<- *WriteTask, task *WriteTask, timeout <-chan time.Time, ctxDone <-chan struct{}) (bool, error) {
+	// 维护期间新任务直接拒绝：不入队、不等 30 秒
+	if InDBMaintenance() {
+		return false, ErrDBMaintenance
+	}
 	q.closeMu.RLock()
 	defer q.closeMu.RUnlock()
 

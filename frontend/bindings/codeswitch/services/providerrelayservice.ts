@@ -26,18 +26,20 @@ export function BoundAddresses(): $CancellablePromise<string[]> {
 
 /**
  * ClearCapturedRequests 清空全部抓包数据：所有会话 + 0 号旧数据的捕获内容
- * 一并清除（保留统计行本身），会话元数据整表删除；录制中则轮换出新会话。
- * 全局清除以代次推进兜在途行（任何旧代次行落库时自我置空），返回清理行数
+ * 分批清除（保留统计行本身），末批删除旧会话元数据；录制中则轮换出新会话。
+ * 全局清除以代次推进兜在途行（任何旧代次行落库时自我置空）。
+ * 磁盘空间不在此回收（逻辑清空）：VACUUM 移至设置页的显式维护操作，
+ * 同步 VACUUM 曾把"清空"放大成分钟级排他锁全库冻结
  */
 export function ClearCapturedRequests(): $CancellablePromise<number> {
     return $Call.ByID(3424084195);
 }
 
 /**
- * DeleteCaptureSession 删除单个会话：清除其捕获内容（保留统计行本身）并移除
- * 会话元数据。删除的是活动会话时原地轮换出新会话（录制不中断、白纸重来）。
- * 事务提交在前、内存状态（墓碑/活动会话 id）变更在后；回滚时内存不动。
- * 墓碑兜住在途长流请求：采集发生在请求开始，落库时校验会话已删则自我置空
+ * DeleteCaptureSession 删除单个会话：分批清除其捕获内容（保留统计行本身），
+ * 末批删除会话元数据。删除活动会话时先在短事务内轮换出新会话（录制不中断、
+ * 白纸重来）。墓碑兜住在途长流请求：采集发生在请求开始，落库时校验会话已删
+ * 则自我置空；墓碑在元数据删除前就已生效，批处理期间无新行进入该会话
  */
 export function DeleteCaptureSession(sessionID: number): $CancellablePromise<number> {
     return $Call.ByID(82781707, sessionID);
@@ -81,7 +83,10 @@ export function GetCaptureSessionLogs(sessionID: number, sinceID: number, before
 
 /**
  * GetCaptureTotalBytes 返回全部抓包字段的存储字节总量（200MB 提醒用）。
- * 按需查询，不常驻扫描；octet_length 计字节，与磁盘占用近似但非等同
+ * "基线 + 增量"缓存：首次在 captureWriteMu 写锁内做一次全表 SUM 建基线
+ * （与捕获 INSERT 线性化，某行不会既进 SUM 又进增量或两边都漏），此后
+ * 写入侧在读锁内原子累加，维护操作完成后基线失效重建。
+ * 取代旧实现"前端每 10s 一次全表扫描"——那是随库增长的无界周期开销
  */
 export function GetCaptureTotalBytes(): $CancellablePromise<number> {
     return $Call.ByID(590634181);
@@ -132,6 +137,23 @@ export function Stop(): $CancellablePromise<void> {
     return $Call.ByID(3260822682);
 }
 
+/**
+ * VacuumDatabase 显式回收数据库磁盘空间（设置页维护操作）。
+ * 抓包清空/删除只做逻辑清除，被清内容仍占据主库 freelist；VACUUM 重写整库
+ * 才能真正收缩文件。VACUUM 持排他锁可达分钟级，因此：
+ *   - 前置要求录制已关闭，且经确认框明示"期间新请求的日志不会入库"；
+ *   - 与清空/删除共用维护互斥（TryLock 拒绝并发）；
+ *   - 全程置全局维护标志：普通落库与队列写入快速失败（fail-open），
+ *     不去撞排他锁，转发链路与供应商并发配额不受牵连；
+ *   - 用独立连接执行且 busy_timeout 收紧到 800ms：抢不到锁快速失败提示重试，
+ *     不自旋 30 秒。
+ */
+export function VacuumDatabase(): $CancellablePromise<$models.VacuumResult> {
+    return $Call.ByID(4163535544).then(($result: any) => {
+        return $$createType9($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
 const $$createType1 = $models.CaptureExportResult.createFrom;
@@ -142,3 +164,4 @@ const $$createType5 = $models.CaptureSessionLogRow.createFrom;
 const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = $models.CaptureSessionInfo.createFrom;
 const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = $models.VacuumResult.createFrom;

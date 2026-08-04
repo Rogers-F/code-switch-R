@@ -1209,6 +1209,12 @@ func (hcs *HealthCheckService) CleanupOldRecords(daysToKeep int) (int64, error) 
 		daysToKeep = 7 // 默认保留 7 天
 	}
 
+	// 数据库维护（VACUUM）期间拒绝直写，避免撞排他锁自旋 busy_timeout
+	if !AcquireDBWrite() {
+		return 0, ErrDBMaintenance
+	}
+	defer ReleaseDBWrite()
+
 	db, err := xdb.DB("default")
 	if err != nil {
 		return 0, fmt.Errorf("获取数据库连接失败: %w", err)

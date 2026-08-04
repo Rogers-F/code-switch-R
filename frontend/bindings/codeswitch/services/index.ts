@@ -121,5 +121,6 @@ export {
     UpdateInfo,
     UpdateState,
     UpdateStateSnapshot,
+    VacuumResult,
     WSLDetection
 } from "./models.js";
